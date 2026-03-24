@@ -82,10 +82,14 @@ class T46:
         self._cmd_queue = queue.Queue()
 
 
-        # I/O bus interface
+        # I/O bus interface (CPU IN/OUT instructions)
         self._io_args     = [0, 0, 0, 0]
-        self._char_queue  = queue.Queue()
+        self._char_queue  = queue.Queue()   # individual chars for CPU IN
         self._line_buffer = []
+
+        # Shell line input: poll() pushes completed lines here.
+        # read_line() blocks until one is available.
+        self._line_queue  = queue.Queue()
 
         self._clear_text()
 
@@ -152,6 +156,10 @@ class T46:
             return ord(ch)
         return 0
 
+    def read_line(self):
+        """Block until the user presses Enter. Returns the line without newline."""
+        return self._line_queue.get()
+
     # ------------------------------------------------------------------
     # Commands from M56  (called from M56 thread — enqueue only)
     # ------------------------------------------------------------------
@@ -183,10 +191,14 @@ class T46:
                         dirty = True
                 elif ch == "\n":
                     self._print("\n")
-                    for c in self._line_buffer:
+                    line = "".join(self._line_buffer)
+                    self._line_buffer.clear()
+                    # Shell input (Python OS layer)
+                    self._line_queue.put(line)
+                    # CPU input (IN instruction)
+                    for c in line:
                         self._char_queue.put(c)
                     self._char_queue.put("\n")
-                    self._line_buffer.clear()
                     dirty = True
                 else:
                     self._line_buffer.append(ch)
@@ -294,8 +306,7 @@ class T46:
     def _scroll(self):
         self._cur_row = ROWS - 1
         self.txt_fb.scroll(0, -CHAR_H)
-        pal = _build_palette()
-        pygame.draw.rect(self.txt_fb, pal[self._bg],
+        pygame.draw.rect(self.txt_fb, self._bg,
                          (0, (ROWS - 1) * CHAR_H, TXT_W, CHAR_H))
 
     def _blit(self):

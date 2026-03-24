@@ -79,6 +79,14 @@ class StdioTerminal:
         elif t == "cls":
             print("\033[2J\033[H", end="", flush=True)
 
+    def read_line(self):
+        """Block until the user presses Enter. Returns the line without newline."""
+        line = sys.stdin.readline()
+        if not line:
+            self.running = False
+            return ""
+        return line.rstrip("\n")
+
     def poll(self):
         pass   # no event loop needed
 

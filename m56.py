@@ -3,15 +3,20 @@ M56 Mainframe
 
 Virtual fantasy computer. Contains:
   - Memory (flat bytearray, memory-mapped layout from spec)
-  - CPU (fetch/decode/execute — stubbed for now)
+  - CPU (fetch/decode/execute)
   - OS (syscall layer — handles input from T46, sends output back)
-  - Filesystem (nested dicts)
+  - 56FS filesystem
 
 The M56 runs in its own thread. The T46 pushes input via m56.input().
 The M56 pushes display commands via terminal.receive().
 """
 
+import os
+import subprocess
+import sys
+import tempfile
 import threading
+from fs56 import FS56
 
 
 # ---------------------------------------------------------------------------
@@ -452,111 +457,6 @@ class CPU:
         self.flags = 0
 
 
-class Filesystem:
-    """
-    Simple nested-dict filesystem.
-
-    Files are strings. Directories are dicts.
-    Paths are Unix-style strings.
-    """
-
-    def __init__(self):
-        self._root = {
-            "sys": {
-                "shell.pi": "# shell stub\n",
-            },
-            "home": {},
-        }
-        self._cwd = "/"
-
-    # ------------------------------------------------------------------
-    # Path helpers
-    # ------------------------------------------------------------------
-
-    def _resolve(self, path):
-        if path.startswith("/"):
-            parts = path.strip("/").split("/")
-        else:
-            base = [] if self._cwd == "/" else self._cwd.strip("/").split("/")
-            parts = base + path.split("/")
-        # normalise . and ..
-        out = []
-        for p in parts:
-            if p == "" or p == ".":
-                continue
-            elif p == "..":
-                if out:
-                    out.pop()
-            else:
-                out.append(p)
-        return out
-
-    def _navigate(self, parts):
-        node = self._root
-        for p in parts:
-            if not isinstance(node, dict) or p not in node:
-                return None
-            node = node[p]
-        return node
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
-    @property
-    def cwd(self):
-        return self._cwd
-
-    def ls(self, path=None):
-        parts = self._resolve(path or self._cwd)
-        node  = self._navigate(parts)
-        if node is None:
-            return None, "no such directory"
-        if not isinstance(node, dict):
-            return None, "not a directory"
-        return sorted(node.keys()), None
-
-    def cd(self, path):
-        parts = self._resolve(path)
-        node  = self._navigate(parts)
-        if node is None:
-            return "no such directory"
-        if not isinstance(node, dict):
-            return "not a directory"
-        self._cwd = "/" + "/".join(parts) if parts else "/"
-        return None
-
-    def read_file(self, path):
-        parts = self._resolve(path)
-        node  = self._navigate(parts)
-        if node is None:
-            return None, "no such file"
-        if isinstance(node, dict):
-            return None, "is a directory"
-        return node, None
-
-    def write_file(self, path, content):
-        parts = self._resolve(path)
-        if not parts:
-            return "cannot write to root"
-        parent = self._navigate(parts[:-1])
-        if parent is None or not isinstance(parent, dict):
-            return "no such directory"
-        parent[parts[-1]] = content
-        return None
-
-    def mkdir(self, path):
-        parts = self._resolve(path)
-        if not parts:
-            return "cannot mkdir root"
-        parent = self._navigate(parts[:-1])
-        if parent is None or not isinstance(parent, dict):
-            return "no such directory"
-        name = parts[-1]
-        if name in parent:
-            return "already exists"
-        parent[name] = {}
-        return None
 
 
 class OS:
@@ -568,42 +468,14 @@ class OS:
     def __init__(self, fs, terminal):
         self.fs       = fs
         self.terminal = terminal
-        self._input_buf  = []
-        self._input_lock = threading.Lock()
-        self._input_event = threading.Event()
-
-    # ------------------------------------------------------------------
-    # Called by T46 when a key arrives
-    # ------------------------------------------------------------------
-
-    def push_input(self, char):
-        with self._input_lock:
-            self._input_buf.append(char)
-        self._input_event.set()
 
     # ------------------------------------------------------------------
     # Syscalls (called by CPU / Pi interpreter)
     # ------------------------------------------------------------------
 
     def read_line(self):
-        """Block until a full line is available. Returns the line (no newline)."""
-        line = []
-        while True:
-            self._input_event.wait()
-            with self._input_lock:
-                chars = list(self._input_buf)
-                self._input_buf.clear()
-                self._input_event.clear()
-            for ch in chars:
-                if ch == "\n":
-                    return "".join(line)
-                elif ch == "\b":
-                    if line:
-                        line.pop()
-                        self.print_char("\b \b")
-                else:
-                    line.append(ch)
-                    self.print_char(ch)
+        """Block until the user presses Enter. Returns the line (no newline)."""
+        return self.terminal.read_line()
 
     def print_text(self, text):
         self.terminal.receive({"type": "print", "text": text})
@@ -615,33 +487,61 @@ class OS:
         self.print_text(text + "\n")
 
     def sys_ls(self, path=None):
-        entries, err = self.fs.ls(path)
-        if err:
-            self.println(f"ls: {err}")
-            return
-        self.println("  ".join(entries) if entries else "")
+        try:
+            entries = self.fs.ls(path)
+            if not entries:
+                return
+            # dirs first, then files; dirs get trailing /
+            dirs  = sorted(n + '/' for n, t, _ in entries if t == 2)
+            files = sorted(n       for n, t, _ in entries if t != 2)
+            self.println("  ".join(dirs + files))
+        except Exception as e:
+            self.println(f"ls: {e}")
 
     def sys_cd(self, path):
-        err = self.fs.cd(path)
-        if err:
-            self.println(f"cd: {err}")
+        try:
+            self.fs.cd(path)
+        except Exception as e:
+            self.println(f"cd: {e}")
 
     def sys_cat(self, path):
-        content, err = self.fs.read_file(path)
-        if err:
-            self.println(f"cat: {err}")
-            return
-        self.println(content)
+        try:
+            data = self.fs.read_file(path)
+            self.println(data.decode(errors='replace'))
+        except Exception as e:
+            self.println(f"cat: {e}")
 
     def sys_write(self, path, content):
-        err = self.fs.write_file(path, content)
-        if err:
-            self.println(f"write: {err}")
+        try:
+            self.fs.write_file(path, content)
+        except Exception as e:
+            self.println(f"write: {e}")
 
     def sys_mkdir(self, path):
-        err = self.fs.mkdir(path)
-        if err:
-            self.println(f"mkdir: {err}")
+        try:
+            self.fs.mkdir(path)
+        except Exception as e:
+            self.println(f"mkdir: {e}")
+
+    def sys_edit(self, path):
+        try:
+            try:
+                content = self.fs.read_file(path).decode(errors="replace")
+            except Exception:
+                content = ""
+            editor = os.path.join(os.path.dirname(__file__), "editor.py")
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".txt",
+                                            delete=False) as f:
+                f.write(content)
+                tmp = f.name
+            try:
+                subprocess.run([sys.executable, editor, tmp, path])
+                with open(tmp) as f:
+                    self.fs.write_file(path, f.read())
+            finally:
+                os.unlink(tmp)
+        except Exception as e:
+            self.println(f"edit: {e}")
 
 
 class Shell:
@@ -650,13 +550,13 @@ class Shell:
     This stands in for the Pi shell program that will eventually live in ROM.
     """
 
-    COMMANDS = {"ls", "cd", "cat", "mkdir", "help"}
+    COMMANDS = {"ls", "cd", "mkdir", "cat", "edit", "help"}
 
     def __init__(self, os_):
         self.os = os_
 
     def prompt(self):
-        self.os.print_text(f"{self.os.fs.cwd}> ")
+        self.os.print_text(f"{self.os.fs.cwd} > ")
 
     def run_line(self, line):
         line = line.strip()
@@ -672,7 +572,7 @@ class Shell:
             if arg:
                 self.os.sys_cd(arg)
             else:
-                self.os.sys_cd("/")
+                self.os.sys_cd("/home")
         elif cmd == "cat":
             if arg:
                 self.os.sys_cat(arg)
@@ -683,16 +583,42 @@ class Shell:
                 self.os.sys_mkdir(arg)
             else:
                 self.os.println("usage: mkdir <dir>")
+        elif cmd == "edit":
+            if arg:
+                self.os.sys_edit(arg)
+            else:
+                self.os.println("usage: edit <file>")
         elif cmd == "help":
-            self.os.println("commands: " + "  ".join(sorted(self.COMMANDS)))
+            self.os.println("M56 SHELL COMMANDS")
+            self.os.println()
+            self.os.println("  ls [path]       list directory contents")
+            self.os.println("  cd <path>       change directory")
+            self.os.println("  mkdir <dir>     create a new directory")
+            self.os.println("  cat <file>      print a file to the terminal")
+            self.os.println("  edit <file>     open file in editor")
+            self.os.println("  help            this message")
         else:
             self.os.println(f"unknown command: {cmd}")
 
     def loop(self):
-        self.os.println("M56 ready.")
-        while True:
+        self.os.println()
+        self.os.println("UTRONIC DATA SYSTEMS INC.")
+        self.os.println("M56 MAINFRAME  SN: 948-464")
+        self.os.println()
+        self.os.println("MEMORY TEST ............. 65536 BYTES OK")
+        self.os.println("56FS .................... 512K ONLINE")
+        self.os.println("TERMINAL LINK ........... T46 OK")
+        self.os.println()
+        self.os.println("SYSTEM READY.")
+        self.os.println()
+        self.os.println("For help please type help.")
+        self.os.println()
+        self.os.sys_cd("/home")
+        while self.os.terminal.running:
             self.prompt()
             line = self.os.read_line()
+            if not self.os.terminal.running:
+                break
             self.run_line(line)
 
 
@@ -702,7 +628,7 @@ class M56:
         self.memory   = Memory()
         self.io_bus   = IOBus()
         self.cpu      = CPU(self.memory, self.io_bus)
-        self.fs       = Filesystem()
+        self.fs       = FS56()
         self.os       = OS(self.fs, terminal)
         self.shell    = Shell(self.os)
 
@@ -718,10 +644,6 @@ class M56:
         self.terminal.register_on_bus(self.io_bus)
         self.cpu.reset()
         self._thread.start()
-
-    def input(self, char):
-        """Legacy path: called by T46 for the Python-level OS shell."""
-        self.os.push_input(char)
 
     def _run(self):
         if self._entry is not None:
