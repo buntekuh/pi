@@ -21,6 +21,11 @@ from m56 import (
     OP_LOAD, OP_ADD,  OP_SUB,  OP_AND,  OP_OR,  OP_XOR,
     OP_NOT,  OP_SFT,  OP_SAR,  OP_MUL,  OP_DIV, OP_SWP,
     OP_JMP,  OP_CAL,  OP_RET,  OP_PUSH, OP_POP, OP_NOP, OP_HALT,
+    OP_OUT,  OP_IN,
+    PORT_T46_CMD, PORT_T46_ARG0, PORT_T46_ARG1, PORT_T46_ARG2,
+    PORT_T46_ARG3, PORT_T46_KEY,
+    T46_CMD_CLS, T46_CMD_PRINT, T46_CMD_PEN, T46_CMD_PLOT,
+    T46_CMD_LINE, T46_CMD_FILL,  T46_CMD_RECT, T46_CMD_MODE,
     LOAD_IMM, LOAD_RR, LOAD_IND_R, LOAD_IND_W,
     LOAD_IDX_R, LOAD_IDX_W, LOAD_PCREL,
     COND_Z, COND_NZ, COND_C, COND_NC,
@@ -62,6 +67,7 @@ def disassemble_word(word):
         OP_SAR:  'SAR',  OP_MUL:  'MUL',  OP_DIV:  'DIV', OP_SWP: 'SWP',
         OP_JMP:  'JMP',  OP_CAL:  'CAL',  OP_RET:  'RET', OP_PUSH:'PUSH',
         OP_POP:  'POP',  OP_NOP:  'NOP',  OP_HALT: 'HALT',
+        OP_OUT:  'OUT',  OP_IN:   'IN',
     }.get(opcode, f'???({opcode})')
 
     cond_name = {v: k for k, v in CONDITIONS.items()}
@@ -70,6 +76,10 @@ def disassemble_word(word):
         return 'NOP'
     if opcode == OP_HALT:
         return 'HALT'
+    if opcode == OP_OUT:
+        return f'OUT #{imm13 & 0xFF}, R{rs}'
+    if opcode == OP_IN:
+        return f'IN R{rd}, #{imm13 & 0xFF}'
 
     if opcode == OP_LOAD:
         mode = rs
@@ -185,6 +195,51 @@ def parse_indexed(tok):
     return base, off
 
 
+def _db_bytes(args_str, labels=None):
+    """
+    Parse the argument portion of a .DB directive and return bytes.
+
+    Handles:
+      "hello", 0          → b'hello\x00'
+      'A', 0x0D, 10       → b'A\r\n'
+      42                  → b'\x2a'
+    """
+    result = bytearray()
+    # Tokenize: keep quoted strings intact, split rest on commas
+    tokens = []
+    remaining = args_str.strip()
+    while remaining:
+        remaining = remaining.lstrip()
+        if not remaining:
+            break
+        if remaining[0] in ('"', "'"):
+            q = remaining[0]
+            end = remaining.find(q, 1)
+            if end == -1:
+                raise AssemblerError(f"unterminated string in .DB: {args_str}")
+            tokens.append(remaining[1:end])
+            remaining = remaining[end+1:].lstrip().lstrip(',')
+        else:
+            part, _, remaining = remaining.partition(',')
+            tokens.append(part.strip())
+
+    for tok in tokens:
+        if not tok:
+            continue
+        # Multi-char: it came from a quoted string
+        if len(tok) > 1 and not tok.startswith('0'):
+            for ch in tok:
+                result.append(ord(ch))
+        else:
+            # numeric or label
+            try:
+                val = int(tok, 0)
+            except ValueError:
+                val = (labels or {}).get(tok.upper(), 0)
+            result.append(val & 0xFF)
+    return bytes(result)
+
+
 # ---------------------------------------------------------------------------
 # Assembler passes
 # ---------------------------------------------------------------------------
@@ -234,7 +289,16 @@ def assemble(source, load_addr=USERRAM_START):
         toks = [t for t in toks if t]
         mnemonic = toks[0].upper()
 
+        # Constant definition:  NAME = value
+        if '=' in clean and not clean.startswith('.'):
+            name, _, val = clean.partition('=')
+            labels[name.strip().upper()] = int(val.strip(), 0)
+            continue
+
         # Directives
+        if mnemonic == '.EQU':
+            labels[toks[1].upper()] = int(toks[2], 0)
+            continue
         if mnemonic == '.ORG':
             addr = int(toks[1], 0)
             continue
@@ -243,10 +307,25 @@ def assemble(source, load_addr=USERRAM_START):
             pending.append((lineno, addr, toks, raw))
             addr += 2
             continue
-        if mnemonic == '.DB':   # define byte
-            sizes.append(1)
+        if mnemonic == '.DB':
+            args_str = clean[len('.DB'):].strip()
+            n = len(_db_bytes(args_str))
+            sizes.append(n)
             pending.append((lineno, addr, toks, raw))
-            addr += 1
+            addr += n
+            continue
+        if mnemonic == '.DS':   # define space: reserve N zero bytes
+            n = int(toks[1], 0)
+            sizes.append(n)
+            pending.append((lineno, addr, toks, raw))
+            addr += n
+            continue
+
+        # LA Rd, label — load 16-bit address, expands to 3 instructions (9 bytes)
+        if mnemonic == 'LA':
+            sizes.append(9)
+            pending.append((lineno, addr, toks, raw))
+            addr += 9
             continue
 
         sizes.append(3)
@@ -261,7 +340,7 @@ def assemble(source, load_addr=USERRAM_START):
         args     = toks[1:]
 
         try:
-            data = _emit(mnemonic, args, labels, iaddr)
+            data = _emit(mnemonic, args, labels, iaddr, raw)
         except (ValueError, IndexError) as e:
             raise AssemblerError(str(e), lineno)
 
@@ -271,7 +350,7 @@ def assemble(source, load_addr=USERRAM_START):
     return bytes(output), labels, listing
 
 
-def _emit(mnemonic, args, labels, pc):
+def _emit(mnemonic, args, labels, pc, raw=''):
     """Return 3 bytes for one instruction (or 1/2 for directives)."""
 
     def imm(tok):
@@ -285,13 +364,42 @@ def _emit(mnemonic, args, labels, pc):
         return bytes([val & 0xFF, (val >> 8) & 0xFF])
 
     if mnemonic == '.DB':
-        return bytes([imm(args[0]) & 0xFF])
+        args_str = raw.split(';')[0].strip()[len('.DB'):].strip()
+        return _db_bytes(args_str, labels)
+
+    if mnemonic == '.DS':
+        return bytes(int(args[0], 0))
 
     if mnemonic == 'NOP':
         return encode(OP_NOP, 0, 0, 0)
 
     if mnemonic == 'HALT':
         return encode(OP_HALT, 0, 0, 0)
+
+    # LA Rd, value — load any 16-bit address into register (9 bytes)
+    #   LOAD #(val >> 8), Rd   — high byte into low position
+    #   SWP  Rd                — swap bytes → high byte in high position
+    #   OR   #(val & 0xFF), Rd — OR in low byte
+    if mnemonic == 'LA':
+        rd  = reg(args[0])
+        val = imm(args[1]) & 0xFFFF
+        hi  = (val >> 8) & 0xFF
+        lo  = val & 0xFF
+        return (encode(OP_LOAD, LOAD_IMM, rd, hi) +
+                encode(OP_SWP,  0,        rd, 0)  +
+                encode(OP_OR,   0,        rd, 0x1000 | lo))
+
+    # OUT #port, Rs  — rs=source register, imm13=port
+    if mnemonic == 'OUT':
+        port = imm(args[0]) & 0xFF
+        rs   = reg(args[1])
+        return encode(OP_OUT, rs, 0, port)
+
+    # IN Rd, #port  — rd=dest register, imm13=port
+    if mnemonic == 'IN':
+        rd   = reg(args[0])
+        port = imm(args[1]) & 0xFF
+        return encode(OP_IN, 0, rd, port)
 
     # ---- LOAD ----
     if mnemonic == 'LOAD':
@@ -301,9 +409,12 @@ def _emit(mnemonic, args, labels, pc):
 
         # LOAD #imm, Rd
         if src.startswith('#') or (src_up not in REGISTERS and '[' not in src_up and src_up not in ('PC',)):
-            # try as label/number
-            rd = reg(dst)
-            return encode(OP_LOAD, LOAD_IMM, rd, imm(src))
+            rd  = reg(dst)
+            val = imm(src)
+            if val > 0x1FFF:
+                raise ValueError(
+                    f"immediate 0x{val:X} exceeds 13-bit range — use LA for addresses")
+            return encode(OP_LOAD, LOAD_IMM, rd, val)
 
         # LOAD [PC+off], Rd
         if src_up.startswith('[PC'):

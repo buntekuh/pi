@@ -61,6 +61,25 @@ OP_OR   = 4;  OP_XOR  = 5;  OP_NOT  = 6;  OP_SFT  = 7
 OP_SAR  = 8;  OP_MUL  = 9;  OP_DIV  = 10; OP_SWP  = 11
 OP_JMP  = 12; OP_CAL  = 13; OP_RET  = 14; OP_PUSH = 15
 OP_POP  = 16; OP_NOP  = 17; OP_HALT = 18
+OP_OUT  = 19; OP_IN   = 20
+
+# I/O port assignments
+PORT_T46_CMD  = 0x01   # write: execute terminal command
+PORT_T46_ARG0 = 0x02   # write: argument 0
+PORT_T46_ARG1 = 0x03   # write: argument 1
+PORT_T46_ARG2 = 0x04   # write: argument 2
+PORT_T46_ARG3 = 0x05   # write: argument 3
+PORT_T46_KEY  = 0x06   # read:  next keycode (blocks until available)
+
+# T46 command codes
+T46_CMD_CLS   = 0x01
+T46_CMD_PRINT = 0x02   # arg0 = char code
+T46_CMD_PEN   = 0x03   # arg0 = colour index
+T46_CMD_PLOT  = 0x04   # arg0=x, arg1=y
+T46_CMD_LINE  = 0x05   # arg0=x1, arg1=y1, arg2=x2, arg3=y2
+T46_CMD_FILL  = 0x06   # arg0=x, arg1=y
+T46_CMD_RECT  = 0x07   # arg0=x, arg1=y, arg2=w, arg3=h
+T46_CMD_MODE  = 0x08   # arg0=0(text) or 1(graphics)
 
 # LOAD addressing modes (encoded in rs field)
 LOAD_IMM    = 0   # LOAD #imm13, Rd
@@ -74,6 +93,30 @@ LOAD_PCREL  = 6   # LOAD [PC+off], Rd
 # Condition codes (used in rs field of JMP/CAL/RET)
 COND_Z  = 0; COND_NZ = 1; COND_C  = 2; COND_NC = 3
 COND_N  = 4; COND_NN = 5; COND_V  = 6; COND_AL = 7
+
+
+class IOBus:
+    """
+    I/O bus. Devices register port ranges and handle read/write.
+    OUT is synchronous. IN blocks until the device has data.
+    """
+
+    def __init__(self):
+        self._devices = {}   # port -> device
+
+    def register(self, port, device):
+        self._devices[port] = device
+
+    def write(self, port, value):
+        dev = self._devices.get(port)
+        if dev:
+            dev.io_write(port, value)
+
+    def read(self, port):
+        dev = self._devices.get(port)
+        if dev:
+            return dev.io_read(port)
+        return 0
 
 
 class Memory:
@@ -110,8 +153,9 @@ class CPU:
     Registers are memory-mapped at CPU_STATE_BASE.
     """
 
-    def __init__(self, memory):
-        self.mem = memory
+    def __init__(self, memory, io_bus=None):
+        self.mem    = memory
+        self.io_bus = io_bus
         self.halted = False
 
     # Register access via memory map
@@ -256,6 +300,20 @@ class CPU:
 
         if opcode == OP_HALT:
             self.halted = True
+            return
+
+        # ---- I/O bus ----
+        # OUT #port, Rs  — rs=source register, imm13=port number
+        if opcode == OP_OUT:
+            if self.io_bus:
+                self.io_bus.write(imm13 & 0xFF, self._rn(rs))
+            return
+
+        # IN Rd, #port   — rd=dest register, imm13=port number
+        # Blocks if the device has no data yet (acts as a blocking syscall)
+        if opcode == OP_IN:
+            val = self.io_bus.read(imm13 & 0xFF) if self.io_bus else 0
+            self._setrn(rd, val & 0xFFFF)
             return
 
         # ---- LOAD ----
@@ -642,22 +700,33 @@ class M56:
     def __init__(self, terminal):
         self.terminal = terminal
         self.memory   = Memory()
-        self.cpu      = CPU(self.memory)
+        self.io_bus   = IOBus()
+        self.cpu      = CPU(self.memory, self.io_bus)
         self.fs       = Filesystem()
         self.os       = OS(self.fs, terminal)
         self.shell    = Shell(self.os)
 
+        self._entry   = None
         self._thread  = threading.Thread(target=self._run, daemon=True)
 
+    def load(self, code, addr=USERRAM_START):
+        """Load machine code into memory and set PC to addr."""
+        self.memory.write_bytes(addr, code)
+        self._entry = addr
+
     def connect(self):
+        self.terminal.register_on_bus(self.io_bus)
         self.cpu.reset()
         self._thread.start()
 
     def input(self, char):
-        """Called by T46 when user input arrives."""
+        """Legacy path: called by T46 for the Python-level OS shell."""
         self.os.push_input(char)
 
     def _run(self):
-        # Eventually: CPU fetch/execute loop running ROM code (shell, Pi, Zero).
-        # For now: run the Python-level shell directly.
-        self.shell.loop()
+        if self._entry is not None:
+            self.cpu.pc = self._entry
+            while not self.cpu.halted:
+                self.cpu.step()
+        else:
+            self.shell.loop()
