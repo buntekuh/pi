@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 import sys
 from m56 import M56, USERRAM_START
 

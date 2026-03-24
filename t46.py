@@ -81,7 +81,6 @@ class T46:
         # Render command queue: M56 thread enqueues, main thread executes
         self._cmd_queue = queue.Queue()
 
-
         # I/O bus interface (CPU IN/OUT instructions)
         self._io_args     = [0, 0, 0, 0]
         self._char_queue  = queue.Queue()   # individual chars for CPU IN
@@ -90,6 +89,10 @@ class T46:
         # Shell line input: poll() pushes completed lines here.
         # read_line() blocks until one is available.
         self._line_queue  = queue.Queue()
+
+        # Raw key input: used by the editor (set_raw=True bypasses line buffer)
+        self._key_queue  = queue.Queue()
+        self._raw_mode   = False
 
         self._clear_text()
 
@@ -160,6 +163,16 @@ class T46:
         """Block until the user presses Enter. Returns the line without newline."""
         return self._line_queue.get()
 
+    def set_raw(self, raw):
+        """Switch between line-buffered (shell) and raw (editor) input modes."""
+        self._raw_mode = raw
+        if raw:
+            self._line_buffer.clear()
+
+    def read_key(self):
+        """Block until one raw keypress is available. Used by the editor."""
+        return self._key_queue.get()
+
     # ------------------------------------------------------------------
     # Commands from M56  (called from M56 thread — enqueue only)
     # ------------------------------------------------------------------
@@ -181,29 +194,34 @@ class T46:
             if event.type == pygame.QUIT:
                 self.running = False
             elif event.type == pygame.KEYDOWN:
-                ch = self._key_to_char(event)
-                if ch is None:
-                    continue
-                if ch == "\b":
-                    if self._line_buffer:
-                        self._line_buffer.pop()
-                        self._print("\b \b")
-                        dirty = True
-                elif ch == "\n":
-                    self._print("\n")
-                    line = "".join(self._line_buffer)
-                    self._line_buffer.clear()
-                    # Shell input (Python OS layer)
-                    self._line_queue.put(line)
-                    # CPU input (IN instruction)
-                    for c in line:
-                        self._char_queue.put(c)
-                    self._char_queue.put("\n")
-                    dirty = True
+                if self._raw_mode:
+                    key = self._event_to_key(event)
+                    if key is not None:
+                        self._key_queue.put(key)
                 else:
-                    self._line_buffer.append(ch)
-                    self._print(ch)
-                    dirty = True
+                    ch = self._key_to_char(event)
+                    if ch is None:
+                        continue
+                    if ch == "\b":
+                        if self._line_buffer:
+                            self._line_buffer.pop()
+                            self._print("\b \b")
+                            dirty = True
+                    elif ch == "\n":
+                        self._print("\n")
+                        line = "".join(self._line_buffer)
+                        self._line_buffer.clear()
+                        # Shell input (Python OS layer)
+                        self._line_queue.put(line)
+                        # CPU input (IN instruction)
+                        for c in line:
+                            self._char_queue.put(c)
+                        self._char_queue.put("\n")
+                        dirty = True
+                    else:
+                        self._line_buffer.append(ch)
+                        self._print(ch)
+                        dirty = True
 
         # Drain render commands from M56 thread
         while not self._cmd_queue.empty():
@@ -220,6 +238,10 @@ class T46:
     def _exec_cmd(self, cmd):
         """Execute one display command. Main thread only."""
         t = cmd.get("type")
+        if t == "goto":
+            self._cur_row = max(0, min(cmd["row"], ROWS - 1))
+            self._cur_col = max(0, min(cmd["col"], COLS - 1))
+            return
         if t == "mode":
             self.mode = cmd["mode"]
         elif t == "cls":
@@ -325,6 +347,24 @@ class T46:
             return "\b"
         if event.unicode:
             return event.unicode
+        return None
+
+    @staticmethod
+    def _event_to_key(event):
+        """Translate a pygame KEYDOWN event to a raw key string for the editor."""
+        k = event.key
+        if k == pygame.K_UP:        return "UP"
+        if k == pygame.K_DOWN:      return "DOWN"
+        if k == pygame.K_LEFT:      return "LEFT"
+        if k == pygame.K_RIGHT:     return "RIGHT"
+        if k == pygame.K_HOME:      return "HOME"
+        if k == pygame.K_END:       return "END"
+        if k == pygame.K_PAGEUP:    return "PGUP"
+        if k == pygame.K_PAGEDOWN:  return "PGDN"
+        if k == pygame.K_RETURN:    return "\n"
+        if k == pygame.K_BACKSPACE: return "\b"
+        if k == pygame.K_TAB:       return "\t"
+        if event.unicode:           return event.unicode
         return None
 
 

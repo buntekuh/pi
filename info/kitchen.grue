@@ -1,0 +1,20 @@
+Kitchen is a room.
+"A room apparently for cooking simple, equipped with the usual
+ knick‑knack like a hyperspace macrowave oven and a spout for clean‑o
+ and a water tap."
+
+Pan "Cast‑iron skillet, perfect for roasting herring" is a surface.
+Pot "A battered metal pot with a dented lid" is a container.
+Red Herring "Suspiciously fishy - and a disgusting smell" is here.
+
+Auntie "Auntie wears her hair in a bun and is looking at you with that quizzical frown that makes you feel ever so insecure." Auntie pronoun is she.
+
+Kitchen is east of Dining Hall.
+Kitchen is west of Back Porch.
+
+verb (wait, look)
+verb object (eat spinach, examine red herring)
+verb preposition object (listen to auntie)
+verb object preposition object (put key in lock)
+verb preposition object string say to Auntie "go to armchair", which would be a special case for saying but would repeat the same concept).
+verb string "say hello"

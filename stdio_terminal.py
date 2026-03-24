@@ -77,7 +77,11 @@ class StdioTerminal:
             sys.stdout.write(command["text"])
             sys.stdout.flush()
         elif t == "cls":
-            print("\033[2J\033[H", end="", flush=True)
+            sys.stdout.write("\033[2J\033[H")
+            sys.stdout.flush()
+        elif t == "goto":
+            sys.stdout.write(f"\033[{command['row']+1};{command['col']+1}H")
+            sys.stdout.flush()
 
     def read_line(self):
         """Block until the user presses Enter. Returns the line without newline."""
@@ -86,6 +90,32 @@ class StdioTerminal:
             self.running = False
             return ""
         return line.rstrip("\n")
+
+    def set_raw(self, raw):
+        self._raw_mode = raw
+
+    def read_key(self):
+        """Read one raw keypress. Supports arrow keys via ANSI escape sequences."""
+        import tty
+        import termios
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            ch = sys.stdin.read(1)
+            if ch == "\x1b":
+                seq = sys.stdin.read(2)
+                _ESC = {"[A": "UP", "[B": "DOWN", "[C": "RIGHT", "[D": "LEFT",
+                        "[H": "HOME", "[F": "END"}
+                if seq in _ESC:
+                    return _ESC[seq]
+                if seq in ("[5", "[6"):
+                    sys.stdin.read(1)   # consume trailing '~'
+                    return "PGUP" if seq == "[5" else "PGDN"
+                return ch
+            return ch
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
     def poll(self):
         pass   # no event loop needed

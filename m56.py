@@ -11,10 +11,6 @@ The M56 runs in its own thread. The T46 pushes input via m56.input().
 The M56 pushes display commands via terminal.receive().
 """
 
-import os
-import subprocess
-import sys
-import tempfile
 import threading
 from fs56 import FS56
 
@@ -524,22 +520,13 @@ class OS:
             self.println(f"mkdir: {e}")
 
     def sys_edit(self, path):
+        from editor import Editor
         try:
             try:
                 content = self.fs.read_file(path).decode(errors="replace")
             except Exception:
                 content = ""
-            editor = os.path.join(os.path.dirname(__file__), "editor.py")
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".txt",
-                                            delete=False) as f:
-                f.write(content)
-                tmp = f.name
-            try:
-                subprocess.run([sys.executable, editor, tmp, path])
-                with open(tmp) as f:
-                    self.fs.write_file(path, f.read())
-            finally:
-                os.unlink(tmp)
+            Editor(self, path).run(content)
         except Exception as e:
             self.println(f"edit: {e}")
 
