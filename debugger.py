@@ -42,15 +42,24 @@ def flag_str(flags):
 
 STACK_DEPTH = 6   # how many stack entries to show
 
-def print_regs(cpu):
+# T46 screen dimensions (80x25)
+_T46_ROWS = 25
+_T46_COLS = 80
+_SCROLL_BOTTOM = _T46_ROWS - 3   # rows 0-22 scroll; rows 23-24 are fixed
+
+_SEP  = "-" * (_T46_COLS - 1)
+_INFO = ("  s step  r run  b break <addr>  m mem <addr>"
+         "  p regs  l list  q quit  ? help")
+
+def print_regs(cpu, w=print):
     f = cpu.flags
-    print(f"  PC={cpu.pc:05X}  SP={cpu.sp:04X}  FLAGS={f:02X} [{flag_str(f)}]")
+    w(f"  PC={cpu.pc:05X}  SP={cpu.sp:04X}  FLAGS={f:02X} [{flag_str(f)}]")
     for row in range(2):
         parts = []
         for col in range(4):
             i = row * 4 + col
             parts.append(f"R{i}={cpu.get_reg(f'R{i}'):04X}")
-        print("  " + "  ".join(parts))
+        w("  " + "  ".join(parts))
     # Stack: top few entries from SP upward
     stack_vals = []
     sp = cpu.sp
@@ -59,20 +68,20 @@ def print_regs(cpu):
         val  = cpu.mem.read16(addr)
         stack_vals.append(f"{val:04X}")
     top_marker = "<- SP" if stack_vals else ""
-    print(f"  stack [{', '.join(stack_vals)}]  {top_marker}")
+    w(f"  stack [{', '.join(stack_vals)}]  {top_marker}")
 
 
-def print_mem(mem, addr, count=64):
+def print_mem(mem, addr, count=64, w=print):
     addr = addr & ~0xF   # align to 16
     for row in range(0, count, 16):
         a = addr + row
         raw = [mem.read8(a + i) for i in range(16)]
         hex_part  = " ".join(f"{b:02X}" for b in raw)
         char_part = "".join(chr(b) if 32 <= b < 127 else '.' for b in raw)
-        print(f"  {a:05X}  {hex_part}  {char_part}")
+        w(f"  {a:05X}  {hex_part}  {char_part}")
 
 
-def print_instruction(cpu, mem, listing_map):
+def print_instruction(cpu, mem, listing_map, w=print):
     pc   = cpu.pc
     # fetch without advancing PC
     b0 = mem.read8(pc)
@@ -81,7 +90,7 @@ def print_instruction(cpu, mem, listing_map):
     word = b0 | (b1 << 8) | (b2 << 16)
     asm  = disassemble_word(word)
     src  = listing_map.get(pc, "")
-    print(f"  {pc:05X}: {b0:02X} {b1:02X} {b2:02X}  {asm:<30}  ; {src}")
+    w(f"  {pc:05X}: {b0:02X} {b1:02X} {b2:02X}  {asm:<30}  ; {src}")
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +98,8 @@ def print_instruction(cpu, mem, listing_map):
 # ---------------------------------------------------------------------------
 
 class Debugger:
-    def __init__(self, cpu, mem, load_addr, listing, labels):
+    def __init__(self, cpu, mem, load_addr, listing, labels,
+                 println=None, read_line=None, term=None):
         self.cpu        = cpu
         self.mem        = mem
         self.load_addr  = load_addr
@@ -98,10 +108,16 @@ class Debugger:
         # Map address → source line
         self.listing_map = {addr: src for addr, _, src in listing}
         self.last_cmd   = 's'
+        # I/O — defaults let the standalone CLI work unchanged
+        self._w    = println   or print
+        self._r    = read_line or input
+        # When term is provided the debugger uses screen-aware layout:
+        # rows 0-22 scroll, rows 23-24 hold a fixed separator + info bar.
+        self._term = term
 
     def _step_one(self):
         if self.cpu.halted:
-            print("  CPU halted.")
+            self._w("  CPU halted.")
             return False
         self.cpu.step()
         return True
@@ -110,31 +126,49 @@ class Debugger:
         count = 0
         while True:
             if self.cpu.halted:
-                print(f"  CPU halted after {count} instructions.")
+                self._w(f"  CPU halted after {count} instructions.")
                 break
             pc = self.cpu.pc
             self.cpu.step()
             count += 1
             if self.cpu.pc in self.breakpoints:
-                print(f"  Breakpoint hit at {self.cpu.pc:05X} after {count} instructions.")
+                self._w(f"  Breakpoint hit at {self.cpu.pc:05X} after {count} instructions.")
                 break
             if count > 1_000_000:
-                print("  Runaway — stopped after 1M instructions.")
+                self._w("  Runaway — stopped after 1M instructions.")
                 break
 
+    def _draw_status(self):
+        """Write the fixed separator + info bar at rows 23-24."""
+        t = self._term
+        t.receive({"type": "goto", "row": _T46_ROWS - 2, "col": 0})
+        t.receive({"type": "print", "text": _SEP})
+        t.receive({"type": "goto", "row": _T46_ROWS - 1, "col": 0})
+        t.receive({"type": "print", "text": _INFO.ljust(_T46_COLS - 1)})
+
     def loop(self):
-        print()
-        print("M56 Debugger  —  ? for help")
-        print_regs(self.cpu)
-        print()
-        print_instruction(self.cpu, self.mem, self.listing_map)
-        print()
+        if self._term:
+            self._term.receive({"type": "cls"})
+            self._term.receive({"type": "scroll_region", "bottom": _SCROLL_BOTTOM})
+            self._draw_status()
+            self._term.receive({"type": "goto", "row": 0, "col": 0})
+
+        self._w("")
+        self._w("M56 Debugger")
+        print_regs(self.cpu, self._w)
+        self._w("")
+        print_instruction(self.cpu, self.mem, self.listing_map, self._w)
+        self._w("")
 
         while True:
             try:
-                line = input("(dbg) ").strip()
+                if not self._term:
+                    self._w(_SEP)
+                    self._w(_INFO)
+                self._w("(dbg) ")
+                line = self._r().strip()
             except (EOFError, KeyboardInterrupt):
-                print()
+                self._w("")
                 break
 
             if not line:
@@ -149,60 +183,58 @@ class Debugger:
                 break
 
             elif cmd in ('?', 'h', 'help'):
-                print("  s / step         — step one instruction")
-                print("  r / run          — run until halt or breakpoint")
-                print("  b / break <hex>  — toggle breakpoint")
-                print("  m / mem <hex>    — dump memory at address")
-                print("  p / print        — print registers")
-                print("  l / list         — show listing around PC")
-                print("  q / quit         — exit")
+                self._w("  s / step         — step one instruction")
+                self._w("  r / run          — run until halt or breakpoint")
+                self._w("  b / break <hex>  — toggle breakpoint")
+                self._w("  m / mem <hex>    — dump memory at address")
+                self._w("  p / print        — print registers")
+                self._w("  l / list         — show listing around PC")
+                self._w("  q / quit         — exit")
 
             elif cmd in ('s', 'step'):
                 if self._step_one():
-                    print_regs(self.cpu)
-                    print()
-                    print_instruction(self.cpu, self.mem, self.listing_map)
+                    print_regs(self.cpu, self._w)
+                    self._w("")
+                    print_instruction(self.cpu, self.mem, self.listing_map, self._w)
 
             elif cmd in ('r', 'run'):
                 self._run()
-                print_regs(self.cpu)
-                print()
-                print_instruction(self.cpu, self.mem, self.listing_map)
+                print_regs(self.cpu, self._w)
+                self._w("")
+                print_instruction(self.cpu, self.mem, self.listing_map, self._w)
 
             elif cmd in ('b', 'break'):
                 if not rest:
                     if self.breakpoints:
-                        print("  Breakpoints: " + ", ".join(f"0x{a:05X}" for a in sorted(self.breakpoints)))
+                        self._w("  Breakpoints: " + ", ".join(f"0x{a:05X}" for a in sorted(self.breakpoints)))
                     else:
-                        print("  No breakpoints.")
+                        self._w("  No breakpoints.")
                 else:
                     try:
                         addr = int(rest[0], 16)
                     except ValueError:
-                        # try label
                         name = rest[0].upper()
                         if name in self.labels:
                             addr = self.labels[name]
                         else:
-                            print(f"  bad address: {rest[0]!r}")
+                            self._w(f"  bad address: {rest[0]!r}")
                             continue
                     if addr in self.breakpoints:
                         self.breakpoints.discard(addr)
-                        print(f"  Breakpoint cleared at 0x{addr:05X}")
+                        self._w(f"  Breakpoint cleared at 0x{addr:05X}")
                     else:
                         self.breakpoints.add(addr)
-                        print(f"  Breakpoint set at 0x{addr:05X}")
+                        self._w(f"  Breakpoint set at 0x{addr:05X}")
 
             elif cmd in ('m', 'mem'):
                 addr = int(rest[0], 16) if rest else self.load_addr
-                print_mem(self.mem, addr)
+                print_mem(self.mem, addr, w=self._w)
 
             elif cmd in ('p', 'print', 'regs'):
-                print_regs(self.cpu)
+                print_regs(self.cpu, self._w)
 
             elif cmd in ('l', 'list'):
                 pc = self.cpu.pc
-                # show a window of instructions around PC
                 start = max(self.load_addr, pc - 9)
                 for a in range(start, pc + 12, 3):
                     b0 = self.mem.read8(a)
@@ -212,10 +244,14 @@ class Debugger:
                     asm  = disassemble_word(word)
                     src  = self.listing_map.get(a, "")
                     mark = ">>>" if a == pc else "   "
-                    print(f"  {mark} {a:05X}: {b0:02X}{b1:02X}{b2:02X}  {asm:<30}  {src}")
+                    self._w(f"  {mark} {a:05X}: {b0:02X}{b1:02X}{b2:02X}  {asm:<30}  {src}")
 
             else:
-                print(f"  unknown command: {cmd!r}  (? for help)")
+                self._w(f"  unknown command: {cmd!r}  (? for help)")
+
+        if self._term:
+            self._term.receive({"type": "scroll_region", "bottom": _T46_ROWS - 1})
+            self._term.receive({"type": "cls"})
 
 
 # ---------------------------------------------------------------------------

@@ -15,7 +15,7 @@ import pygame
 from palette import PALETTE_DATA, PALETTE_BYTES
 
 
-CHAR_W = 8     # font cell width  — classic VGA 80-col
+CHAR_W = 9     # font cell width  — 1 px wider than the nominal 8 to give glyphs breathing room
 CHAR_H = 16    # font cell height — 8x16 looks like a real terminal
 COLS   = 80
 ROWS   = 25
@@ -27,9 +27,13 @@ GFX_SCALE = 3
 TXT_W  = COLS * CHAR_W   # 640
 TXT_H  = ROWS * CHAR_H   # 400
 
+# macOS rounds window corners (~8 px radius).  A small bottom margin keeps
+# the last text row clear of the curve.
+_BOTTOM_PAD = 8
+
 # Window: text mode drives the size; graphics mode scales up to fit.
-WIN_W  = TXT_W            # 640
-WIN_H  = TXT_H            # 400
+WIN_W  = TXT_W                  # 640
+WIN_H  = TXT_H + _BOTTOM_PAD   # 408
 
 
 class T46:
@@ -59,9 +63,16 @@ class T46:
         # Text framebuffer: 32-bit so font surfaces blit cleanly
         self.txt_fb = pygame.Surface((TXT_W, TXT_H))
 
-        # Size the font to fit naturally in CHAR_H; try to keep width ≤ CHAR_W.
-        for name in ("Courier New", "Courier", "monospace"):
-            self.font = pygame.font.SysFont(name, CHAR_H - 2, bold=False)
+        # Prefer Menlo/Monaco (macOS native coding fonts) at size 13 — they
+        # give M=(8,16), leaving a spare pixel inside the 9-wide cell and
+        # rendering wide glyphs (m, w) cleanly.  Fall back to Courier New /
+        # Courier at size 14 on other platforms.
+        for name, size in (("Menlo",       CHAR_H - 3),
+                           ("Monaco",      CHAR_H - 3),
+                           ("Courier New", CHAR_H - 2),
+                           ("Courier",     CHAR_H - 2),
+                           ("monospace",   CHAR_H - 2)):
+            self.font = pygame.font.SysFont(name, size, bold=False)
             fw, fh = self.font.size("M")
             if fw <= CHAR_W and fh <= CHAR_H:
                 break
@@ -77,6 +88,7 @@ class T46:
         self._bg      = (0,  0,  0)     # black
 
         self._m56     = None
+        self._scroll_bottom = ROWS - 1   # bottom row of the scroll region (inclusive)
 
         # Render command queue: M56 thread enqueues, main thread executes
         self._cmd_queue = queue.Queue()
@@ -242,6 +254,12 @@ class T46:
             self._cur_row = max(0, min(cmd["row"], ROWS - 1))
             self._cur_col = max(0, min(cmd["col"], COLS - 1))
             return
+        if t == "scroll_region":
+            # Set the bottom of the scroll region (0-based row index).
+            # Rows above this value scroll normally; rows at or below are
+            # protected and will not move when the screen scrolls.
+            self._scroll_bottom = max(0, min(cmd["bottom"], ROWS - 1))
+            return
         if t == "mode":
             self.mode = cmd["mode"]
         elif t == "cls":
@@ -285,7 +303,7 @@ class T46:
             if ch == "\n":
                 self._cur_col = 0
                 self._cur_row += 1
-                if self._cur_row >= ROWS:
+                if self._cur_row > self._scroll_bottom:
                     self._scroll()
             elif ch == "\r":
                 self._cur_col = 0
@@ -299,14 +317,16 @@ class T46:
                 if self._cur_col >= COLS:
                     self._cur_col = 0
                     self._cur_row += 1
-                    if self._cur_row >= ROWS:
+                    if self._cur_row > self._scroll_bottom:
                         self._scroll()
 
     def _put_char(self, row, col, ch, fg, bg):
         x, y = col * CHAR_W, row * CHAR_H
         pygame.draw.rect(self.txt_fb, bg, (x, y, CHAR_W, CHAR_H))
         surf = self._render_char(ch, fg, bg)
-        self.txt_fb.blit(surf, (x, y))
+        # Clip to the cell so wide glyphs (m, w, …) don't bleed into the
+        # next column and get erased when that column's background is drawn.
+        self.txt_fb.blit(surf, (x, y), (0, 0, CHAR_W, CHAR_H))
 
     def _render_char(self, ch, rgb_fg, rgb_bg):
         key = (ch, rgb_fg, rgb_bg)
@@ -326,10 +346,24 @@ class T46:
                 col += 1
 
     def _scroll(self):
-        self._cur_row = ROWS - 1
-        self.txt_fb.scroll(0, -CHAR_H)
-        pygame.draw.rect(self.txt_fb, self._bg,
-                         (0, (ROWS - 1) * CHAR_H, TXT_W, CHAR_H))
+        bottom = self._scroll_bottom
+        self._cur_row = bottom
+        if bottom == ROWS - 1:
+            # Full-screen scroll — use the fast built-in path.
+            self.txt_fb.scroll(0, -CHAR_H)
+            pygame.draw.rect(self.txt_fb, self._bg,
+                             (0, (ROWS - 1) * CHAR_H, TXT_W, CHAR_H))
+        else:
+            # Partial scroll: rows 0..bottom only.  pygame's scroll() cannot
+            # be used on a subsurface, so copy the region via blit + temp.
+            # Copy rows 1..bottom (shifted up) into a temp surface, then
+            # blit it back to rows 0..bottom-1, and clear row bottom.
+            h = bottom * CHAR_H   # height of rows 1..bottom
+            temp = self.txt_fb.subsurface(
+                pygame.Rect(0, CHAR_H, TXT_W, h)).copy()
+            self.txt_fb.blit(temp, (0, 0))
+            pygame.draw.rect(self.txt_fb, self._bg,
+                             (0, bottom * CHAR_H, TXT_W, CHAR_H))
 
     def _blit(self):
         if self.mode == self.MODE_TEXT:

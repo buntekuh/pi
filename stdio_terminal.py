@@ -82,6 +82,11 @@ class StdioTerminal:
         elif t == "goto":
             sys.stdout.write(f"\033[{command['row']+1};{command['col']+1}H")
             sys.stdout.flush()
+        elif t == "scroll_region":
+            # ANSI CSI Ps ; Ps r — set top/bottom margins (1-based)
+            bottom = command["bottom"] + 1
+            sys.stdout.write(f"\033[1;{bottom}r")
+            sys.stdout.flush()
 
     def read_line(self):
         """Block until the user presses Enter. Returns the line without newline."""

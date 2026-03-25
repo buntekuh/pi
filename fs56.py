@@ -6,14 +6,87 @@ to the correct one based on the mount table.
 
 Mount points live under /volumes. /bin is read-only system territory.
 The OS bypasses protection for privileged operations (mounting etc).
+
+/uplink is a special read-only mount backed by the host 'uplink/'
+directory.  Files placed there by the user's real editor appear
+immediately inside the terminal without any copy step.
 """
+
+import os as _os
+import pathlib
 
 from cartridge import Cartridge, NotFound, AlreadyExists, NotADirectory, \
                       NotAFile, NoSpace, FSError, TYPE_FILE, TYPE_DIR
 
 
+# Default host path for the uplink directory (alongside this file).
+_DEFAULT_UPLINK = pathlib.Path(__file__).parent / 'uplink'
+
+
 class PermissionError(FSError):
     pass
+
+
+class UplinkCart:
+    """
+    Read-only cartridge backed by a directory on the host filesystem.
+
+    Every read goes straight to disk, so files edited in the user's
+    real editor are visible inside the terminal immediately — no sync
+    step required.  Write operations raise PermissionError; the M56
+    cannot modify uplinked files.
+    """
+
+    def __init__(self, host_path):
+        self._root = _os.path.abspath(str(host_path))
+
+    def _host(self, path: str) -> str:
+        """Map a virtual path to an absolute host path."""
+        rel = path.strip('/')
+        return _os.path.join(self._root, rel) if rel else self._root
+
+    def ls(self, path='/'):
+        host = self._host(path)
+        if not _os.path.isdir(host):
+            raise NotFound(path)
+        entries = []
+        for name in sorted(_os.listdir(host)):
+            if name.startswith('.'):
+                continue   # skip .DS_Store and other hidden files
+            full = _os.path.join(host, name)
+            if _os.path.isdir(full):
+                entries.append((name, TYPE_DIR, 0))
+            else:
+                entries.append((name, TYPE_FILE, _os.path.getsize(full)))
+        return entries
+
+    def read_file(self, path) -> bytes:
+        host = self._host(path)
+        if not _os.path.isfile(host):
+            raise NotFound(path)
+        with open(host, 'rb') as f:
+            return f.read()
+
+    def exists(self, path) -> bool:
+        return _os.path.exists(self._host(path))
+
+    def stat(self, path) -> dict:
+        host = self._host(path)
+        if not _os.path.exists(host):
+            raise NotFound(path)
+        if _os.path.isdir(host):
+            return {'type': TYPE_DIR, 'size': 0}
+        return {'type': TYPE_FILE, 'size': _os.path.getsize(host)}
+
+    # Write operations are not permitted on uplinked files.
+    def write_file(self, path, data):
+        raise PermissionError(f'{path}: uplink is read-only')
+
+    def mkdir(self, path):
+        raise PermissionError(f'{path}: uplink is read-only')
+
+    def delete(self, path):
+        raise PermissionError(f'{path}: uplink is read-only')
 
 
 # Paths the user cannot write to or create directories in.
@@ -28,8 +101,10 @@ _BIN = {
     'mkdir':  '# make directory\n',
     'rm':     '# remove file or empty directory\n',
     'cat':    '# print file to terminal\n',
-    'nano':   '# simple text editor\n',
-    'asm':    '# M56 assembler\n',
+    'edit':   '# text editor\n',
+    'run':    '# run a Pi source file\n',
+    'asm':    '# assemble M56 assembly to binary\n',
+    'debug':  '# interactive step debugger\n',
     'hex':    '# hex viewer/editor\n',
     'mount':  '# mount a cartridge at /volumes/<name>\n',
     'umount': '# unmount a cartridge\n',
@@ -49,16 +124,22 @@ class FS56:
         vfs.umount('game')
     """
 
-    def __init__(self, boot_cartridge=None):
+    def __init__(self, boot_cartridge=None, uplink_path=_DEFAULT_UPLINK):
         self._boot = boot_cartridge or Cartridge()
         self._boot.format()
         self._mounts  = {}    # name → Cartridge  (mounted under /volumes)
         self.cwd      = '/'
+        # Mount the host uplink directory if it exists.
+        uplink_path = pathlib.Path(uplink_path)
+        self._uplink = UplinkCart(uplink_path) if uplink_path.is_dir() else None
         self._setup_boot()
 
     def _setup_boot(self):
         """Create the standard directory tree on the boot cartridge."""
-        for d in ('/bin', '/volumes', '/home', '/tmp'):
+        dirs = ['/bin', '/volumes', '/home', '/tmp']
+        if self._uplink:
+            dirs.append('/uplink')   # placeholder so root ls shows it
+        for d in dirs:
             self._boot.mkdir(d)
         for name, stub in _BIN.items():
             self._boot.write_file(f'/bin/{name}', stub)
@@ -97,11 +178,15 @@ class FS56:
         """
         Return (cartridge, local_path) for an absolute path.
 
-        Paths under /volumes/<name>/... are routed to the named cartridge.
-        Everything else goes to the boot cartridge.
+        /uplink/...         → UplinkCart (host filesystem, read-only)
+        /volumes/<n>/...    → mounted Cartridge
+        everything else     → boot Cartridge
         """
         path = self._abs(path)
         parts = path.strip('/').split('/')
+        if self._uplink and parts[0] == 'uplink':
+            local_path = '/' + '/'.join(parts[1:]) if len(parts) > 1 else '/'
+            return self._uplink, local_path
         if len(parts) >= 2 and parts[0] == 'volumes' and parts[1] in self._mounts:
             cart       = self._mounts[parts[1]]
             local_path = '/' + '/'.join(parts[2:]) if len(parts) > 2 else '/'

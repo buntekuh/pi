@@ -530,6 +530,90 @@ class OS:
         except Exception as e:
             self.println(f"edit: {e}")
 
+    def sys_asm(self, path, out_path=None):
+        """Assemble a .asm file from the virtual FS, write the binary back."""
+        from assembler import assemble, AssemblerError
+        import os as _os
+        try:
+            source = self.fs.read_file(path).decode(errors='replace')
+        except Exception as e:
+            self.println(f"asm: {e}")
+            return
+        try:
+            code, labels, _ = assemble(source, USERRAM_START)
+        except AssemblerError as e:
+            self.println(f"asm: {e}")
+            return
+        if out_path is None:
+            basename = _os.path.basename(path)
+            stem     = basename.rsplit('.', 1)[0] if '.' in basename else basename
+            out_path = f'/tmp/{stem}.bin'
+        try:
+            self.fs.write_file(out_path, code)
+        except Exception as e:
+            self.println(f"asm: write failed: {e}")
+            return
+        self.println(f"assembled {len(code)} bytes  →  {out_path}")
+        if labels:
+            label_strs = [f"{n}=0x{a:05X}"
+                          for n, a in sorted(labels.items(), key=lambda x: x[1])]
+            self.println("labels: " + "  ".join(label_strs))
+
+    def sys_debug(self, path):
+        """Load a .asm or .bin file from the virtual FS and start the debugger."""
+        from assembler import assemble, AssemblerError
+        from debugger import Debugger
+        load_addr = USERRAM_START
+        try:
+            data = self.fs.read_file(path)
+        except Exception as e:
+            self.println(f"debug: {e}")
+            return
+        if path.endswith('.asm') or path.endswith('.s'):
+            try:
+                code, labels, listing = assemble(data.decode(errors='replace'), load_addr)
+            except AssemblerError as e:
+                self.println(f"debug: assembler error: {e}")
+                return
+            self.println(f"assembled {len(code)} bytes at 0x{load_addr:05X}")
+        else:
+            code    = data
+            labels  = {}
+            listing = [(load_addr + i, code[i:i+3], '')
+                       for i in range(0, len(code), 3)]
+            self.println(f"loaded {len(code)} bytes at 0x{load_addr:05X}")
+        mem = Memory()
+        mem.write_bytes(load_addr, code)
+        cpu = CPU(mem)
+        cpu.reset()
+        cpu.pc = load_addr
+        cpu.sp = load_addr - 2
+        Debugger(cpu, mem, load_addr, listing, labels,
+                 println=self.println, read_line=self.read_line,
+                 term=self.terminal).loop()
+
+    def sys_run(self, path):
+        """Run a Pi source file from the virtual filesystem."""
+        from pi_interp import Interpreter, InterpError
+        from pi_lexer import LexError
+        try:
+            source = self.fs.read_file(path).decode(errors="replace")
+        except Exception as e:
+            self.println(f"run: {e}")
+            return
+        interp = Interpreter(output=self.print_text)
+        try:
+            interp.run(source)
+        except (LexError, InterpError) as e:
+            self.println(str(e))
+
+    def sys_repl(self):
+        """Launch the interactive Pi REPL."""
+        from pi_repl import PiRepl
+        repl = PiRepl(println=self.println, read_line=self.read_line,
+                      term=self.terminal)
+        repl.loop()
+
 
 class Shell:
     """
@@ -537,7 +621,7 @@ class Shell:
     This stands in for the Pi shell program that will eventually live in ROM.
     """
 
-    COMMANDS = {"ls", "cd", "mkdir", "cat", "edit", "help"}
+    COMMANDS = {"ls", "cd", "mkdir", "cat", "edit", "run", "asm", "debug", "pi", "help"}
 
     def __init__(self, os_):
         self.os = os_
@@ -575,6 +659,24 @@ class Shell:
                 self.os.sys_edit(arg)
             else:
                 self.os.println("usage: edit <file>")
+        elif cmd == "run":
+            if arg:
+                self.os.sys_run(arg)
+            else:
+                self.os.println("usage: run <file.pi>")
+        elif cmd == "asm":
+            if arg:
+                parts2 = arg.split(None, 1)
+                self.os.sys_asm(parts2[0], parts2[1] if len(parts2) > 1 else None)
+            else:
+                self.os.println("usage: asm <file.asm> [output.bin]")
+        elif cmd == "debug":
+            if arg:
+                self.os.sys_debug(arg)
+            else:
+                self.os.println("usage: debug <file.asm|file.bin>")
+        elif cmd == "pi":
+            self.os.sys_repl()
         elif cmd == "help":
             self.os.println("M56 SHELL COMMANDS")
             self.os.println()
@@ -583,23 +685,64 @@ class Shell:
             self.os.println("  mkdir <dir>     create a new directory")
             self.os.println("  cat <file>      print a file to the terminal")
             self.os.println("  edit <file>     open file in editor")
-            self.os.println("  help            this message")
+            self.os.println("  run <file.pi>              run a Pi program")
+            self.os.println("  asm <file.asm> [out.bin]   assemble to binary")
+            self.os.println("  debug <file.asm|.bin>      step debugger")
+            self.os.println("  pi                         interactive Pi REPL")
+            self.os.println("  help                       this message")
         else:
             self.os.println(f"unknown command: {cmd}")
 
+    def _dots(self, n, delay=0.08):
+        """Print n dots with a short pause between each."""
+        import time
+        for _ in range(n):
+            self.os.print_text(".")
+            time.sleep(delay)
+
     def loop(self):
-        self.os.println()
-        self.os.println("UTRONIC DATA SYSTEMS INC.")
-        self.os.println("M56 MAINFRAME  SN: 948-464")
-        self.os.println()
-        self.os.println("MEMORY TEST ............. 65536 BYTES OK")
-        self.os.println("56FS .................... 512K ONLINE")
-        self.os.println("TERMINAL LINK ........... T46 OK")
-        self.os.println()
-        self.os.println("SYSTEM READY.")
-        self.os.println()
-        self.os.println("For help please type help.")
-        self.os.println()
+        import time
+
+        w = self.os.println
+        p = self.os.print_text
+
+        w()
+        w("T46 TERMINAL  REV 2.1")
+        w("UTRONIC DATA SYSTEMS INC.")
+        w()
+        time.sleep(0.3)
+
+        p("SCANNING NETWORK FOR MAINFRAME NODE")
+        self._dots(3, 0.4)
+        self._dots(6, 0.12)
+        w()
+        time.sleep(0.2)
+
+        p("M56 MAINFRAME FOUND  SN: 948-464")
+        self._dots(3, 0.25)
+        w()
+        time.sleep(0.15)
+
+        p("AUTHENTICATING")
+        self._dots(4, 0.18)
+        w("  OK")
+        time.sleep(0.1)
+
+        p("ESTABLISHING LINK")
+        self._dots(4, 0.14)
+        w("  CONNECTED")
+        w()
+        time.sleep(0.25)
+
+        w("MEMORY TEST ............. 65536 BYTES OK")
+        time.sleep(0.06)
+        w("56FS .................... 512K ONLINE")
+        time.sleep(0.06)
+        w("TERMINAL LINK ........... T46 OK")
+        w()
+        time.sleep(0.2)
+        w("SYSTEM READY.  Type help for commands.")
+        w()
         self.os.sys_cd("/home")
         while self.os.terminal.running:
             self.prompt()
