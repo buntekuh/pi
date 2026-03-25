@@ -1,20 +1,33 @@
 Kitchen is a room.
-"A room apparently for cooking simple, equipped with the usual
- knick‑knack like a hyperspace macrowave oven and a spout for clean‑o
- and a water tap."
+"A room apparently for cooking, equipped with the usual knick-knack
+ like a hyperspace macrowave oven and a spout for clean-o water."
 
-Pan "Cast‑iron skillet, perfect for roasting herring" is a surface.
-Pot "A battered metal pot with a dented lid" is a container.
-Red Herring "Suspiciously fishy - and a disgusting smell" is here.
+Pan "Cast-iron skillet, perfect for roasting herring" is a surface.
+Red Herring "Suspiciously fishy — and a disgusting smell" is here.
 
-Auntie "Auntie wears her hair in a bun and is looking at you with that quizzical frown that makes you feel ever so insecure." Auntie pronoun is she.
+Auntie "Auntie wears her hair in a bun and looks at you with that
+ quizzical frown that makes you feel ever so insecure." pronoun is she.
 
 Kitchen is east of Dining Hall.
 Kitchen is west of Back Porch.
 
-verb (wait, look)
-verb object (eat spinach, examine red herring)
-verb preposition object (listen to auntie)
-verb object preposition object (put key in lock)
-verb preposition object string say to Auntie "go to armchair", which would be a special case for saying but would repeat the same concept).
-verb string "say hello"
+Scullery Door "A low door with a crooked frame" is a door.
+Scullery Door is between Kitchen and Back Porch.
+Scullery Door is close.
+
+examine Red Herring:
+    "It stares back. One of you is lying."
+end
+
+eat Red Herring:
+    if Red Herring is nowhere:
+        "There is no herring here."
+    elsif Red Herring is here:
+        "Tastes of regret and low tide."
+        Red Herring is nowhere.
+    end
+end
+
+say to Auntie "sit down":
+    "Auntie fixes you with a stare that could curdle milk."
+end

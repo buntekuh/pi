@@ -1,0 +1,229 @@
+// Pi lexer test — edge cases and representative syntax
+// Each section is labelled with what it is testing.
+
+
+// ----------------------------------------------------------------
+// Integers — decimal and hex
+// ----------------------------------------------------------------
+
+42
+-1
+0
+32767
+-32768
+
+0xff
+0x00
+0xffff        // same bit pattern as -1
+0x1A2B        // mixed case hex
+
+
+// ----------------------------------------------------------------
+// Two names for the same bits
+// ----------------------------------------------------------------
+
+0xffff        // unsigned: 65535
+-1            // signed:   -1
+              // same 16 bits: 1111111111111111
+
+0xffff -1 ==  // true — identical bit pattern
+0xffff 1 +    // wraps to 0x0000 — no error, no surprise
+
+
+// ----------------------------------------------------------------
+// Negative numbers vs subtraction
+// ----------------------------------------------------------------
+
+-1            // integer literal: negative one
+3 -1 -        // subtraction: 3 minus negative-one = 4
+3 1 -         // subtraction: 3 minus 1 = 2
+-1 -1 +       // addition of two negative literals = -2
+
+
+// ----------------------------------------------------------------
+// Hyphenated names vs subtraction
+// ----------------------------------------------------------------
+
+go-north      // one identifier: go-north
+a-b           // one identifier: a-b
+a - b         // three tokens: a  -  b  (spaces make it subtraction)
+a-1           // one identifier: a-1  (digit after hyphen is allowed)
+
+
+// ----------------------------------------------------------------
+// Hex literals adjacent to operators
+// ----------------------------------------------------------------
+
+0xff 0x01 +   // 255 + 1 = 256
+0xff 1 +      // 255 + 1 = 256
+0x10 2 *      // 16 * 2 = 32
+
+
+// ----------------------------------------------------------------
+// Strings
+// ----------------------------------------------------------------
+
+"hello world"
+"say \"hi\" to everyone"   // escaped quotes inside string
+"line one\nline two"       // escape sequence: newline
+""                         // empty string
+"trailing space "
+
+
+// ----------------------------------------------------------------
+// Comments
+// ----------------------------------------------------------------
+
+42 // this is a comment, 42 is the only token on this line
+
+/* this is a
+   multiline comment */
+
+42 /* inline block comment */ 43 +
+
+/* nested /* comments */ are tricky */ 99   // should this work?
+
+
+// ----------------------------------------------------------------
+// Empty definition
+// ----------------------------------------------------------------
+
+: noop ;
+
+
+// ----------------------------------------------------------------
+// Simple macro
+// ----------------------------------------------------------------
+
+: double   2 * ;
+: square   dup * ;
+: negate   0 swap - ;
+
+
+// ----------------------------------------------------------------
+// Function with type signature and locals
+// ----------------------------------------------------------------
+
+function area ( Int Int -> Int ):
+    -> width height:
+    width height *
+end
+
+function greet ( Str -> ):
+    -> name:
+    "hello " name concat println
+end
+
+
+// ----------------------------------------------------------------
+// Locals — the colon is part of the local syntax, not a definition
+// ----------------------------------------------------------------
+
+function tricky ( Int Int Int -> Int ):
+    -> a b c:        // three locals: a=third, b=second, c=top
+    a b + c *
+end
+
+
+// ----------------------------------------------------------------
+// Control flow
+// ----------------------------------------------------------------
+
+function abs ( Int -> Int ):
+    dup 0 <
+    if:
+        negate
+    end
+end
+
+function max ( Int Int -> Int ):
+    -> a b:
+    if a b >:
+        a
+    elsif a b ==:
+        a
+    else:
+        b
+    end
+end
+
+function count-down ( Int -> ):
+    -> n:
+    while n 0 >:
+        n .
+        n 1 - -> n:
+    end
+end
+
+
+// ----------------------------------------------------------------
+// Namespace and dot access
+// ----------------------------------------------------------------
+
+namespace geometry:
+    function area ( Int Int -> Int ):  * end
+    function perimeter ( Int Int -> Int ):  + 2 * end
+end
+
+geometry.area         // dot access: namespace=geometry word=area
+geometry.perimeter
+
+use geometry
+area                  // unqualified after use
+
+
+// ----------------------------------------------------------------
+// Lists and quotations
+// ----------------------------------------------------------------
+
+[ 1 2 3 ]
+[ "cat" "dog" "fish" ]
+[ ]
+
+[ 1 2 3 ] { dup * } map
+[ 1 2 3 4 5 ] { 2 mod 0 == } filter
+[ 1 2 3 ] 0 { + } fold
+
+
+// ----------------------------------------------------------------
+// Error and panic
+// ----------------------------------------------------------------
+
+function safe-div ( Int Int -> Int ):
+    -> a b:
+    if b 0 ==:
+        error "division by zero"
+    else:
+        a b /
+    end
+end
+
+function direction ( Int -> ):
+    -> d:
+    if d 0 ==:       "north" print
+    elsif d 1 ==:    "south" print
+    elsif d 2 ==:    "east"  print
+    elsif d 3 ==:    "west"  print
+    else: panic "unreachable direction"
+    end
+end
+
+
+// ----------------------------------------------------------------
+// Variables and constants
+// ----------------------------------------------------------------
+
+variable counter
+0 counter !
+counter @ 1 + counter !
+
+42 constant the-answer
+0xff constant max-colour
+
+
+// ----------------------------------------------------------------
+// Tricky whitespace and edge cases
+// ----------------------------------------------------------------
+
+// word immediately followed by end of file with no newline:
+the-answer .

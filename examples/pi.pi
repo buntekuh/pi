@@ -1,0 +1,121 @@
+// pi.pi — Pi computing pi
+//
+// Pi has no floating point. We do not apologise for this.
+// Instead we use fixed-point arithmetic scaled by 10000.
+//
+//   3.1415  is stored as  31415
+//   0.5     is stored as  5000
+//
+// The famous rational approximation 355/113 gives us pi
+// accurate to six decimal places — more than enough.
+
+
+10000 constant SCALE
+
+// ----------------------------------------------------------------
+// pi as a fixed-point integer
+// 355/113 = 3.14159292...  (error < 0.000001)
+// ----------------------------------------------------------------
+
+function pi ( -> Int ):
+    355 SCALE 113 */    // */ uses 32-bit intermediate — avoids 16-bit overflow
+end
+
+
+// ----------------------------------------------------------------
+// Fixed-point helpers
+// ----------------------------------------------------------------
+
+: fp*   SCALE */ ;      // ( a b -- a*b/SCALE )  multiply two fixed-point values
+: fp/   swap SCALE */ ; // ( a b -- a*SCALE/b )  divide two fixed-point values
+
+// format a fixed-point number as "X.YYYY"  ( Int -> Str )
+function print-fp ( Int -> Str ):
+    -> n:
+    n SCALE /        int-to-str
+    "."              concat
+    n SCALE mod pad4 concat
+end
+
+// zero-pad an integer to 4 digits
+function pad4 ( Int -> Str ):
+    -> n:
+    if n 10 <:      "000" n int-to-str concat
+    elsif n 100 <:  "00"  n int-to-str concat
+    elsif n 1000 <: "0"   n int-to-str concat
+    else:           n int-to-str
+    end
+end
+
+
+// ----------------------------------------------------------------
+// Circle geometry  (radius is a plain integer, results are fixed-point)
+// ----------------------------------------------------------------
+
+// Circle geometry — integer approximations (real answer × 1, rounded down)
+// SCALE=10000 makes the full fixed-point result overflow 16-bit for r > 1,
+// so we return the integer part only: (2*r * pi_fp) / SCALE
+function circumference ( Int -> Int ):
+    -> r:
+    2 r * pi SCALE */   // (2*r) * pi_fp / SCALE  — 32-bit intermediate
+end
+
+function circle-area ( Int -> Int ):
+    -> r:
+    r r * pi SCALE */   // r^2 * pi_fp / SCALE  — 32-bit intermediate
+end
+
+
+// ----------------------------------------------------------------
+// Nilakantha series — converges much faster than Leibniz
+//
+// pi = 3 + 4/(2*3*4) - 4/(4*5*6) + 4/(6*7*8) - ...
+//
+// We accumulate in fixed-point and stop after n terms.
+// ----------------------------------------------------------------
+
+function nilakantha ( Int -> Int ):
+    -> terms:
+    3 SCALE *     -> acc:    // start with 3.0000  (30000, fits in 16-bit)
+    1             -> sign:
+    2             -> k:
+    0             -> i:
+
+    // term = 4 * sign * SCALE / (k*(k+1)*(k+2))
+    // */ gives 32-bit intermediate for the numerator (4*sign*SCALE = ±40000)
+    // Denominator fits in 16-bit up to k=30 (30*31*32=29760 < 32767)
+    while i terms <:
+        4 sign *  SCALE  k k 1 + * k 2 + *  */ -> term:
+        acc term + -> acc:
+        sign negate -> sign:
+        k 2 + -> k:
+        i 1 + -> i:
+    end
+
+    acc
+end
+
+
+// ----------------------------------------------------------------
+// Demo
+// ----------------------------------------------------------------
+
+"Pi computing pi" println
+"==================" println
+""                  println
+
+"355/113 approximation:  " print   pi           print-fp println
+"Nilakantha (5 terms):   " print   5 nilakantha  print-fp println
+"Nilakantha (10 terms):  " print   10 nilakantha print-fp println
+// Note: Nilakantha uses 16-bit cells; k*(k+1)*(k+2) overflows at k>30 (~15 terms)
+
+"" println
+"Circle integer approximations (result = floor of real value):" println
+"  r=10  circumference: " print   10 circumference int-to-str println   // 62
+"  r=10  area:          " print   10 circle-area   int-to-str println   // 314
+"  r=7   circumference: " print   7  circumference int-to-str println   // 43
+"  r=7   area:          " print   7  circle-area   int-to-str println   // 153
+
+"" println
+"// A language called Pi that cannot say 3.14159" println
+"// is just integer 31415 wearing a trenchcoat." println

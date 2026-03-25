@@ -1,0 +1,169 @@
+// report.pi — class grade report
+//
+// A self-contained program exercising as much Pi syntax as possible.
+// Expected output is annotated with each print statement.
+//
+// Covers: namespaces, function, : ;, named locals, if/elsif/else/end,
+//         while, lists, quotations, fold, each, variables, constants,
+//         fixed-point arithmetic, error, panic, hex literals,
+//         string operations, // and /* */ comments.
+
+
+/* ----------------------------------------------------------------
+   Constants
+   ---------------------------------------------------------------- */
+
+100  constant SCALE       // fixed-point scale: 77.16 stored as 7716
+                          // SCALE=100 (2 d.p.) keeps values in 16-bit range
+6    constant NUM-SCORES
+
+
+/* ----------------------------------------------------------------
+   Fixed-point helpers
+   ---------------------------------------------------------------- */
+
+: fp*   SCALE */ ;      // ( a b -- a*b/SCALE )  fixed-point multiply
+: fp/   swap SCALE */ ; // ( a b -- a*SCALE/b )  fixed-point divide
+
+function pad2 ( Int -> Str ):   // zero-pad to 2 digits
+    -> n:
+    if n 10 <: "0" n int-to-str concat
+    else:          n int-to-str
+    end
+end
+
+function print-fp ( Int -> Str ):     // format "77.16" as a string
+    -> n:
+    n SCALE /        int-to-str
+    "."              concat
+    n SCALE mod pad2 concat
+end
+
+
+/* ----------------------------------------------------------------
+   Stats namespace
+   ---------------------------------------------------------------- */
+
+namespace stats:
+
+    function sum ( List -> Int ):
+        0 { + } fold
+    end
+
+    function min ( List -> Int ):
+        -> xs:
+        if xs length 0 ==: error "min of empty list" end
+        xs rest  xs first  { -> acc x: if x acc <: x else: acc end } fold
+    end
+
+    function max ( List -> Int ):
+        -> xs:
+        if xs length 0 ==: error "max of empty list" end
+        xs rest  xs first  { -> acc x: if x acc >: x else: acc end } fold
+    end
+
+    /* mean returned as fixed-point scaled by SCALE */
+    function mean-fp ( List -> Int ):
+        -> xs:
+        if xs length 0 ==: error "mean of empty list" end
+        xs sum SCALE xs length */   // */ for 32-bit intermediate
+    end
+
+    function count-if ( List Int -> Int ):   // count elements >= threshold
+        -> xs threshold:
+        0 -> count:
+        0 -> i:
+        while i xs length <:
+            if xs i nth threshold >=:
+                count 1 + -> count:
+            end
+            i 1 + -> i:
+        end
+        count
+    end
+
+end
+
+
+/* ----------------------------------------------------------------
+   Grading
+   ---------------------------------------------------------------- */
+
+function letter-grade ( Int -> Str ):
+    -> score:
+    if score 0 < score 100 > or:
+        error "score out of range"
+    end
+    if    score 90 >=: "A"
+    elsif score 80 >=: "B"
+    elsif score 70 >=: "C"
+    elsif score 60 >=: "D"
+    else:              "F"
+    end
+end
+
+// pad a string on the right to a fixed width
+function pad-right ( Str Int -> Str ):
+    -> s width:
+    while s length width <:
+        s " " concat -> s:
+    end
+    s
+end
+
+
+/* ----------------------------------------------------------------
+   Separator line using hex char code for '-'  (0x2D = 45 = '-')
+   ---------------------------------------------------------------- */
+
+variable sep-char
+0x2D sep-char !      // '-'  (hex literal for a dash)
+
+: separator   0 -> i: while i 24 <: sep-char @ emit  i 1 + -> i: end "\n" print ;
+
+
+/* ----------------------------------------------------------------
+   Main program
+   ---------------------------------------------------------------- */
+
+[ 85 92 73 61 98 54 ] -> scores:
+
+"=== CLASS REPORT ===" println           // === CLASS REPORT ===
+"" println
+
+"Score  Grade" println                   // Score  Grade
+separator                                // ------------------------
+
+scores {
+    -> s:
+    s int-to-str 6 pad-right print       //  85     B
+    s letter-grade println               //  92     A  etc.
+} each
+
+"" println
+
+// Statistics
+"Total students : " print  scores length   int-to-str println   // 6
+"Highest score  : " print  scores stats.max int-to-str println  // 98
+"Lowest score   : " print  scores stats.min int-to-str println  // 54
+"Total points   : " print  scores stats.sum int-to-str println  // 463
+"Class average  : " print  scores stats.mean-fp print-fp println // 77.1666
+
+60 -> pass-mark:
+"Passing (>=" print  pass-mark int-to-str print ") : " print
+scores pass-mark stats.count-if int-to-str println               // 5
+
+"Failing        : " print
+scores pass-mark stats.count-if
+NUM-SCORES swap -
+int-to-str println                                               // 1
+
+"" println
+separator
+
+// Bonus: build a string from raw hex char codes
+// 0x4f 0x4b = "OK"  —  the machine reports all is well
+"System check: " print
+0x4F emit   // 'O'
+0x4B emit   // 'K'
+"" println                                                       // System check: OK

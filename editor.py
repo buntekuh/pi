@@ -1,5 +1,5 @@
 """
-M56 in-window text editor.
+T46 in-window text editor.
 
 Runs inside the T46 pygame window. The OS creates an Editor, calls
 run(content), and gets back the edited content (or None if discarded).

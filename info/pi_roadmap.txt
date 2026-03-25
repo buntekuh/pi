@@ -1,0 +1,34 @@
+Step 0
+write some example code
+
+Step 1 — Lexer
+Tokenise source into numbers, strings, identifiers, and punctuation. Nothing executes yet, but you can print the token stream and verify it handles // comments, hex literals, strings with escapes.
+
+Step 2 — Stack + arithmetic
+Interpret a flat token stream. Push literals, execute built-in words (+ - * / mod dup drop swap over). No definitions yet. 2 3 + . prints 5. The machine breathes.
+
+Step 3 — : ; macros and the dictionary
+Word definitions. : double 2 * ; then 3 double . prints 6. This is the Forth heart — once the dictionary works, everything else is just adding words.
+
+Step 4 — Control flow
+if/elsif/else/end and while/end. Branch compilation. Now you can write real logic.
+
+Step 5 — function and named locals
+function name ( sig ): ... end and -> a b:. Locals compile to stack shuffles. Type signatures are parsed but ignored for now.
+
+Step 6 — Variables, constants, memory
+variable, constant, @, !. State. Programs can remember things.
+
+Step 7 — Strings and I/O
+First-class strings, concat, length, print, println. Now you can write programs that talk.
+
+Step 8 — Lists and quotations
+[ 1 2 3 ] literals, { dup * } quotations, each map filter fold. The language becomes expressive.
+
+Step 9 — Namespaces
+namespace name: ... end, dot access, use. Needed before writing the Grue runtime.
+
+Step 10 — Error handling
+error and panic. Wire up runtime errors (division by zero, stack underflow).
+
+Each step is a commit. Each step you can open the shell, type run hello.pi, and something works.
