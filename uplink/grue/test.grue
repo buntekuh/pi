@@ -1,0 +1,62 @@
+-- test.grue
+-- Exercises: disambiguation, NPCs, inventory, dynamic events,
+--            kind behaviour, cardinal movement, player description,
+--            six sentence types: go, take, drop, examine, talk, inventory
+
+kind being  tree fae crow woman man
+kind mood   lost curious bold
+
+player "Newcomer"
+  being tree
+  mood  lost
+  "A young tree, recently uprooted. Your travelling cloak is still dusty from the journey."
+
+room "Market Square"
+  "A busy fae market. Colourful shawls hang from every stall. The fountain plaza lies to the east."
+  north: "Side Street"
+  east:  "Fountain Plaza"
+  object "red Apple"
+  object "green Apple"
+
+  shawl "Red Shawl"   "Vivid crimson, edged with gold thread."
+  shawl "Blue Shawl"  "Deep indigo, shot through with silver."
+  shawl "Green Shawl" "Forest green, soft as moss."
+
+  woman "Merchant" "A sharp-eyed fae woman, watching her wares with practiced suspicion."
+  crow  "Herbert"  "A large crow perched on a stall post, eyeing the shawls with professional interest."
+
+  on turn:
+    say "The crowd shifts."
+
+  on turn 2:
+    crow "Norbert" "Struts haughtily among the stalls, a distasteful look in his eyes."
+
+  on talk to "Merchant":
+    say "She eyes you up and down."
+    say "'Newcomer, are you. Looking for something, or just perusing?'"
+
+  on talk to "Herbert":
+    say "Herbert fixes you with one bright eye."
+    say "'Caw,' he says, which explains everything."
+
+  on "Herbert" sees inventory contains shawl:
+    say "Herbert eyes your shawl with undisguised interest."
+
+
+room "Side Street"
+  "A quieter lane running north of the market. Someone lingers in a doorway."
+  south: "Market Square"
+
+  man "Stranger" "A tall figure, collar turned up against nothing in particular."
+
+  on talk to "Stranger":
+    say "He glances sideways."
+    say "'Just passing through,' he says. So are you."
+
+
+room "Fountain Plaza"
+  "A small plaza. A stone fountain mutters to itself. Crows strut about."
+  west: "Market Square"
+
+  on turn 1:
+    say "Quieter here. The market noise fades to a murmur."

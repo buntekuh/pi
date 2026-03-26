@@ -4,7 +4,7 @@ T46 Terminal
 A dumb graphical terminal. Renders display commands from the M56.
 Captures keyboard input and pushes it to the M56's OS read handler.
 
-Display: 256x192 pixels, 256-colour Doom palette (scaled 3x)
+Display: 640x368 pixels, 256-colour Doom palette
 Text:    80x25 characters
 """
 
@@ -20,20 +20,21 @@ CHAR_H = 16    # font cell height — 8x16 looks like a real terminal
 COLS   = 80
 ROWS   = 25
 
-GFX_W  = 256
-GFX_H  = 192
-GFX_SCALE = 3
-
-TXT_W  = COLS * CHAR_W   # 640
+TXT_W  = COLS * CHAR_W   # 720
 TXT_H  = ROWS * CHAR_H   # 400
 
-# macOS rounds window corners (~8 px radius).  A small bottom margin keeps
-# the last text row clear of the curve.
+# macOS rounds window corners (~8 px radius).  Margins keep the text clear
+# of the curve on the right edge and the bottom row.
+_RIGHT_PAD  = 8
 _BOTTOM_PAD = 8
 
-# Window: text mode drives the size; graphics mode scales up to fit.
-WIN_W  = TXT_W                  # 640
-WIN_H  = TXT_H + _BOTTOM_PAD   # 408
+# Window: text mode drives the size.
+WIN_W  = TXT_W + _RIGHT_PAD    # 728
+WIN_H  = TXT_H + _BOTTOM_PAD  # 408
+
+# Graphics framebuffer: 640x368 — full width, height minus the 2-row status bar.
+GFX_W  = WIN_W          # 640
+GFX_H  = TXT_H - 32     # 368  (400 - 2 rows × 16px)
 
 
 class T46:
@@ -42,7 +43,7 @@ class T46:
 
     Modes:
         'text'     — 80x25 character display
-        'graphics' — 256x192 pixel display
+        'graphics' — 640x368 pixel display
 
     The M56 sends commands via receive(). Keyboard events are pushed
     to m56.input() on each poll() call.
@@ -105,6 +106,8 @@ class T46:
         # Raw key input: used by the editor (set_raw=True bypasses line buffer)
         self._key_queue  = queue.Queue()
         self._raw_mode   = False
+
+        self._tab_callback = None
 
         self._clear_text()
 
@@ -172,8 +175,15 @@ class T46:
         return 0
 
     def read_line(self):
-        """Block until the user presses Enter. Returns the line without newline."""
-        return self._line_queue.get()
+        """Block until the user presses Enter. Returns the line without newline.
+        Raises KeyboardInterrupt if Ctrl-Q was pressed."""
+        line = self._line_queue.get()
+        if line is None:
+            raise KeyboardInterrupt
+        return line
+
+    def set_tab_callback(self, fn):
+        self._tab_callback = fn
 
     def set_raw(self, raw):
         """Switch between line-buffered (shell) and raw (editor) input modes."""
@@ -219,6 +229,15 @@ class T46:
                             self._line_buffer.pop()
                             self._print("\b \b")
                             dirty = True
+                    elif ch == "\t":
+                        if self._tab_callback:
+                            current   = "".join(self._line_buffer)
+                            completed = self._tab_callback(current)
+                            if completed is not None and completed != current:
+                                self._print("\b \b" * len(self._line_buffer))
+                                self._line_buffer = list(completed)
+                                self._print(completed)
+                                dirty = True
                     elif ch == "\n":
                         self._print("\n")
                         line = "".join(self._line_buffer)
@@ -229,6 +248,10 @@ class T46:
                         for c in line:
                             self._char_queue.put(c)
                         self._char_queue.put("\n")
+                        dirty = True
+                    elif ch == "\x11":   # Ctrl-Q — interrupt current program
+                        self._line_buffer.clear()
+                        self._line_queue.put(None)
                         dirty = True
                     else:
                         self._line_buffer.append(ch)
@@ -253,6 +276,24 @@ class T46:
         if t == "goto":
             self._cur_row = max(0, min(cmd["row"], ROWS - 1))
             self._cur_col = max(0, min(cmd["col"], COLS - 1))
+            return
+        if t == "status":
+            # Draw the two-row status bar at rows 23-24 without disturbing the
+            # cursor.  This runs in the main thread where _cur_row/_cur_col are
+            # the authoritative values — no cross-thread tracking required.
+            saved_row, saved_col = self._cur_row, self._cur_col
+            room      = cmd.get('room', '')
+            exits     = cmd.get('exits', [])
+            exits_str = '  '.join(exits) if exits else 'none'
+            right     = f'exits: {exits_str}'
+            left      = f'  {room}'
+            gap       = max(1, 79 - len(left) - len(right))
+            line      = (left + ' ' * gap + right)[:79]
+            self._cur_row, self._cur_col = 23, 0
+            self._print('\u2500' * 79)
+            self._cur_row, self._cur_col = 24, 0
+            self._print(line)
+            self._cur_row, self._cur_col = saved_row, saved_col
             return
         if t == "scroll_region":
             # Set the bottom of the scroll region (0-based row index).
@@ -299,18 +340,48 @@ class T46:
         self.txt_fb.fill(self._bg)
 
     def _print(self, text):
-        for ch in text:
+        i = 0
+        n = len(text)
+        while i < n:
+            ch = text[i]
             if ch == "\n":
                 self._cur_col = 0
                 self._cur_row += 1
                 if self._cur_row > self._scroll_bottom:
                     self._scroll()
+                i += 1
             elif ch == "\r":
                 self._cur_col = 0
+                i += 1
             elif ch == "\b":
                 if self._cur_col > 0:
                     self._cur_col -= 1
                     self._put_char(self._cur_row, self._cur_col, " ", self._fg, self._bg)
+                i += 1
+            elif ch == " ":
+                # Look ahead to the next word; wrap before it if it won't fit.
+                j = i + 1
+                while j < n and text[j] == " ":
+                    j += 1
+                k = j
+                while k < n and text[k] not in (" ", "\n", "\r", "\b"):
+                    k += 1
+                if k > j and self._cur_col > 0 and self._cur_col + (k - j) >= COLS:
+                    # Next word won't fit — wrap here, skip the space(s)
+                    self._cur_col = 0
+                    self._cur_row += 1
+                    if self._cur_row > self._scroll_bottom:
+                        self._scroll()
+                    i = j
+                else:
+                    self._put_char(self._cur_row, self._cur_col, " ", self._fg, self._bg)
+                    self._cur_col += 1
+                    if self._cur_col >= COLS:
+                        self._cur_col = 0
+                        self._cur_row += 1
+                        if self._cur_row > self._scroll_bottom:
+                            self._scroll()
+                    i += 1
             else:
                 self._put_char(self._cur_row, self._cur_col, ch, self._fg, self._bg)
                 self._cur_col += 1
@@ -319,6 +390,7 @@ class T46:
                     self._cur_row += 1
                     if self._cur_row > self._scroll_bottom:
                         self._scroll()
+                i += 1
 
     def _put_char(self, row, col, ch, fg, bg):
         x, y = col * CHAR_W, row * CHAR_H
@@ -354,24 +426,23 @@ class T46:
             pygame.draw.rect(self.txt_fb, self._bg,
                              (0, (ROWS - 1) * CHAR_H, TXT_W, CHAR_H))
         else:
-            # Partial scroll: rows 0..bottom only.  pygame's scroll() cannot
-            # be used on a subsurface, so copy the region via blit + temp.
-            # Copy rows 1..bottom (shifted up) into a temp surface, then
-            # blit it back to rows 0..bottom-1, and clear row bottom.
-            h = bottom * CHAR_H   # height of rows 1..bottom
-            temp = self.txt_fb.subsurface(
-                pygame.Rect(0, CHAR_H, TXT_W, h)).copy()
+            # Partial scroll: rows 0..bottom only.  pygame's scroll() shifts
+            # the entire surface so we can't use it here.  Instead allocate
+            # a fresh independent surface, blit rows 1..bottom into it, blit
+            # it back to rows 0..bottom-1, and clear the new blank row.
+            h    = bottom * CHAR_H   # pixel height of rows 1..bottom
+            temp = pygame.Surface((TXT_W, h))
+            temp.blit(self.txt_fb, (0, 0),
+                      pygame.Rect(0, CHAR_H, TXT_W, h))
             self.txt_fb.blit(temp, (0, 0))
             pygame.draw.rect(self.txt_fb, self._bg,
                              (0, bottom * CHAR_H, TXT_W, CHAR_H))
 
     def _blit(self):
         if self.mode == self.MODE_TEXT:
-            # txt_fb is already WIN_W x WIN_H — blit directly, no scaling
             self.screen.blit(self.txt_fb, (0, 0))
         else:
-            scaled = pygame.transform.scale(self.gfx_fb, (WIN_W, WIN_H))
-            self.screen.blit(scaled, (0, 0))
+            self.screen.blit(self.gfx_fb, (0, 0))
 
     @staticmethod
     def _key_to_char(event):

@@ -19,12 +19,86 @@ from cartridge import Cartridge, NotFound, AlreadyExists, NotADirectory, \
                       NotAFile, NoSpace, FSError, TYPE_FILE, TYPE_DIR
 
 
-# Default host path for the uplink directory (alongside this file).
+# Default host paths (alongside this file).
 _DEFAULT_UPLINK = pathlib.Path(__file__).parent / 'uplink'
+_DEFAULT_HOME   = pathlib.Path(__file__).parent / 'home'
 
 
 class PermissionError(FSError):
     pass
+
+
+class HostCart:
+    """
+    Read-write cartridge backed by a real directory on the host filesystem.
+
+    Used for /home — files written inside the terminal persist between
+    sessions and are directly editable with the user's real editor.
+    """
+
+    def __init__(self, host_path):
+        self._root = pathlib.Path(host_path)
+        self._root.mkdir(parents=True, exist_ok=True)
+
+    def _host(self, path: str) -> pathlib.Path:
+        rel = path.strip('/')
+        return self._root / rel if rel else self._root
+
+    def ls(self, path='/'):
+        host = self._host(path)
+        if not host.is_dir():
+            raise NotFound(path)
+        entries = []
+        for p in sorted(host.iterdir()):
+            if p.name.startswith('.'):
+                continue
+            if p.is_dir():
+                entries.append((p.name, TYPE_DIR, 0))
+            else:
+                entries.append((p.name, TYPE_FILE, p.stat().st_size))
+        return entries
+
+    def read_file(self, path) -> bytes:
+        host = self._host(path)
+        if not host.is_file():
+            raise NotFound(path)
+        return host.read_bytes()
+
+    def write_file(self, path, data):
+        host = self._host(path)
+        host.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(data, str):
+            data = data.encode()
+        host.write_bytes(data)
+
+    def mkdir(self, path):
+        host = self._host(path)
+        if host.exists():
+            raise AlreadyExists(path)
+        host.mkdir(parents=True, exist_ok=True)
+
+    def delete(self, path):
+        host = self._host(path)
+        if not host.exists():
+            raise NotFound(path)
+        if host.is_dir():
+            try:
+                host.rmdir()
+            except OSError:
+                raise FSError(f'{path}: directory not empty')
+        else:
+            host.unlink()
+
+    def exists(self, path) -> bool:
+        return self._host(path).exists()
+
+    def stat(self, path) -> dict:
+        host = self._host(path)
+        if not host.exists():
+            raise NotFound(path)
+        if host.is_dir():
+            return {'type': TYPE_DIR, 'size': 0}
+        return {'type': TYPE_FILE, 'size': host.stat().st_size}
 
 
 class UplinkCart:
@@ -124,21 +198,24 @@ class FS56:
         vfs.umount('game')
     """
 
-    def __init__(self, boot_cartridge=None, uplink_path=_DEFAULT_UPLINK):
+    def __init__(self, boot_cartridge=None, uplink_path=_DEFAULT_UPLINK,
+                 home_path=_DEFAULT_HOME):
         self._boot = boot_cartridge or Cartridge()
         self._boot.format()
         self._mounts  = {}    # name → Cartridge  (mounted under /volumes)
         self.cwd      = '/'
-        # Mount the host uplink directory if it exists.
         uplink_path = pathlib.Path(uplink_path)
         self._uplink = UplinkCart(uplink_path) if uplink_path.is_dir() else None
+        self._home   = HostCart(home_path)
         self._setup_boot()
 
     def _setup_boot(self):
         """Create the standard directory tree on the boot cartridge."""
+        # /home is a stub entry only — actual storage is in HostCart.
+        # /uplink is a stub entry only — actual storage is in UplinkCart.
         dirs = ['/bin', '/volumes', '/home', '/tmp']
         if self._uplink:
-            dirs.append('/uplink')   # placeholder so root ls shows it
+            dirs.append('/uplink')
         for d in dirs:
             self._boot.mkdir(d)
         for name, stub in _BIN.items():
@@ -187,6 +264,9 @@ class FS56:
         if self._uplink and parts[0] == 'uplink':
             local_path = '/' + '/'.join(parts[1:]) if len(parts) > 1 else '/'
             return self._uplink, local_path
+        if parts[0] == 'home':
+            local_path = '/' + '/'.join(parts[1:]) if len(parts) > 1 else '/'
+            return self._home, local_path
         if len(parts) >= 2 and parts[0] == 'volumes' and parts[1] in self._mounts:
             cart       = self._mounts[parts[1]]
             local_path = '/' + '/'.join(parts[2:]) if len(parts) > 2 else '/'

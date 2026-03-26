@@ -519,6 +519,26 @@ class OS:
         except Exception as e:
             self.println(f"mkdir: {e}")
 
+    def sys_cp(self, src, dst):
+        try:
+            data = self.fs.read_file(src)
+        except Exception as e:
+            self.println(f"cp: {e}")
+            return
+        # If dst is a directory, copy into it using src's filename.
+        try:
+            if self.fs.stat(dst).get('type') == 2:   # TYPE_DIR
+                from pathlib import Path
+                dst = dst.rstrip('/') + '/' + Path(src).name
+        except Exception:
+            pass
+        try:
+            self.fs.write_file(dst, data)
+        except Exception as e:
+            self.println(f"cp: {e}")
+            return
+        self.println(f"{src} → {dst}")
+
     def sys_edit(self, path):
         from editor import Editor
         try:
@@ -558,6 +578,102 @@ class OS:
             label_strs = [f"{n}=0x{a:05X}"
                           for n, a in sorted(labels.items(), key=lambda x: x[1])]
             self.println("labels: " + "  ".join(label_strs))
+
+    def sys_grue(self, src_path, out_path=None):
+        """Compile a .grue file to .pi."""
+        from grue import parse, emit, GrueError
+        from pathlib import Path
+        try:
+            data = self.fs.read_file(src_path)
+        except Exception as e:
+            self.println(f"grue: {e}")
+            return
+        if out_path is None:
+            stem = Path(src_path).stem
+            out_path = f'/tmp/{stem}.pi'
+        try:
+            ast = parse(data.decode(errors='replace'))
+            pi  = emit(ast)
+        except GrueError as e:
+            self.println(f"grue: {e}")
+            return
+        try:
+            self.fs.write_file(out_path, pi.encode())
+        except Exception as e:
+            self.println(f"grue: write failed: {e}")
+            return
+        self.println(f"compiled {src_path}  →  {out_path}  ({len(ast['rooms'])} rooms)")
+
+    def sys_grui(self, src_path, script_path=None):
+        """Interpret a .grue file directly.  If script_path is given, commands
+        are read from that file one per line with a short pause between each."""
+        import time
+        from grui import load_and_run, GrueError
+
+        try:
+            data = self.fs.read_file(src_path)
+        except Exception as e:
+            self.println(f"grui: {e}")
+            return
+
+        # --- input function --------------------------------------------------
+        if script_path:
+            try:
+                raw = self.fs.read_file(script_path).decode(errors='replace')
+            except Exception as e:
+                self.println(f"grui: {e}")
+                return
+            commands = [l.strip() for l in raw.splitlines()
+                        if l.strip() and not l.strip().startswith('//')]
+            it = iter(commands)
+            def scripted_input(_):
+                time.sleep(0.6)
+                cmd = next(it, None)
+                if cmd is None:
+                    raise EOFError
+                self.print_text(cmd + '\n')
+                return cmd
+            input_fn = scripted_input
+        else:
+            input_fn = lambda _: self.read_line()
+
+        # --- status bar (T46 only) -------------------------------------------
+        term       = getattr(self, 'terminal', None)
+        status_fn  = None
+        SCROLL_ROW = 22   # rows 0-22 scroll; 23-24 are the fixed status bar
+
+        if term is not None:
+            def draw_status(room_name, exits):
+                # T46 handles cursor save/restore in the main thread where
+                # _cur_row is authoritative — no cross-thread tracking needed.
+                term.receive({'type': 'status',
+                              'room': room_name, 'exits': exits})
+
+            # Clear screen and set scroll region so rows 23-24 are protected.
+            term.receive({'type': 'cls'})
+            term.receive({'type': 'goto', 'row': 0, 'col': 0})
+            term.receive({'type': 'scroll_region', 'bottom': SCROLL_ROW})
+
+            status_fn = draw_status
+
+        output_fn = self.print_text
+
+        # --- run -------------------------------------------------------------
+        try:
+            load_and_run(
+                data.decode(errors='replace'),
+                output=output_fn,
+                input_fn=input_fn,
+                status_fn=status_fn,
+            )
+        except GrueError as e:
+            self.println(f"grui: {e}")
+        finally:
+            if term is not None:
+                # Restore full-screen scroll and clear the status bar rows.
+                term.receive({'type': 'scroll_region', 'bottom': 24})
+                term.receive({'type': 'cls'})
+                term.receive({'type': 'goto', 'row': 0, 'col': 0})
 
     def sys_debug(self, path):
         """Load a .asm or .bin file from the virtual FS and start the debugger."""
@@ -601,7 +717,8 @@ class OS:
         except Exception as e:
             self.println(f"run: {e}")
             return
-        interp = Interpreter(output=self.print_text)
+        interp = Interpreter(output=self.print_text, input_fn=self.read_line,
+                             term_fn=self.terminal.receive)
         try:
             interp.run(source)
         except (LexError, InterpError) as e:
@@ -615,16 +732,30 @@ class OS:
         repl.loop()
 
 
+def _common_prefix(words):
+    if not words:
+        return ''
+    prefix = words[0]
+    for w in words[1:]:
+        while not w.startswith(prefix):
+            prefix = prefix[:-1]
+            if not prefix:
+                return ''
+    return prefix
+
+
 class Shell:
     """
     Minimal line-oriented command interpreter running on the OS layer.
     This stands in for the Pi shell program that will eventually live in ROM.
     """
 
-    COMMANDS = {"ls", "cd", "mkdir", "cat", "edit", "run", "asm", "debug", "pi", "help"}
+    COMMANDS = {"ls", "cd", "mkdir", "cat", "cp", "edit", "run", "bat", "asm", "debug", "grue", "pi", "help"}
 
     def __init__(self, os_):
         self.os = os_
+        if hasattr(os_.terminal, 'set_tab_callback'):
+            os_.terminal.set_tab_callback(self.complete)
 
     def prompt(self):
         self.os.print_text(f"{self.os.fs.cwd} > ")
@@ -654,6 +785,15 @@ class Shell:
                 self.os.sys_mkdir(arg)
             else:
                 self.os.println("usage: mkdir <dir>")
+        elif cmd == "cp":
+            if arg:
+                parts2 = arg.split(None, 1)
+                if len(parts2) == 2:
+                    self.os.sys_cp(parts2[0], parts2[1])
+                else:
+                    self.os.println("usage: cp <src> <dst>")
+            else:
+                self.os.println("usage: cp <src> <dst>")
         elif cmd == "edit":
             if arg:
                 self.os.sys_edit(arg)
@@ -661,15 +801,31 @@ class Shell:
                 self.os.println("usage: edit <file>")
         elif cmd == "run":
             if arg:
-                self.os.sys_run(arg)
+                if arg.endswith('.bat'):
+                    self._run_bat(arg)
+                elif arg.split(None, 1)[0].endswith('.grue'):
+                    self.os.sys_grui(arg.split(None, 1)[0])
+                else:
+                    self.os.sys_run(arg)
             else:
-                self.os.println("usage: run <file.pi>")
+                self.os.println("usage: run <file.pi|file.bat|file.grue>")
+        elif cmd == "bat":
+            if arg:
+                self._run_bat(arg)
+            else:
+                self.os.println("usage: bat <file.bat>")
         elif cmd == "asm":
             if arg:
                 parts2 = arg.split(None, 1)
                 self.os.sys_asm(parts2[0], parts2[1] if len(parts2) > 1 else None)
             else:
                 self.os.println("usage: asm <file.asm> [output.bin]")
+        elif cmd == "grue":
+            if arg:
+                parts2 = arg.split(None, 1)
+                self.os.sys_grui(parts2[0], parts2[1] if len(parts2) > 1 else None)
+            else:
+                self.os.println("usage: grue <file.grue> [script.play]")
         elif cmd == "debug":
             if arg:
                 self.os.sys_debug(arg)
@@ -683,15 +839,85 @@ class Shell:
             self.os.println("  ls [path]       list directory contents")
             self.os.println("  cd <path>       change directory")
             self.os.println("  mkdir <dir>     create a new directory")
+            self.os.println("  cp <src> <dst>  copy a file")
             self.os.println("  cat <file>      print a file to the terminal")
             self.os.println("  edit <file>     open file in editor")
             self.os.println("  run <file.pi>              run a Pi program")
+            self.os.println("  bat <file.bat>             run a batch script")
             self.os.println("  asm <file.asm> [out.bin]   assemble to binary")
             self.os.println("  debug <file.asm|.bin>      step debugger")
+            self.os.println("  grue <file.grue>           run a Grue interactive fiction file")
             self.os.println("  pi                         interactive Pi REPL")
             self.os.println("  help                       this message")
+        elif cmd.endswith('.bat'):
+            self._run_bat(cmd)
         else:
             self.os.println(f"unknown command: {cmd}")
+
+    def _run_bat(self, path):
+        try:
+            data = self.os.fs.read_file(path)
+        except Exception as e:
+            self.os.println(f"bat: {e}")
+            return
+        for line in data.decode(errors='replace').splitlines():
+            line = line.strip()
+            if not line or line.startswith('//'):
+                continue
+            self.run_line(line)
+
+    def complete(self, line):
+        """Tab-complete line. Returns the completed line string, or None."""
+        parts   = line.split()
+        trailing = line.endswith(' ')
+
+        # --- completing the command word ---
+        if not parts or (len(parts) == 1 and not trailing):
+            prefix  = parts[0] if parts else ''
+            matches = sorted(c for c in self.COMMANDS if c.startswith(prefix))
+            if not matches:
+                return None
+            common = _common_prefix(matches)
+            return common + (' ' if len(matches) == 1 else '')
+
+        # --- completing a path argument (always the last token) ---
+        path_prefix = '' if trailing else parts[-1]
+
+        if '/' in path_prefix:
+            slash     = path_prefix.rfind('/')
+            dir_part  = path_prefix[:slash] or '/'
+            name_part = path_prefix[slash + 1:]
+        else:
+            dir_part  = None   # list cwd
+            name_part = path_prefix
+
+        try:
+            entries = self.os.fs.ls(dir_part)
+        except Exception:
+            return None
+
+        matches = [(n, t) for n, t, _ in entries if n.startswith(name_part)]
+        if not matches:
+            return None
+
+        suffixed = [n + ('/' if t == 2 else '') for n, t in matches]
+        common   = _common_prefix(suffixed)
+
+        if dir_part is not None:
+            sep   = '' if dir_part.endswith('/') else '/'
+            token = dir_part + sep + common
+        else:
+            token = common
+
+        if trailing:
+            new_line = line + token
+        else:
+            before   = line[:len(line) - len(path_prefix)]
+            new_line = before + token
+
+        if len(matches) == 1 and not new_line.endswith('/'):
+            new_line += ' '
+        return new_line
 
     def _dots(self, n, delay=0.08):
         """Print n dots with a short pause between each."""

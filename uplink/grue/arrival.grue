@@ -1,0 +1,92 @@
+-- The City of Lights
+-- Part 1: Arrival
+
+kind being: tree fae crow stork woman
+kind mood:  lost afraid rooted hopeful
+
+player has being: tree
+player has mood:  lost
+player has treeness: 0
+
+
+room station "Train Station"
+  "It is a place of rancour. Steaming locomotives and the confusion of
+   bustling crowds. Metallic whistles pierce the night.
+   The lights of the city beckon to the north."
+  north: open-space
+
+  object locomotives "Iron giants, hissing and steaming, indifferent to the chaos around them." scenery
+  object crowds "A press of bodies, all noise and urgency, pushing in every direction." scenery
+  object whistles "Sharp metallic screams cutting through the dark." scenery
+
+  on arrive:
+    say "Uprooted from my ancestral home, I finally arrive in the City of Lights."
+    say "I have forgotten the dances of my homeland."
+    say "I have forgotten who I am."
+    say ""
+    say "All I want, is to take root."
+
+  on turn:
+    say "Shuffling feet push from behind. A surge of mighty trees trundling along sweeps me away."
+    go open-space
+
+  instead of go:
+    say "You are too listless to move."
+
+
+room open-space "Open Space in Front of Station"
+  "An open space for trees to root. For arrivals to rest.
+   Yet also there is laughter of fae folk and birds."
+  south: station
+  east: market
+
+  object birds "Crows strutting among the leaves, utterly unconcerned." scenery
+  object trees "New arrivals and old netizens of the city in equal measure." scenery
+
+  on turn:
+    say "A jumble of trees, trembling, a forlorn rustle, lost."
+    go market
+
+  instead of go:
+    say "You are too listless to move."
+
+
+room market "The Market"
+  "A fae market. Fruit, vegetables, shawls and toys. A bustle of people,
+   delighted exclamation at the sight of a cute sash at outrageous prices."
+  west: open-space
+  south: forest
+
+  object sash "A vivid slash of colour against the grey of the cobblestones." scenery
+  object fruit "Stalls piled high with produce, vivid and fragrant, just out of reach." scenery
+  object fae "Quick-eyed folk, light on their feet, scattering in all directions." scenery
+
+  on turn:
+    say "Startled frightened fae call out as a stampede of scuffling trees bears down."
+    say "A frenzy of flurry as merchants hustle to push their goods out of the way."
+    go forest
+
+  instead of go:
+    say "You are too listless to move."
+
+
+room forest "Sprawling Forest"
+  "A sprawling jumble of trees. Young saplings and old gnarled oaks
+   stretch away into the distance."
+  north: market
+
+  object oaks "Ancient and gnarled, their roots so deep they seem to never have moved." scenery
+  object saplings "Young trees, thin and trembling, finding their way just as you are." scenery
+  object soil "Dark and cool and quiet. It calls to something deep inside you." scenery
+
+  on arrive:
+    say "Trees are spreading out, taking root."
+    say "The stampede dissipates into a sudden calm serenity."
+    say ""
+    say "My roots tentatively sprout deeper into the earth."
+    say "A sigh of relief."
+    say "A home? I cannot say. Yet at least a place to rest."
+    set player mood: rooted
+
+  instead of go:
+    say "You have taken root. The soil holds you fast."

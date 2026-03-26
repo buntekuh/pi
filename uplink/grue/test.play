@@ -1,0 +1,34 @@
+// test.play — scripted walkthrough of test.grue
+
+look
+talk to norbert
+x merchant
+x herbert
+x red shawl
+x blue shawl
+x green shawl
+take red
+take red apple
+take green apple
+i
+drop red apple
+talk to merchant
+talk to herbert
+wait
+wait
+x norbert
+take green shawl
+i
+e
+take red
+take red apple
+look
+wait
+w
+look
+n
+talk to stranger
+s
+drop green shawl
+look
+quit

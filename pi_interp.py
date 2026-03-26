@@ -173,9 +173,11 @@ class Interpreter:
                  Words are stored as  _namespace + name  in _dict.
     """
 
-    def __init__(self, output=None):
+    def __init__(self, output=None, input_fn=None, term_fn=None):
         self.stack:      list            = []
         self._out       = output or (lambda s: sys.stdout.write(s))
+        self._in        = input_fn or (lambda: sys.stdin.readline().rstrip('\n'))
+        self._term      = term_fn  or (lambda cmd: None)
         self._dict:      dict            = {}
         self._frames:    list[dict]      = [{}]      # [0] = global frame
         self._memory:    dict[int, int]  = {}
@@ -1079,6 +1081,23 @@ BUILTINS: dict[str, object] = {
     # ---- Stack inspection --------------------------------------------
     # depth: push the current stack depth BEFORE the push (i.e. depth before 'depth' ran).
     'depth': lambda self, tok: self.stack.append(len(self.stack)),
+
+    # ---- I/O ---------------------------------------------------------
+    # readline: read one line of input (blocking).  Returns string without newline.
+    'readline': lambda self, tok: self.stack.append(self._in()),
+    # words: split a string on whitespace into a list of strings.
+    'words':    lambda self, tok: self.stack.append(self._pop(tok).split()),
+
+    # ---- T46 terminal control ----------------------------------------
+    # t46-goto  ( row col -- )  — position cursor at row, col (0-based).
+    't46-goto':   lambda self, tok: self._term(
+                      {"type": "goto",
+                       "col": self._pop(tok), "row": self._pop(tok)}),
+    # t46-scroll  ( bottom -- )  — set scroll-region bottom row (0-based).
+    't46-scroll': lambda self, tok: self._term(
+                      {"type": "scroll_region", "bottom": self._pop(tok)}),
+    # t46-cls  ( -- )  — clear the screen.
+    't46-cls':    lambda self, tok: self._term({"type": "cls"}),
 }
 
 

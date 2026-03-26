@@ -1,0 +1,351 @@
+"Th City of Lights" by Bernd Eickhoff
+
+[This game is about changing one's own destiny. It is about plunging the player into a new reference field of powerful feelings, and finding the confidence to choose to be a wo/man. 
+
+	We start with developing a few mechanisms:
+		Rooting
+		Power levels
+		Dancing
+		Prancing
+		Engaging
+		Responsibility
+		Love
+		Relationship
+		Freedom
+]
+
+[
+We track general progress using the following metrics:
+	
+Recognition of Who I am
+Recognition of what the world around me is
+Recognition of sentiment towards my brothers
+Recognition of sentiment towards my self
+Disconnectedness from my own history
+Disconnectedness of the history of the city
+Disconnectedness from the real political structure of the city and who my allies really are.
+
+The playable creature strands will be:
+	
+Trees are beings in total denial of who they are. They have very little choice and little opportunity for growth. At the beginning of the game, the player is a tree, watching the city around it, experiencing it as victims but also biding his time until the time, he is willing to invest in one of the other strands of being.
+	
+Wolfs are nefarious creatures. Wolfs feed on the weak including and especially the trees. Wolf are natural predators, they control illegal goods, enjoy the good life but ultimately will pay the price of being eliminated by rivals.
+
+Fae are the common people of the city of lights. They are those, who have carved a niche for themselves, work as traders or artisans or factory workers and keep the city running without being able to achieve greatness.
+
+Crows are those who live a life of denial. A life of seeming freedom from responsibility. However they are unable to cope with tragic events, of which believe me there will be many in our city life. They are the hippies who can only survive if the rest of the city gives them the freedom to be who they are.
+
+The stork, is a person who takes responsibilty for themselves and others, Storks have the freedom to leave the city, to find the truth about their past and come to terms with who they are.
+
+Finally there is wo/man. Wo/man is a strand that begins where the stork leaves off. The being of wo/man is accepted through the recognition of inner wisdom and the acceptance of the own path.
+
+There are many and varied dances, too numerous to mention and their merit is as individual as their respective name and nature.
+
+Beginne mit den Szenen die Bäumen zur Verfügung stehen.
+
+
+There will be dozens of npcs, we will bring them up, whenever we come to a particular scene.
+
+ich bin der Christus
+
+erkenne, dass du bereit bist bedingungslose Führung anzunehmen
+we are not going to do a multiple choice, it needs to be entered text like everywhere else
+
+The necessary steps when being Tree -> becoming Fae involve realizing:
+	Ich bin meines Glückes Schmied: Tree remembers the fae market and ponders that it would be nice to ponder trinkets
+	Zusammen ist man weniger allein: Tree decides to find people from their own home out in the steppes
+	
+Recognize how to implement these two steps
+]
+
+
+Book 1 - Preparations
+
+Chapter 1 - Mechanics
+
+Being is a kind of value. The beings are Tree, Fae, Crow, Stork and Wo/man. 
+
+When play begins:
+	now Being is Tree.
+
+[
+General Mechnics go here
+
+]
+Chapter 2 - Extensions
+
+Section 1 - Text Effects
+
+Include Glulx Text Effects by Emily Short.
+
+To say regular:
+	(- glk_set_style( style_Normal ); -).
+To say feeling:
+	(- glk_set_style( style_User1 ); -).
+To say right:
+	(- glk_set_style( style_User2 ); -).
+
+Table of User Styles (continued)
+style name	justification	italic	indentation	first line indentation	font weight	color
+normal-style	left-justified	true	15	0	regular-weight	"#0"
+special-style-1	left-justified	true	15	0	light-weight	"#888888"
+special-style-2	right-justified	true	15	0	bold-weight	"#0"
+
+
+Spaces per tab is initially 4.
+
+To say (T - text) indented to level (N - number): [see WWI 11.1 What are phrases? and 11.3 Pattern matching]
+	let spaces needed be N times spaces per tab;
+	say "[line break]";
+	repeat with counter running from 1 to spaces needed:
+		say " ";
+	say "[T][line break]"; 
+	
+Section 2 - Introspection
+
+Part 1 - Subjects
+
+[A subject is a kind of thing. The current subject is a thing that varies. Blank is a subject. The printed name of blank is "whatever comes to mind".
+
+Suggestion relates subjects to each other. The verb to suggest (it suggests, they suggest, it is suggested) implies the suggestion relation.]
+
+Part 2 - Thinking
+
+Thinking about is an action applying to one topic. Understand "think about [text]" or "Think of [text]" or  "Think on [text]" or "consider [text]" or "ponder [text]" or "remember [text]" or "reflect on [text]" or "reflect about [text]" or "contemplate [text]" as thinking about.
+
+Check thinking about:
+	let subject be the topic understood;
+	say line break;
+	follow the marvellous reasoning rulebook for subject in lower case.
+
+Marvellous reasoning is a text based rulebook.
+
+Marvellous reasoning "strawberries": say "Crimson gems in summer's hand,[line break]Sweet as secrets, soft and grand."; the rule succeeds.
+[edmmzs]
+
+Marvellous reasoning "trees": follow the marvellous reasoning for "tree" instead.
+Marvellous reasoning "tree": 
+	say "From the treeless steppes, to the nameless forest,[line break]";
+	say "A spirit congelead in hardened timber.[line break]";
+	Say "Lost. Depressed. Lonely.";
+	The rule succeeds.
+	
+[vergib dir das als erstes]
+Marvellous reasoning "roots":
+	Say "Roots submerged —[line break]";
+	say "tightly held in coolness down below.[line break]";
+	say "Fear subsides,[line break]";
+	say "anger perishes.[line break]";
+	say "Relaxing inwards,[line break]";
+	say "yet fearful to let go.[line break]";
+	say "A dream -[line break]";
+	say "promising oblivion and abandon.";
+	The rule succeeds.
+
+[I am not myself
+I have become a hunger]
+Marvellous reasoning "hunger": 
+	follow the marvellous reasoning for "fear" instead.
+Marvellous reasoning "the fear": follow the marvellous reasoning for "fear" instead.
+Marvellous reasoning "fear": 
+	say "I am not myself —[line break]";
+	say "My darkness gnawing within.[line break]";
+	say "Feeding on my self.[line break]";
+	the rule succeeds.
+	 
+Marvellous reasoning "cold fury": follow the marvellous reasoning for "anger" instead.
+Marvellous reasoning "cold": follow the marvellous reasoning for "anger" instead.
+Marvellous reasoning "fury": follow the marvellous reasoning for "anger" instead.
+Marvellous reasoning "anger": 
+	say "I am lost in rage.[line break]";
+	say "Self respect withers,[line break]";
+	say "doubt mangles constructive thought.[line break]";
+	say "Self recrimination tears me apart.";
+	the rule succeeds.
+
+Marvellous reasoning "locomotives": say "locomotives"; the rule succeeds.
+[edmmzs]
+
+Marvellous reasoning "hatred": say "hatred"; the rule succeeds.
+[edmmzs]
+
+Marvellous reasoning "face": follow the marvellous reasoning for "gun" instead.
+Marvellous reasoning "gun": 
+	say "The moment Oz threatened my life,[line break]";
+	say "I fell apart.[line break]";
+	say "I knew I had to go.[line break]";
+	say "And then,[line break]";
+	say "this strange silence within me.[line break]";
+	say "I tried to name what I’d lose.[line break]";
+	say "But nothing came.[line break]";
+	say "That shocked me most.";
+	the rule succeeds.
+	
+
+Marvellous reasoning "Oz":
+	say "Oz is not a simple man,[line break]";
+	say "though he does live a life of simplicity.[line break]";
+	say "Many a tale is spun over his many deeds,[line break]";
+	say "Yet Oz is a deceiver, a liar and a crook.[line break]";
+	say "Few tales spin a yarn as dark as does him justice.";
+	the rule succeeds.
+ 
+Marvellous reasoning "tale": say "tale"; the rule succeeds.
+
+Marvellous reasoning "folk": follow the marvellous reasoning for "fae" instead.
+Marvellous reasoning "fae folk": follow the marvellous reasoning for "fae" instead.
+Marvellous reasoning "fae": say "fae"; the rule succeeds.
+
+Marvellous reasoning "market": say "market"; the rule succeeds.
+Marvellous reasoning "trinket": say "trinket"; the rule succeeds.
+Marvellous reasoning "sash": say "sash"; the rule succeeds.
+[edmmzs]
+
+Marvellous reasoning "forest": say "forest"; the rule succeeds.
+[edmmzs]
+
+Marvellous reasoning "station": say "station"; the rule succeeds.
+[edmmzs]
+
+Marvellous reasoning "arrival": say "arrival"; the rule succeeds.
+[edmmzs]
+
+Marvellous reasoning "city": follow the marvellous reasoning for "city of lights" instead.
+Marvellous reasoning "lights": follow the marvellous reasoning for "city of lights" instead.
+Marvellous reasoning "city of lights": say "city of lights"; the rule succeeds.
+[edmmzs]
+
+Marvellous reasoning "dances": follow the marvellous reasoning for "dance" instead.
+Marvellous reasoning "dancing": follow the marvellous reasoning for "dance" instead.
+Marvellous reasoning "dance": say "dance"; the rule succeeds.
+[edmmzs]
+
+Marvellous reasoning a text (called subject): say "You ponder all implications of [subject] on the world at large but come to no definite conclusion."
+	
+Part 3 - Introspection
+
+[you need to make a list of what you want to think about, how thinking resolves your inability to move right now, to understand what you cannot think about, what it bears thinking about and what you are able to think about with time, before you are able to move].
+[tree becomes a fey when it moves. When it, for whatever reason needs to root again, it becomes a tree.]
+
+[
+the past: no
+the city: yes, where does thinking of the city lead to:
+	1: solace, take root again, the scene repeats
+	2: understand what first needs to be understood
+	
+Trees -> fear
+Fear -> restarts Waking_up_for_the_first_time
+Locomotives -> arrival
+Hatred -> a Gun
+Gun -> fear
+Fey -> the city of lights
+Forest -> trees
+Station  -> arrival
+
+arrival -> city
+City -> hope
+Dance -> fear 
+
+What is the thought that brings the first step to self respect?
+Solace -> check
+Promise -> check
+Hope -> check
+Sawdust -> fear
+]
+
+Chapter 3 - Testing - not for release
+
+[ testing ]
+
+Book 2 - The Story
+
+Chapter 1 - Map
+
+Train station is a room. "It is a place of rancour. It is a place of chaos, steaming locomotives and the confusion of bustling crowds. Metallic whistles pierce the night.
+
+Recollections of the past, echoes of sorrow, memories of lingering hatred. The lights of the city beckon to the north.[paragraph break][trainstation-description]".
+
+to say trainstation-description:
+	if the Arrival is happening:
+		say "A city of sawdust[line break]";
+		say "A city of promises[line break]";
+		say "A city of hope[line break]";
+		say  "[right]A home in a city, a home yet to be made.[line break][line break]";
+		say "[feeling]I feel lost. I feel afraid. I float in a space of desperate fear."
+		[say "[regular]Is it vain to hope for solace?".]
+
+Open Space in front of Station is a room. "It is an open space for trees to root. For arrivals to rest. Yet also there is laughter of fey folk and birds."
+It is east of the Train station.
+
+Market is a room. "It is a fey market. fruit, vegetables, shawls and toys. A bustle of people, delighted exclamation at the sight of a cute sash or when haggling outrageous prices."
+It is south of the Open Space in front of Station.
+
+Sprawling Forest of Trees is a room. "It is a sprawling jumble of trees, young saplings and old gnarled oaks stretch away into the distance."
+It is south of the Market.
+
+Chapter 2 - Arrival
+
+Test Arrival with "z / z / z"
+
+When play begins:
+	say "Uprooted from my ancestral home, I finally arrive in the City of Lights.[line break]I have forgotten the dances of my homeland.[line break]I have forgotten who I am.[paragraph break]All I want, is to take root."
+
+Arrival is a Scene. 
+
+Arrival begins when the player is in the Train station for the first turn.
+Arrival ends when the player is in the Sprawling Forest three turns.
+
+every turn during the Arrival:
+	if player is in the Open Space in front of Station:
+		say "A jumble of trees, trembling, a forlorn rustle, lost.[line break]";
+	if player is in the Market:
+		say "Startled frightened fey call out as a stampede of scuffling trees bears down on the market. A frenzy of flurry as merchants hustle to push their goods out of the way.";
+	if player is in the Sprawling Forest of Trees:
+		say "Trees are spreading out, taking root.[line break]The stampede dissipates into a sudden calm serenity.[line break]";
+		say "My roots tentatively sprout deeper into the earth.";
+		say "A sigh of relief. [line break]";
+		say "A home? I cannot say. Yet at least a place to rest."
+
+automatic going is initially false.
+
+check going during the Arrival:
+	if automatic going is false:
+		say "I feel too listless, tired and lost to do anything." instead.
+
+Every turn during the Arrival:	
+	if the location of the player is not the Sprawling Forest of Trees:
+		if Arrival is happening:	
+			say "Shuffling feet push from behind. A surge of mighty trees trundling along sweep me away.";
+		otherwise:
+			say "Anxiously I head for a forest to rest.";
+		let the way be the best route from the location of the player to the Sprawling Forest of Trees;
+		now automatic going is true;
+		try the player going the way;
+		now automatic going is false.
+		
+Chapter 3 - Awakening
+
+Treeness is a number that varies. Treeness is usually 0.
+
+Awakening is a scene.
+
+Awakening begins when Arrival ends.
+Awakening begins when treeness is greater than 10.
+Awakening ends when the location is not the Sprawling Forest of Trees.	
+
+Instead of going during Awakening:
+	say "You have taken root. You feel the soothing warmth of the soil wrapping itself around your feet as you reach deep within the bowels of the earth.[line break]";
+	say "As you feel soothed and held and taken care of, you feel the need to reflect on what has brought you here and how you wish to move forward."
+
+When Awakening begins:
+	Say "This night of chaos and of arrival.[paragraph break]";
+	Say "This night I dreamed of a gun pointed at my face. I dreamed of fear and cold fury.[paragraph break]";
+	Say "[feeling]As I awake, all I remember is the fury.[paragraph break]";
+	say "[right]Do I not remember the fear?[regular]";
+ 
+
+
+
+
+
+	
