@@ -1,2 +1,4 @@
-room "Castle Ground"
+room: "Castle Ground"
   object "Ritter Steiner"
+  on turn 7:
+    say "Where to?"  

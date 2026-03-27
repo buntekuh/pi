@@ -542,11 +542,15 @@ class OS:
     def sys_edit(self, path):
         from editor import Editor
         try:
+            highlighter = None
+            if path.endswith('.grue'):
+                from grui import highlight_line
+                highlighter = highlight_line
             try:
                 content = self.fs.read_file(path).decode(errors="replace")
             except Exception:
                 content = ""
-            Editor(self, path).run(content)
+            Editor(self, path, highlighter=highlighter).run(content)
         except Exception as e:
             self.println(f"edit: {e}")
 
@@ -674,6 +678,26 @@ class OS:
                 term.receive({'type': 'scroll_region', 'bottom': 24})
                 term.receive({'type': 'cls'})
                 term.receive({'type': 'goto', 'row': 0, 'col': 0})
+
+    def sys_grui_check(self, src_path):
+        """Run the Grue syntax/semantic checker on a .grue file."""
+        from grui import Parser, GrueError
+        try:
+            data = self.fs.read_file(src_path)
+        except Exception as e:
+            self.println(f"grue: {e}")
+            return
+        source = data.decode(errors='replace')
+        try:
+            issues = Parser().check(source)
+        except GrueError as e:
+            self.println(f"grue: {e}")
+            return
+        if not issues:
+            self.println(f"{src_path}: ok")
+        else:
+            for issue in issues:
+                self.println(f"{src_path}: {issue}")
 
     def sys_debug(self, path):
         """Load a .asm or .bin file from the virtual FS and start the debugger."""
@@ -822,10 +846,15 @@ class Shell:
                 self.os.println("usage: asm <file.asm> [output.bin]")
         elif cmd == "grue":
             if arg:
-                parts2 = arg.split(None, 1)
-                self.os.sys_grui(parts2[0], parts2[1] if len(parts2) > 1 else None)
+                parts2 = arg.split()
+                check  = '--check' in parts2
+                parts2 = [p for p in parts2 if p != '--check']
+                if check:
+                    self.os.sys_grui_check(parts2[0])
+                else:
+                    self.os.sys_grui(parts2[0], parts2[1] if len(parts2) > 1 else None)
             else:
-                self.os.println("usage: grue <file.grue> [script.play]")
+                self.os.println("usage: grue [--check] <file.grue> [script.play]")
         elif cmd == "debug":
             if arg:
                 self.os.sys_debug(arg)
@@ -847,6 +876,7 @@ class Shell:
             self.os.println("  asm <file.asm> [out.bin]   assemble to binary")
             self.os.println("  debug <file.asm|.bin>      step debugger")
             self.os.println("  grue <file.grue>           run a Grue interactive fiction file")
+            self.os.println("  grue --check <file.grue>   check syntax without running")
             self.os.println("  pi                         interactive Pi REPL")
             self.os.println("  help                       this message")
         elif cmd.endswith('.bat'):

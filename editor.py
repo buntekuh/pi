@@ -16,17 +16,26 @@ _COLS = 80
 
 class Editor:
 
-    def __init__(self, os_, path):
-        self.os       = os_
-        self.path     = path
-        self.lines    = [""]
-        self.row      = 0     # cursor row  in buffer
-        self.col      = 0     # cursor col  in buffer
-        self.top      = 0     # viewport top  (first visible buffer row)
-        self.left     = 0     # viewport left (first visible buffer col)
-        self.modified = False
-        self._saved   = False  # becomes True once Ctrl+S is pressed
-        self._prev    = None   # previously displayed screen lines
+    def __init__(self, os_, path, highlighter=None):
+        self.os          = os_
+        self.path        = path
+        self.lines       = [""]
+        self.row         = 0     # cursor row  in buffer
+        self.col         = 0     # cursor col  in buffer
+        self.top         = 0     # viewport top  (first visible buffer row)
+        self.left        = 0     # viewport left (first visible buffer col)
+        self.modified    = False
+        self._saved      = False  # becomes True once Ctrl+S is pressed
+        self._prev       = None   # previously displayed screen lines (for diff)
+        self._highlighter = highlighter   # optional fn(raw_line) -> [(col, len, rgb)]
+        self._line_error  = None          # error message for current line, or None
+        if highlighter is not None:
+            from grui import HL_DEFAULT, Parser
+            self._hl_default = HL_DEFAULT
+            self._parser     = Parser()
+        else:
+            self._hl_default = None
+            self._parser     = None
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -50,6 +59,7 @@ class Editor:
             while True:
                 key  = term.read_key()
                 done = self._handle(key)
+                self._check_line()
                 self._draw()
                 if done:
                     break
@@ -150,6 +160,23 @@ class Editor:
             self.modified = True
             self._prev = None
 
+    def _check_line(self):
+        """Run the grue checker and store any error on the current line."""
+        if self._parser is None:
+            return
+        source = "\n".join(self.lines) + "\n"
+        try:
+            issues = self._parser.check(source)
+        except Exception:
+            issues = []
+        cur = self.row + 1   # 1-based line number
+        self._line_error = None
+        for issue in issues:
+            # issues are formatted "line N: message"
+            if issue.startswith(f"line {cur}:"):
+                self._line_error = issue[len(f"line {cur}:"):].strip()
+                break
+
     def _clamp_viewport(self):
         if self.row < self.top:
             self.top = self.row
@@ -169,7 +196,7 @@ class Editor:
         scr_row = self.row - self.top
         scr_col = self.col - self.left
 
-        # Build raw screen lines (no cursor)
+        # Build raw screen lines without cursor (used for diff and highlighting)
         raw = []
         for i in range(_ROWS):
             buf_row = self.top + i
@@ -180,7 +207,7 @@ class Editor:
             else:
                 raw.append("~" + " " * (_COLS - 1))
 
-        # Apply block cursor
+        # Apply block cursor to build screen lines (used for dirty detection)
         screen = list(raw)
         if 0 <= scr_row < _ROWS and 0 <= scr_col < _COLS:
             line = list(screen[scr_row])
@@ -188,25 +215,71 @@ class Editor:
             screen[scr_row] = "".join(line)
 
         # Separator (row 23) and status bar (row 24 — max 79 chars, no wrap)
-        mod    = "*" if self.modified else " "
-        status = (f" {mod} {self.path}   "
-                  f"ln {self.row + 1}/{len(self.lines)}  "
-                  f"col {self.col + 1}"
-                  f"    ^S save  ^Q quit (close)")[: _COLS - 1]
+        mod  = "*" if self.modified else " "
+        left = (f" {mod} {self.path}   "
+                f"ln {self.row + 1}/{len(self.lines)}  "
+                f"col {self.col + 1}")
+        if self._line_error:
+            right = f"  {self._line_error}"
+        else:
+            right = "    ^S save  ^Q quit (close)"
+        dirty = range(_ROWS) if (full or self._prev is None) else [
+            i for i, (n, o) in enumerate(zip(screen, self._prev)) if n != o
+        ]
+
+        for i in dirty:
+            term.receive({"type": "goto", "row": i, "col": 0})
+            if self._highlighter:
+                self._draw_highlighted(term, i, raw[i], screen[i])
+            else:
+                term.receive({"type": "print", "text": screen[i]})
 
         if full or self._prev is None:
-            for i, line in enumerate(screen):
-                term.receive({"type": "goto", "row": i, "col": 0})
-                term.receive({"type": "print", "text": line})
             term.receive({"type": "goto", "row": _ROWS, "col": 0})
             term.receive({"type": "print", "text": "-" * (_COLS - 1)})
-        else:
-            for i, (new, old) in enumerate(zip(screen, self._prev)):
-                if new != old:
-                    term.receive({"type": "goto", "row": i, "col": 0})
-                    term.receive({"type": "print", "text": new})
 
-        term.receive({"type": "goto", "row": _ROWS + 1, "col": 0})
-        term.receive({"type": "print", "text": status})
+        # Status bar: left part always in default colour; right part red on error.
+        from palette import PALETTE_DATA as _PAL
+        _BG      = (0, 0, 0)
+        _DEFAULT = _PAL[11]   # near-white
+        _RED     = _PAL[3]    # #C24C3C
+        left_w   = len(left)
+        right_w  = _COLS - 1 - left_w
+        right_vis = right[:right_w].ljust(right_w)
+        term.receive({"type": "text", "x": 0,      "y": _ROWS + 1,
+                      "text": left,     "colour": _DEFAULT, "bg": _BG})
+        term.receive({"type": "text", "x": left_w, "y": _ROWS + 1,
+                      "text": right_vis,
+                      "colour": _RED if self._line_error else _DEFAULT,
+                      "bg": _BG})
 
         self._prev = screen
+
+    def _draw_highlighted(self, term, scr_row, raw_line, screen_line):
+        """Render one line using syntax-highlight colour spans."""
+        bg     = (0, 0, 0)
+        HL_DEFAULT = self._hl_default
+        spans  = self._highlighter(raw_line)
+
+        # Build a per-column colour map from the spans
+        colours = [HL_DEFAULT] * _COLS
+        for start, length, rgb in spans:
+            for c in range(start, min(start + length, _COLS)):
+                colours[c] = rgb
+
+        # Group into contiguous same-colour runs, using screen_line (has cursor)
+        col = 0
+        while col < _COLS:
+            rgb = colours[col]
+            end = col + 1
+            while end < _COLS and colours[end] == rgb:
+                end += 1
+            term.receive({
+                "type":   "text",
+                "x":      col,
+                "y":      scr_row,
+                "text":   screen_line[col:end],
+                "colour": rgb,
+                "bg":     bg,
+            })
+            col = end
