@@ -173,11 +173,12 @@ class Interpreter:
                  Words are stored as  _namespace + name  in _dict.
     """
 
-    def __init__(self, output=None, input_fn=None, term_fn=None):
+    def __init__(self, output=None, input_fn=None, term_fn=None, step_hook=None):
         self.stack:      list            = []
         self._out       = output or (lambda s: sys.stdout.write(s))
         self._in        = input_fn or (lambda: sys.stdin.readline().rstrip('\n'))
         self._term      = term_fn  or (lambda cmd: None)
+        self._step_hook = step_hook      # optional fn(token, stack) called before each step
         self._dict:      dict            = {}
         self._frames:    list[dict]      = [{}]      # [0] = global frame
         self._memory:    dict[int, int]  = {}
@@ -217,6 +218,8 @@ class Interpreter:
         while i < len(tokens):
             if tokens[i].type == TT.EOF:
                 break
+            if self._step_hook is not None:
+                self._step_hook(tokens[i], self.stack)
             i = self._step(tokens, i)
         return i
 

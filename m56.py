@@ -543,14 +543,22 @@ class OS:
         from editor import Editor
         try:
             highlighter = None
+            checker     = None
             if path.endswith('.grue'):
                 from grui import highlight_line
+                from grui import Parser as _GrueParser
+                _p = _GrueParser()
                 highlighter = highlight_line
+                checker     = lambda src: _p.check(src)
+            elif path.endswith('.pi'):
+                from pi_highlight import highlight_line as pi_hl, check_source
+                highlighter = pi_hl
+                checker     = check_source
             try:
                 content = self.fs.read_file(path).decode(errors="replace")
             except Exception:
                 content = ""
-            Editor(self, path, highlighter=highlighter).run(content)
+            Editor(self, path, highlighter=highlighter, checker=checker).run(content)
         except Exception as e:
             self.println(f"edit: {e}")
 
@@ -748,6 +756,16 @@ class OS:
         except (LexError, InterpError) as e:
             self.println(str(e))
 
+    def sys_pi_debug(self, path):
+        """Open the Pi source debugger for a .pi file."""
+        from pi_debugger import PiDebugger
+        try:
+            source = self.fs.read_file(path).decode(errors='replace')
+        except Exception as e:
+            self.println(f"pi: {e}")
+            return
+        PiDebugger(self).run(source, filename=path)
+
     def sys_repl(self):
         """Launch the interactive Pi REPL."""
         from pi_repl import PiRepl
@@ -861,7 +879,10 @@ class Shell:
             else:
                 self.os.println("usage: debug <file.asm|file.bin>")
         elif cmd == "pi":
-            self.os.sys_repl()
+            if arg:
+                self.os.sys_pi_debug(arg)
+            else:
+                self.os.sys_repl()
         elif cmd == "help":
             self.os.println("M56 SHELL COMMANDS")
             self.os.println()
@@ -878,6 +899,7 @@ class Shell:
             self.os.println("  grue <file.grue>           run a Grue interactive fiction file")
             self.os.println("  grue --check <file.grue>   check syntax without running")
             self.os.println("  pi                         interactive Pi REPL")
+            self.os.println("  pi <file.pi>               step debugger for Pi source")
             self.os.println("  help                       this message")
         elif cmd.endswith('.bat'):
             self._run_bat(cmd)
@@ -1000,12 +1022,28 @@ class Shell:
         w("SYSTEM READY.  Type help for commands.")
         w()
         self.os.sys_cd("/home")
+
+        # Load persisted command history.
+        _HIST_FILE = 'home/.history'
+        try:
+            raw = self.os.fs.read_file(_HIST_FILE).decode(errors='replace')
+            self.os.terminal.set_history(raw.splitlines())
+        except Exception:
+            pass
+
         while self.os.terminal.running:
             self.prompt()
             line = self.os.read_line()
             if not self.os.terminal.running:
                 break
             self.run_line(line)
+            # Persist history after every command.
+            try:
+                hist = self.os.terminal.get_history()
+                self.os.fs.write_file(_HIST_FILE,
+                                      '\n'.join(hist[-200:]) + '\n')
+            except Exception:
+                pass
 
 
 class M56:

@@ -109,6 +109,13 @@ class T46:
 
         self._tab_callback = None
 
+        # Command history for shell line editing.
+        # _hist_pos == -1 means the user is editing a fresh line.
+        # While navigating, _hist_draft preserves what they had typed.
+        self._history    = []
+        self._hist_pos   = -1
+        self._hist_draft = ''
+
         self._clear_text()
 
     def connect(self, m56):
@@ -182,6 +189,41 @@ class T46:
             raise KeyboardInterrupt
         return line
 
+    def set_history(self, lines):
+        """Load history entries (called by the shell on startup)."""
+        self._history  = [l for l in lines if l]
+        self._hist_pos = -1
+
+    def get_history(self):
+        """Return current history list (called by the shell to persist it)."""
+        return list(self._history)
+
+    def _hist_replace(self, text):
+        """Erase the current line buffer and replace it with text."""
+        self._print("\b \b" * len(self._line_buffer))
+        self._line_buffer = list(text)
+        self._print(text)
+
+    def _hist_up(self):
+        if not self._history:
+            return
+        if self._hist_pos == -1:
+            self._hist_draft = "".join(self._line_buffer)
+            self._hist_pos   = len(self._history) - 1
+        elif self._hist_pos > 0:
+            self._hist_pos -= 1
+        self._hist_replace(self._history[self._hist_pos])
+
+    def _hist_down(self):
+        if self._hist_pos == -1:
+            return
+        if self._hist_pos < len(self._history) - 1:
+            self._hist_pos += 1
+            self._hist_replace(self._history[self._hist_pos])
+        else:
+            self._hist_pos = -1
+            self._hist_replace(self._hist_draft)
+
     def set_tab_callback(self, fn):
         self._tab_callback = fn
 
@@ -221,6 +263,17 @@ class T46:
                     if key is not None:
                         self._key_queue.put(key)
                 else:
+                    # History navigation — handled before _key_to_char so
+                    # arrow keys don't fall through as None.
+                    if event.key == pygame.K_UP:
+                        self._hist_up()
+                        dirty = True
+                        continue
+                    if event.key == pygame.K_DOWN:
+                        self._hist_down()
+                        dirty = True
+                        continue
+
                     ch = self._key_to_char(event)
                     if ch is None:
                         continue
@@ -242,6 +295,11 @@ class T46:
                         self._print("\n")
                         line = "".join(self._line_buffer)
                         self._line_buffer.clear()
+                        self._hist_pos   = -1
+                        self._hist_draft = ''
+                        # Add to history if non-empty and not a duplicate
+                        if line and (not self._history or self._history[-1] != line):
+                            self._history.append(line)
                         # Shell input (Python OS layer)
                         self._line_queue.put(line)
                         # CPU input (IN instruction)
@@ -251,6 +309,8 @@ class T46:
                         dirty = True
                     elif ch == "\x11":   # Ctrl-Q — interrupt current program
                         self._line_buffer.clear()
+                        self._hist_pos   = -1
+                        self._hist_draft = ''
                         self._line_queue.put(None)
                         dirty = True
                     else:
@@ -273,6 +333,13 @@ class T46:
     def _exec_cmd(self, cmd):
         """Execute one display command. Main thread only."""
         t = cmd.get("type")
+        if t == "key_repeat":
+            # Enable or disable pygame key-repeat.  Must run on main thread.
+            if cmd.get("on"):
+                pygame.key.set_repeat(cmd.get("delay", 300), cmd.get("interval", 40))
+            else:
+                pygame.key.set_repeat(0)
+            return
         if t == "goto":
             self._cur_row = max(0, min(cmd["row"], ROWS - 1))
             self._cur_col = max(0, min(cmd["col"], COLS - 1))

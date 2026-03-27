@@ -16,7 +16,7 @@ _COLS = 80
 
 class Editor:
 
-    def __init__(self, os_, path, highlighter=None):
+    def __init__(self, os_, path, highlighter=None, checker=None):
         self.os          = os_
         self.path        = path
         self.lines       = [""]
@@ -28,14 +28,13 @@ class Editor:
         self._saved      = False  # becomes True once Ctrl+S is pressed
         self._prev       = None   # previously displayed screen lines (for diff)
         self._highlighter = highlighter   # optional fn(raw_line) -> [(col, len, rgb)]
+        self._checker     = checker       # optional fn(source) -> list["line N: msg"]
         self._line_error  = None          # error message for current line, or None
         if highlighter is not None:
-            from grui import HL_DEFAULT, Parser
+            from grui import HL_DEFAULT
             self._hl_default = HL_DEFAULT
-            self._parser     = Parser()
         else:
             self._hl_default = None
-            self._parser     = None
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -51,6 +50,7 @@ class Editor:
 
         term = self.os.terminal
         term.set_raw(True)
+        term.receive({"type": "key_repeat", "on": True, "delay": 300, "interval": 40})
         term.receive({"type": "cls"})
         self._prev = None
         self._draw(full=True)
@@ -64,6 +64,7 @@ class Editor:
                 if done:
                     break
         finally:
+            term.receive({"type": "key_repeat", "on": False})
             term.set_raw(False)
             term.receive({"type": "cls"})
 
@@ -161,18 +162,18 @@ class Editor:
             self._prev = None
 
     def _check_line(self):
-        """Run the grue checker and store any error on the current line."""
-        if self._parser is None:
+        """Run the language checker and store any error on the current line."""
+        if self._checker is None:
             return
         source = "\n".join(self.lines) + "\n"
         try:
-            issues = self._parser.check(source)
+            issues = self._checker(source)
         except Exception:
             issues = []
         cur = self.row + 1   # 1-based line number
         self._line_error = None
         for issue in issues:
-            # issues are formatted "line N: message"
+            # issues are formatted "line N: …" (grue) or "line N:col M: …" (pi)
             if issue.startswith(f"line {cur}:"):
                 self._line_error = issue[len(f"line {cur}:"):].strip()
                 break
