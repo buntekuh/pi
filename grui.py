@@ -61,9 +61,9 @@ TT_COLON     = 'COLON'      # :
 TT_EOF       = 'EOF'
 
 _KEYWORDS = frozenset({
-    'room', 'player', 'kind',
+    'room', 'player', 'kind', 'color',
     'on', 'instead', 'of',
-    'go', 'take', 'examine', 'talk', 'to', 'with', 'turn', 'say',
+    'go', 'take', 'examine', 'talk', 'to', 'with', 'turn', 'say', 'end',
 })
 
 # Full direction words.  Abbreviations (n, s, e, w, …) lex as TT_WORD;
@@ -126,6 +126,7 @@ class Lexer:
             if not stripped or stripped.startswith('--'):
                 continue
 
+            raw    = raw.expandtabs(2)
             indent = len(raw) - len(raw.lstrip(' '))
             pos    = indent
             n      = len(raw)
@@ -339,6 +340,7 @@ class World:
         self.room_order     = []   # room keys in declaration order (first = start)
         self.objects        = []   # all object instances (rooms + inventory)
         self.player         = {}   # name, location, description, properties
+        self.colors         = {}   # name → palette RGB tuple from 'color "name" N'
         self._next_obj_id   = 0
 
     def norm(self, name: str) -> str:
@@ -400,7 +402,7 @@ class Parser:
 
       indent 0   — top-level declarations:
                      kind being  tree fae crow woman man
-                     player "Name"
+                     player "name":
                      room "Name"
 
       indent 2   — room body:
@@ -563,10 +565,11 @@ class Parser:
             else:
                 raise GrueError(text)
 
-        world           = World()
-        groups          = self._group_lines(tokens)
-        current_room    = None
-        current_handler = None
+        world                = World()
+        groups               = self._group_lines(tokens)
+        current_room         = None
+        current_handler      = None
+        current_sub_handler  = None   # body of a nested 'instead of go' inside turn_n
 
         for line_no, indent, toks in groups:
             types  = [t.type        for t in toks]
@@ -578,7 +581,17 @@ class Parser:
                 current_handler = None
                 current_room    = None
 
-                if types[0] == TT_KEYWORD and values[0] == 'kind':
+                if types[0] == TT_KEYWORD and values[0] == 'color':
+                    # color "name" N  — named palette colour for inline text markup
+                    nums = [t for t in toks if t.type == TT_NUMBER]
+                    if not strs or not nums:
+                        error(line_no, "'color' needs a quoted name and a palette index, e.g.  color \"feeling\" 29")
+                        continue
+                    idx = int(nums[0].value)
+                    from palette import PALETTE_DATA as _PAL
+                    world.colors[strs[0].value.lower()] = _PAL[idx]
+
+                elif types[0] == TT_KEYWORD and values[0] == 'kind':
                     # kind being  tree fae crow woman man
                     # Colon after the kind name is accepted but not required.
                     if len(toks) < 2:
@@ -589,9 +602,15 @@ class Parser:
                     world.kinds[kind_name] = [t.value for t in rest]
 
                 elif types[0] == TT_KEYWORD and values[0] == 'player':
-                    # player "Name"
+                    # player "name":
+                    #   property value
+                    #   ...
+                    if len(toks) > 1 and toks[1].type == TT_WORD and toks[1].value.lower() == 'has':
+                        error(line_no,
+                              "use block syntax: player \"name\":\\n  property value")
+                        continue
                     if not strs:
-                        error(line_no, "'player' needs a quoted name")
+                        error(line_no, "'player' needs a quoted name, e.g.  player \"me\":")
                         continue
                     world.player = {
                         'name':        strs[0].value,
@@ -626,10 +645,10 @@ class Parser:
             # ---- indent 2: inside player block --------------------------
             elif indent == 2 and world.player and not current_room:
                 if types[0] == TT_STRING:
-                    # Player description
+                    # Player description string
                     world.player['description'] = toks[0].value
                 else:
-                    # Property: 'being tree' or 'being: tree' (colon optional)
+                    # Property line:  mood lost  /  being tree  /  treeness 0
                     rest = [t for t in toks[1:] if t.type != TT_COLON]
                     if rest:
                         world.player['properties'][values[0]] = rest[0].value
@@ -674,6 +693,33 @@ class Parser:
 
             # ---- indent 4: handler body ---------------------------------
             elif indent == 4 and current_handler is not None:
+                current_sub_handler = None   # reset on each new indent-4 line
+
+                # Nested 'instead of <action>:' inside a turn_n handler.
+                if (types[0] == TT_KEYWORD and values[0] == 'instead'
+                        and types[-1] == TT_COLON):
+                    # Find the enclosing turn_n handler in the current room.
+                    h_owner = None
+                    if current_room:
+                        for h in reversed(current_room['handlers']):
+                            if h['body'] is current_handler:
+                                h_owner = h
+                                break
+                    if h_owner and h_owner['type'] == 'turn_n':
+                        # Key is 'instead_<action>' e.g. instead_go, instead_take
+                        action_word = next((v for v in values[1:]
+                                           if v not in ('of', ':')), 'go')
+                        key = f'instead_{action_word}'
+                        h_owner.setdefault(key, [])
+                        current_sub_handler = h_owner[key]
+                    else:
+                        error(line_no, "'instead of ...' can only be nested inside 'on turn N:'")
+                    continue
+
+                if types[0] == TT_KEYWORD and values[0] == 'end':
+                    current_handler.append(('end',))
+                    continue
+
                 if types[0] == TT_KEYWORD and values[0] == 'say':
                     if not strs:
                         error(line_no, "'say' needs a quoted string")
@@ -694,10 +740,24 @@ class Parser:
                 error(line_no, f'unrecognised handler body line: '
                       f'{" ".join(values)!r}')
 
+            # ---- indent 6: nested sub-handler body ----------------------
+            elif indent == 6 and current_sub_handler is not None:
+                if types[0] == TT_KEYWORD and values[0] == 'say':
+                    if not strs:
+                        error(line_no, "'say' needs a quoted string")
+                        continue
+                    current_sub_handler.append(('say', strs[0].value))
+                    continue
+                if types[0] == TT_KEYWORD and values[0] == 'end':
+                    current_sub_handler.append(('end',))
+                    continue
+                error(line_no, f'unrecognised nested handler line: '
+                      f'{" ".join(values)!r}')
+
             else:
-                if indent not in (0, 2, 4):
+                if indent not in (0, 2, 4, 6):
                     error(line_no, f'unexpected indent of {indent} spaces '
-                          f'(valid indents are 0, 2, 4)')
+                          f'(valid indents are 0, 2, 4, 6)')
 
         return world
 
@@ -906,20 +966,70 @@ class Interpreter:
 
     WRAP = 72
 
-    def __init__(self, world: World, output=None, input_fn=None, status_fn=None):
-        self.world      = world
-        self._output    = output  or (lambda s: print(s, end=''))
-        self._input     = input_fn or input
-        self._parser    = InputParser()
-        self._status_fn = status_fn
-        self._running   = True
+    def __init__(self, world: World, output=None, input_fn=None, status_fn=None,
+                 wait_key_fn=None, set_color_fn=None):
+        self.world        = world
+        self._output      = output  or (lambda s: print(s, end=''))
+        self._input       = input_fn or input
+        self._wait_key    = wait_key_fn or (lambda: input())
+        self._set_color   = set_color_fn  # fn(rgb_tuple|None) — None resets to default
+        self._parser      = InputParser()
+        self._status_fn   = status_fn
+        self._running     = True
 
     def _say(self, text: str):
         if not text:
             self._output('\n')
             return
-        for line in textwrap.wrap(text, self.WRAP):
-            self._output(line + '\n')
+        # Parse inline color tags: [name]...[/name] or [name]... to end of string.
+        # Segments: list of (text, rgb|None)
+        segments = self._parse_color_tags(text)
+        if len(segments) == 1 and segments[0][1] is None:
+            # No color tags — plain wrap
+            for line in textwrap.wrap(text, self.WRAP):
+                self._output(line + '\n')
+        else:
+            # Colored output — wrap the plain text, then re-emit with colors.
+            plain = ''.join(s for s, _ in segments)
+            wrapped = textwrap.wrap(plain, self.WRAP)
+            # Re-map segments onto wrapped lines character by character.
+            seg_iter = iter((ch, rgb) for s, rgb in segments for ch in s)
+            for line in wrapped:
+                for _ in line:
+                    ch, rgb = next(seg_iter)
+                    if self._set_color:
+                        self._set_color(rgb)
+                    self._output(ch)
+                if self._set_color:
+                    self._set_color(None)
+                self._output('\n')
+
+    def _parse_color_tags(self, text: str):
+        """Split text into [(fragment, rgb|None)] segments using world.colors."""
+        import re
+        colors  = self.world.colors
+        if not colors or '[' not in text:
+            return [(text, None)]
+        pattern = re.compile(r'\[(/?)(\w+)\]')
+        segments  = []
+        pos       = 0
+        cur_color = None
+        for m in pattern.finditer(text):
+            if m.start() > pos:
+                segments.append((text[pos:m.start()], cur_color))
+            closing = m.group(1) == '/'
+            name    = m.group(2).lower()
+            if closing:
+                cur_color = None
+            elif name in colors:
+                cur_color = colors[name]
+            # unknown tag names are emitted as literal text
+            else:
+                segments.append((m.group(0), cur_color))
+            pos = m.end()
+        if pos < len(text):
+            segments.append((text[pos:], cur_color))
+        return segments or [(text, None)]
 
     def _print(self, text: str):
         self._output(text)
@@ -941,6 +1051,12 @@ class Interpreter:
         for stmt in body:
             if stmt[0] == 'say':
                 self._say(stmt[1])
+            elif stmt[0] == 'end':
+                self._output('\n')
+                self._say('The neural engram ends here. Press any key.')
+                self._wait_key()
+                self._running = False
+                return
             elif stmt[0] == 'create':
                 _, kind, name, desc = stmt
                 room = self.world.current_room()
@@ -985,6 +1101,14 @@ class Interpreter:
         room = self.world.current_room()
         if room is None:
             return False
+        # Check for turn-scoped 'instead of go' (nested inside 'on turn N:').
+        # Active when the player's next action would advance to turn N.
+        counter = room['turn_counter']
+        for h in room['handlers']:
+            if (h['type'] == 'turn_n' and not h['fired']
+                    and h['n'] == counter + 1 and 'instead_go' in h):
+                self._run_body(h['instead_go'])
+                return True   # counts as a turn action but player didn't move
         h = self._find_handler(room, 'instead_go')
         if h:
             self._run_body(h['body'])
@@ -1222,10 +1346,12 @@ class Interpreter:
 # Public API
 # ---------------------------------------------------------------------------
 
-def load_and_run(source: str, output=None, input_fn=None, status_fn=None):
+def load_and_run(source: str, output=None, input_fn=None, status_fn=None,
+                 wait_key_fn=None, set_color_fn=None):
     """Parse 'source' as a .grue file and run the game. Raises GrueError on error."""
     world  = Parser().parse(source)
-    interp = Interpreter(world, output=output, input_fn=input_fn, status_fn=status_fn)
+    interp = Interpreter(world, output=output, input_fn=input_fn, status_fn=status_fn,
+                         wait_key_fn=wait_key_fn, set_color_fn=set_color_fn)
     interp.run()
 
 

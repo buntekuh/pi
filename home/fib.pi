@@ -1,9 +1,0 @@
-1 1 //counter and basic value to work on
-//100 allot
-"hallo" print
-//store in heap
-/*while dup 0xffff < :  
-  dup +
-  dup print
-  //store on heap
-end*/

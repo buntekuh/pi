@@ -1,0 +1,145 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Grue",
+  "scopeName": "source.grue",
+  "fileTypes": ["grue"],
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#room_decl" },
+    { "include": "#player_decl" },
+    { "include": "#kind_decl" },
+    { "include": "#handler_header" },
+    { "include": "#string" },
+    { "include": "#direction" },
+    { "include": "#action_keyword" },
+    { "include": "#structure_keyword" },
+    { "include": "#scenery_object" },
+    { "include": "#set_statement" },
+    { "include": "#color_decl" },
+    { "include": "#color_tag" },
+    { "include": "#number" }
+  ],
+  "repository": {
+
+    "comment": {
+      "name": "comment.line.double-dash.grue",
+      "match": "--.*$"
+    },
+
+    "string": {
+      "name": "string.quoted.double.grue",
+      "begin": "\"",
+      "end": "\""
+    },
+
+    "number": {
+      "name": "constant.numeric.grue",
+      "match": "\\b[0-9]+\\b"
+    },
+
+    "direction": {
+      "name": "variable.language.direction.grue",
+      "match": "\\b(north|south|east|west|up|down|northeast|northwest|southeast|southwest|n|s|e|w|ne|nw|se|sw)\\b"
+    },
+
+    "room_decl": {
+      "comment": "room station \"Train Station\"",
+      "match": "^(room)\\s+([\\w-]+)\\s*(\"[^\"]*\")?",
+      "captures": {
+        "1": { "name": "keyword.other.room.grue" },
+        "2": { "name": "entity.name.type.room.grue" },
+        "3": { "name": "string.quoted.double.grue" }
+      }
+    },
+
+    "player_decl": {
+      "comment": "player \"name\":",
+      "match": "^(player)\\b",
+      "captures": {
+        "1": { "name": "keyword.other.player.grue" }
+      }
+    },
+
+    "kind_decl": {
+      "comment": "kind mood: lost afraid rooted hopeful",
+      "match": "^(kind)\\s+([\\w-]+)\\s*(:)?",
+      "captures": {
+        "1": { "name": "keyword.other.kind.grue" },
+        "2": { "name": "entity.name.type.kind.grue" },
+        "3": { "name": "punctuation.separator.grue" }
+      }
+    },
+
+    "handler_header": {
+      "comment": "on arrive:  /  on turn:  /  instead of go:",
+      "patterns": [
+        {
+          "match": "^\\s+(instead)\\s+(of)\\s+([\\w-]+)\\s*(:)",
+          "captures": {
+            "1": { "name": "keyword.control.instead.grue" },
+            "2": { "name": "keyword.control.of.grue" },
+            "3": { "name": "support.function.action.grue" },
+            "4": { "name": "punctuation.separator.grue" }
+          }
+        },
+        {
+          "match": "^\\s+(on)\\s+([\\w-]+)\\s*(:)",
+          "captures": {
+            "1": { "name": "keyword.control.on.grue" },
+            "2": { "name": "entity.name.function.event.grue" },
+            "3": { "name": "punctuation.separator.grue" }
+          }
+        }
+      ]
+    },
+
+    "action_keyword": {
+      "comment": "go say take drop examine talk",
+      "name": "support.function.action.grue",
+      "match": "\\b(go|say|take|drop|examine|talk|to|with|end)\\b"
+    },
+
+    "structure_keyword": {
+      "comment": "on instead of turn set",
+      "name": "keyword.control.grue",
+      "match": "\\b(on|instead|of|turn|set)\\b"
+    },
+
+    "scenery_object": {
+      "comment": "object / scenery declarations",
+      "match": "^\\s+(object|scenery)\\s+([\\w-]+)",
+      "captures": {
+        "1": { "name": "keyword.other.object.grue" },
+        "2": { "name": "variable.other.object.grue" }
+      }
+    },
+
+    "color_decl": {
+      "comment": "color \"feeling\" 29",
+      "match": "^(color)\\s+(\"[^\"]*\")\\s+([0-9]+)",
+      "captures": {
+        "1": { "name": "keyword.other.color.grue" },
+        "2": { "name": "string.quoted.double.grue" },
+        "3": { "name": "constant.numeric.grue" }
+      }
+    },
+
+    "color_tag": {
+      "comment": "[feeling] and [/feeling] inline markup inside strings",
+      "match": "\\[/?\\w+\\]",
+      "name": "punctuation.definition.tag.grue"
+    },
+
+    "set_statement": {
+      "comment": "set player mood: rooted",
+      "match": "^\\s+(set)\\s+(player)\\s+([\\w-]+)\\s*(:)\\s*([\\w-]+)?",
+      "captures": {
+        "1": { "name": "keyword.control.set.grue" },
+        "2": { "name": "keyword.other.player.grue" },
+        "3": { "name": "variable.other.property.grue" },
+        "4": { "name": "punctuation.separator.grue" },
+        "5": { "name": "constant.language.value.grue" }
+      }
+    }
+  }
+}

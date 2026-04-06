@@ -209,3 +209,8 @@ examples/*.bin
 tools/palette.html
 
 .DS_Store
+
+# Game content — lives in its own git repository
+home/
+
+.claude/

@@ -503,9 +503,36 @@ class OS:
     def sys_cat(self, path):
         try:
             data = self.fs.read_file(path)
-            self.println(data.decode(errors='replace'))
+            self.sys_more(data.decode(errors='replace'))
         except Exception as e:
             self.println(f"cat: {e}")
+
+    def sys_more(self, text, page_size=22):
+        """Display text one page at a time. Space/Enter advances; q quits."""
+        lines = text.splitlines()
+        term  = self.terminal
+        i     = 0
+        while i < len(lines):
+            # Print one page
+            for line in lines[i:i + page_size]:
+                self.println(line)
+            i += page_size
+            if i >= len(lines):
+                break
+            # Pause between pages
+            self.print_text("-- more -- (space/enter: next  q: quit) ")
+            term.set_raw(True)
+            try:
+                while True:
+                    key = term.read_key()
+                    if key in (' ', '\n', ''):
+                        break
+                    if key == 'q':
+                        self.println()
+                        return
+            finally:
+                term.set_raw(False)
+            self.println()  # newline after the prompt
 
     def sys_write(self, path, content):
         try:
@@ -551,9 +578,16 @@ class OS:
                 highlighter = highlight_line
                 checker     = lambda src: _p.check(src)
             elif path.endswith('.pi'):
-                from pi_highlight import highlight_line as pi_hl, check_source
+                from pi_highlight import highlight_line as pi_hl, check_source as pi_check
                 highlighter = pi_hl
-                checker     = check_source
+                checker     = pi_check
+            elif path.endswith('.asm'):
+                from asm_highlight import highlight_line as asm_hl, check_source as asm_check
+                highlighter = asm_hl
+                checker     = asm_check
+            elif path.endswith('.md'):
+                from md_highlight import highlight_line as md_hl
+                highlighter = md_hl
             try:
                 content = self.fs.read_file(path).decode(errors="replace")
             except Exception:
@@ -672,11 +706,21 @@ class OS:
 
         # --- run -------------------------------------------------------------
         try:
+            wait_key_fn = (lambda: self.terminal.read_key()) if term else (lambda: input())
+            if term:
+                from palette import PALETTE_DATA as _PAL
+                _default_fg = _PAL[11]
+                def set_color_fn(rgb):
+                    term.receive({'type': 'pen', 'colour': rgb if rgb else _default_fg})
+            else:
+                set_color_fn = None
             load_and_run(
                 data.decode(errors='replace'),
                 output=output_fn,
                 input_fn=input_fn,
                 status_fn=status_fn,
+                wait_key_fn=wait_key_fn,
+                set_color_fn=set_color_fn,
             )
         except GrueError as e:
             self.println(f"grui: {e}")
@@ -792,7 +836,7 @@ class Shell:
     This stands in for the Pi shell program that will eventually live in ROM.
     """
 
-    COMMANDS = {"ls", "cd", "mkdir", "cat", "cp", "edit", "run", "bat", "asm", "debug", "grue", "pi", "help"}
+    COMMANDS = {"ls", "cd", "mkdir", "cat", "more", "cp", "edit", "run", "bat", "asm", "debug", "grue", "pi", "help"}
 
     def __init__(self, os_):
         self.os = os_
@@ -822,6 +866,11 @@ class Shell:
                 self.os.sys_cat(arg)
             else:
                 self.os.println("usage: cat <file>")
+        elif cmd == "more":
+            if arg:
+                self.os.sys_cat(arg)   # sys_cat already pages via sys_more
+            else:
+                self.os.println("usage: more <file>")
         elif cmd == "mkdir":
             if arg:
                 self.os.sys_mkdir(arg)
@@ -864,15 +913,9 @@ class Shell:
                 self.os.println("usage: asm <file.asm> [output.bin]")
         elif cmd == "grue":
             if arg:
-                parts2 = arg.split()
-                check  = '--check' in parts2
-                parts2 = [p for p in parts2 if p != '--check']
-                if check:
-                    self.os.sys_grui_check(parts2[0])
-                else:
-                    self.os.sys_grui(parts2[0], parts2[1] if len(parts2) > 1 else None)
+                self.os.sys_grui_check(arg.strip())
             else:
-                self.os.println("usage: grue [--check] <file.grue> [script.play]")
+                self.os.println("usage: grue <file.grue>   (check syntax)")
         elif cmd == "debug":
             if arg:
                 self.os.sys_debug(arg)
@@ -890,14 +933,14 @@ class Shell:
             self.os.println("  cd <path>       change directory")
             self.os.println("  mkdir <dir>     create a new directory")
             self.os.println("  cp <src> <dst>  copy a file")
-            self.os.println("  cat <file>      print a file to the terminal")
+            self.os.println("  cat <file>      print file (paged)")
+            self.os.println("  more <file>     same as cat")
             self.os.println("  edit <file>     open file in editor")
-            self.os.println("  run <file.pi>              run a Pi program")
+            self.os.println("  run <file.pi|file.grue>    run a Pi program or Grue game")
             self.os.println("  bat <file.bat>             run a batch script")
             self.os.println("  asm <file.asm> [out.bin]   assemble to binary")
             self.os.println("  debug <file.asm|.bin>      step debugger")
-            self.os.println("  grue <file.grue>           run a Grue interactive fiction file")
-            self.os.println("  grue --check <file.grue>   check syntax without running")
+            self.os.println("  grue <file.grue>           check Grue syntax")
             self.os.println("  pi                         interactive Pi REPL")
             self.os.println("  pi <file.pi>               step debugger for Pi source")
             self.os.println("  help                       this message")

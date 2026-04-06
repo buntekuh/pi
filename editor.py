@@ -26,13 +26,14 @@ class Editor:
         self.left        = 0     # viewport left (first visible buffer col)
         self.modified    = False
         self._saved      = False  # becomes True once Ctrl+S is pressed
+        self._read_only  = False  # set when write_file raises PermissionError
         self._prev       = None   # previously displayed screen lines (for diff)
         self._highlighter = highlighter   # optional fn(raw_line) -> [(col, len, rgb)]
         self._checker     = checker       # optional fn(source) -> list["line N: msg"]
         self._line_error  = None          # error message for current line, or None
         if highlighter is not None:
-            from grui import HL_DEFAULT
-            self._hl_default = HL_DEFAULT
+            from palette import PALETTE_DATA as _PAL
+            self._hl_default = _PAL[11]   # near-white default text colour
         else:
             self._hl_default = None
 
@@ -75,9 +76,13 @@ class Editor:
     # ------------------------------------------------------------------
 
     def _save(self):
+        try:
+            self.os.fs.write_file(self.path, "\n".join(self.lines) + "\n")
+        except PermissionError:
+            self._read_only = True
+            return
         self._saved   = True
         self.modified = False
-        self.os.fs.write_file(self.path, "\n".join(self.lines) + "\n")
 
     def _handle(self, key):
         """Process one keypress. Returns done."""
@@ -220,7 +225,11 @@ class Editor:
         left = (f" {mod} {self.path}   "
                 f"ln {self.row + 1}/{len(self.lines)}  "
                 f"col {self.col + 1}")
-        if self._line_error:
+        if self._read_only and self._line_error:
+            right = f"  {self._line_error}  [READ ONLY]"
+        elif self._read_only:
+            right = "  READ ONLY  ^Q quit (close)"
+        elif self._line_error:
             right = f"  {self._line_error}"
         else:
             right = "    ^S save  ^Q quit (close)"
@@ -251,7 +260,7 @@ class Editor:
                       "text": left,     "colour": _DEFAULT, "bg": _BG})
         term.receive({"type": "text", "x": left_w, "y": _ROWS + 1,
                       "text": right_vis,
-                      "colour": _RED if self._line_error else _DEFAULT,
+                      "colour": _RED if (self._line_error or self._read_only) else _DEFAULT,
                       "bg": _BG})
 
         self._prev = screen
