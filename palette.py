@@ -1,27 +1,47 @@
 """
-T46 colour palette.
+T46 colour palette — generated from tools/palette.aseprite.
 
-Edit _HEX to change the colours. 256 entries max; anything unused is
-padded with black. Index 0 is always black.
+Do not edit by hand.  Add or change colours in Aseprite, then run:
+    python tools/aseprite2palette.py
 """
 
 # fmt: off
 _HEX = [
-    # 0 — black (added explicitly)
-    "000000",
-    # warm terracottas / earthy reds
-    "D5917E", "D06F5A", "C24C3C", "A9625B", "8C4434", "582C1E",
-    # olives / muted greens
-    "B7A063", "8F8C55", "638056", "7D997E",
-    # lights / neutrals
-    "E6E9E2", "E8D3B8", "D8BE91", "D8BA7B", "E29D58", "E6B49B",
-    "C2ABA3", "A48F7E", "7D6452", "5B4F3F",
-    # dark greens
-    "436657", "28564B", "313E34",
-    # purple (note: source had 7-digit typo "528683" — using "522868")
-    "528683",
-    # cool blue-greens
-    "BAD0D1", "6FAAA6", "37777D", "96C3C9", "4998A9", "98A6A1",
+    "000000",  #   0
+    "FFFFFF",  #   1
+    "A9625B",  #   2
+    "C24C3C",  #   3
+    "D06F5A",  #   4
+    "8C4434",  #   5
+    "D5917E",  #   6
+    "582C1E",  #   7
+    "C2ABA3",  #   8
+    "E6B49B",  #   9
+    "7D6452",  #  10
+    "A48F7E",  #  11
+    "E29D58",  #  12
+    "E8D3B8",  #  13
+    "5B4F3F",  #  14
+    "D8BE91",  #  15
+    "D8BA7B",  #  16
+    "B7A063",  #  17
+    "8F8C55",  #  18
+    "E6E9E2",  #  19
+    "638056",  #  20
+    "7D997E",  #  21
+    "313E34",  #  22
+    "436657",  #  23
+    "98A6A1",  #  24
+    "28564B",  #  25
+    "6FAAA6",  #  26
+    "528683",  #  27
+    "BAD0D1",  #  28
+    "37777D",  #  29
+    "96C3C9",  #  30
+    "4998A9",  #  31
+    "45AC49",  #  32
+    "37617D",  #  33
+    "E27D58",  #  34
 ]
 # fmt: on
 

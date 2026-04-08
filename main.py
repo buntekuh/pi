@@ -15,10 +15,10 @@ def load_program(computer, path):
     computer.load(code, USERRAM_START)
 
 
-def run_stdio(program_path=None):
+def run_stdio(program_path=None, startup=True):
     from stdio_terminal import StdioTerminal
     terminal = StdioTerminal()
-    computer = M56(terminal)
+    computer = M56(terminal, startup=startup)
     terminal.connect(computer)
     if program_path:
         load_program(computer, program_path)
@@ -27,10 +27,10 @@ def run_stdio(program_path=None):
     computer._thread.join()
 
 
-def run_pygame(program_path=None):
+def run_pygame(program_path=None, startup=True):
     from t46 import T46
     terminal = T46()
-    computer = M56(terminal)
+    computer = M56(terminal, startup=startup)
     terminal.connect(computer)
     if program_path:
         load_program(computer, program_path)
@@ -45,9 +45,12 @@ if __name__ == '__main__':
     parser.add_argument('program', nargs='?', help='.asm or .bin file to run')
     parser.add_argument('--stdio', action='store_true',
                         help='use stdin/stdout instead of pygame window')
+    parser.add_argument('--nostartup', action='store_true',
+                        help='skip the boot sequence')
     args = parser.parse_args()
 
+    startup = not args.nostartup
     if args.stdio:
-        run_stdio(args.program)
+        run_stdio(args.program, startup=startup)
     else:
-        run_pygame(args.program)
+        run_pygame(args.program, startup=startup)

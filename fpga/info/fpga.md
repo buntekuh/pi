@@ -130,21 +130,20 @@ The M56 CPU core will use roughly 2,000–4,000 LUTs. Headroom is ample.
 | LEDs                 | 2 user LEDs, 1 RGB LED                                |
 | Buttons              | 2 push buttons                                        |
 
-**Second PMOD**
+**Single PMOD, two modules**
 
-The board has one PMOD connector. A second PMOD can be hand-wired using four
-of the 44 free DIP pins plus 3.3 V (available from the PMOD header) and GND,
-mounted on a small perfboard with a 2×6 pin header. A straightforward job for
-anyone comfortable with basic electronics.
+The board has one PMOD connector (2×6, 12 pins). Digilent makes a 6-pin SD
+card reader that uses only one row, leaving the other row free. The RS-232
+PMOD is also 6-pin. Both modules plug into the same connector simultaneously —
+one on each row — so no second PMOD adapter or hand-wiring is needed at all.
 
 ### Peripherals
 
-| Function                         | Module                    | Interface | Approx. cost |
-|----------------------------------|---------------------------|-----------|--------------|
-| Terminal to PC                   | Onboard USB-UART (J17/J18)| UART      | included     |
-| Mass storage                     | PMOD SD card reader       | SPI       | ~€7.50       |
-| Inter-machine / classic terminal | PMOD RS-232               | UART      | ~€2.50       |
-| Second PMOD adapter              | Hand-wired perfboard      | —         | ~€1          |
+| Function                         | Module                       | Interface | Approx. cost |
+|----------------------------------|------------------------------|-----------|--------------|
+| Terminal to PC                   | Onboard USB-UART (J17/J18)   | UART      | included     |
+| Mass storage                     | PMOD SD card reader (6-pin)  | SPI       | ~€7.50       |
+| Inter-machine / classic terminal | PMOD RS-232 (6-pin)          | UART      | ~€2.50       |
 
 ### FPGA Fabric Blocks
 

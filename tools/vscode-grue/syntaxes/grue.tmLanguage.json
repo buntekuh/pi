@@ -22,8 +22,8 @@
   "repository": {
 
     "comment": {
-      "name": "comment.line.double-dash.grue",
-      "match": "--.*$"
+      "name": "comment.line.hash.grue",
+      "match": "#.*$"
     },
 
     "string": {
@@ -43,8 +43,8 @@
     },
 
     "room_decl": {
-      "comment": "room station \"Train Station\"",
-      "match": "^(room)\\s+([\\w-]+)\\s*(\"[^\"]*\")?",
+      "comment": "room \"Train Station\"  or  room alias \"Train Station\" (alias optional)",
+      "match": "^(room)\\s+(?:([\\w-]+)\\s+)?(\"[^\"]*\")",
       "captures": {
         "1": { "name": "keyword.other.room.grue" },
         "2": { "name": "entity.name.type.room.grue" },
@@ -94,9 +94,9 @@
     },
 
     "action_keyword": {
-      "comment": "go say take drop examine talk",
+      "comment": "go say take drop examine talk end color",
       "name": "support.function.action.grue",
-      "match": "\\b(go|say|take|drop|examine|talk|to|with|end)\\b"
+      "match": "\\b(go|say|take|drop|examine|talk|to|with|end|color|draw)\\b"
     },
 
     "structure_keyword": {

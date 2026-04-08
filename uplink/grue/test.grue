@@ -1,14 +1,14 @@
--- test.grue
--- Exercises: disambiguation, NPCs, inventory, dynamic events,
---            kind behaviour, cardinal movement, player description,
---            six sentence types: go, take, drop, examine, talk, inventory
+# test.grue
+# Exercises: disambiguation, NPCs, inventory, dynamic events,
+#            kind behaviour, cardinal movement, player description,
+#            six sentence types: go, take, drop, examine, talk, inventory
 
 kind being  tree fae crow woman man
 kind mood   lost curious bold
 
-player "Newcomer"
+player "Newcomer":
   being tree
-  mood  lost
+  mood lost
   "A young tree, recently uprooted. Your travelling cloak is still dusty from the journey."
 
 room "Market Square"

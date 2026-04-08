@@ -150,7 +150,7 @@ class Memory:
 
 class CPU:
     """
-    M56 CPU — 8 x 16-bit registers, 20-bit address space via page registers.
+    M56 CPU — 8 x 16-bit registers, 20-bit address space (PC is 20-bit; CPG/DPG page registers reserved but not yet used).
     Registers are memory-mapped at CPU_STATE_BASE.
     """
 
@@ -654,6 +654,7 @@ class OS:
         """Interpret a .grue file directly.  If script_path is given, commands
         are read from that file one per line with a short pause between each."""
         import time
+        from pathlib import Path
         from grui import load_and_run, GrueError
 
         try:
@@ -709,11 +710,30 @@ class OS:
             wait_key_fn = (lambda: self.terminal.read_key()) if term else (lambda: input())
             if term:
                 from palette import PALETTE_DATA as _PAL
-                _default_fg = _PAL[11]
+                _white     = _PAL[1]
+                _say_color = _white
                 def set_color_fn(rgb):
-                    term.receive({'type': 'pen', 'colour': rgb if rgb else _default_fg})
+                    term.receive({'type': 'pen', 'colour': rgb if rgb else _white})
+
+                _grue_dir = str(Path(src_path).parent)
+                def draw_fn(name):
+                    spans_path = str(Path(_grue_dir) / f"{name}.spans")
+                    try:
+                        spans_data = self.fs.read_file(spans_path)
+                    except Exception:
+                        return
+                    from tools.spans_view import parse_spans, render_to_terminal
+                    _, _, layers = parse_spans(spans_data)
+                    term.receive({'type': 'mode', 'mode': 'graphics'})
+                    render_to_terminal(term, layers)
+                    status_fn('Press a key.', [])
+                    wait_key_fn()
+                    term.receive({'type': 'mode', 'mode': 'text'})
             else:
                 set_color_fn = None
+                _say_color  = None
+                draw_fn     = None
+
             load_and_run(
                 data.decode(errors='replace'),
                 output=output_fn,
@@ -721,15 +741,24 @@ class OS:
                 status_fn=status_fn,
                 wait_key_fn=wait_key_fn,
                 set_color_fn=set_color_fn,
+                say_color=_say_color,
+                draw_fn=draw_fn,
+                src_dir=_grue_dir if term else None,
             )
         except GrueError as e:
-            self.println(f"grui: {e}")
+            error_msg = f"grui: {e}"
+        except Exception as e:
+            import traceback
+            error_msg = f"grui: {e}\n{traceback.format_exc()}"
+        else:
+            error_msg = None
         finally:
             if term is not None:
-                # Restore full-screen scroll and clear the status bar rows.
                 term.receive({'type': 'scroll_region', 'bottom': 24})
                 term.receive({'type': 'cls'})
                 term.receive({'type': 'goto', 'row': 0, 'col': 0})
+        if error_msg:
+            self.println(error_msg)
 
     def sys_grui_check(self, src_path):
         """Run the Grue syntax/semantic checker on a .grue file."""
@@ -1021,49 +1050,51 @@ class Shell:
             self.os.print_text(".")
             time.sleep(delay)
 
-    def loop(self):
+    def loop(self, startup=True):
         import time
 
         w = self.os.println
         p = self.os.print_text
 
-        w()
-        w("T46 TERMINAL  REV 2.1")
-        w("UTRONIC DATA SYSTEMS INC.")
-        w()
-        time.sleep(0.3)
+        if startup:
+            w()
+            w("T46 TERMINAL  REV 2.1")
+            w("UTRONIC DATA SYSTEMS INC.")
+            w()
+            time.sleep(0.3)
 
-        p("SCANNING NETWORK FOR MAINFRAME NODE")
-        self._dots(3, 0.4)
-        self._dots(6, 0.12)
-        w()
-        time.sleep(0.2)
+            p("SCANNING NETWORK FOR MAINFRAME NODE")
+            self._dots(3, 0.4)
+            self._dots(6, 0.12)
+            w()
+            time.sleep(0.2)
 
-        p("M56 MAINFRAME FOUND  SN: 948-464")
-        self._dots(3, 0.25)
-        w()
-        time.sleep(0.15)
+            p("M56 MAINFRAME FOUND  SN: 948-464")
+            self._dots(3, 0.25)
+            w()
+            time.sleep(0.15)
 
-        p("AUTHENTICATING")
-        self._dots(4, 0.18)
-        w("  OK")
-        time.sleep(0.1)
+            p("AUTHENTICATING")
+            self._dots(4, 0.18)
+            w("  OK")
+            time.sleep(0.1)
 
-        p("ESTABLISHING LINK")
-        self._dots(4, 0.14)
-        w("  CONNECTED")
-        w()
-        time.sleep(0.25)
+            p("ESTABLISHING LINK")
+            self._dots(4, 0.14)
+            w("  CONNECTED")
+            w()
+            time.sleep(0.25)
 
-        w("MEMORY TEST ............. 65536 BYTES OK")
-        time.sleep(0.06)
-        w("56FS .................... 512K ONLINE")
-        time.sleep(0.06)
-        w("TERMINAL LINK ........... T46 OK")
-        w()
-        time.sleep(0.2)
-        w("SYSTEM READY.  Type help for commands.")
-        w()
+            w("MEMORY TEST ............. 65536 BYTES OK")
+            time.sleep(0.06)
+            w("56FS .................... 512K ONLINE")
+            time.sleep(0.06)
+            w("TERMINAL LINK ........... T46 OK")
+            w()
+            time.sleep(0.2)
+            w("SYSTEM READY.  Type help for commands.")
+            w()
+
         self.os.sys_cd("/home")
 
         # Load persisted command history.
@@ -1090,7 +1121,7 @@ class Shell:
 
 
 class M56:
-    def __init__(self, terminal):
+    def __init__(self, terminal, startup=True):
         self.terminal = terminal
         self.memory   = Memory()
         self.io_bus   = IOBus()
@@ -1100,6 +1131,7 @@ class M56:
         self.shell    = Shell(self.os)
 
         self._entry   = None
+        self._startup = startup
         self._thread  = threading.Thread(target=self._run, daemon=True)
 
     def load(self, code, addr=USERRAM_START):
@@ -1118,4 +1150,4 @@ class M56:
             while not self.cpu.halted:
                 self.cpu.step()
         else:
-            self.shell.loop()
+            self.shell.loop(startup=self._startup)

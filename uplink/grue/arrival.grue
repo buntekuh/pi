@@ -1,12 +1,13 @@
--- The City of Lights
--- Part 1: Arrival
+# The City of Lights
+# Part 1: Arrival
 
 kind being: tree fae crow stork woman
 kind mood:  lost afraid rooted hopeful
 
-player has being: tree
-player has mood:  lost
-player has treeness: 0
+player "me":
+  being tree
+  mood lost
+  treeness 0
 
 
 room station "Train Station"

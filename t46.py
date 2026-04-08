@@ -85,7 +85,7 @@ class T46:
         # Text state (owned by main thread)
         self._cur_row = 0
         self._cur_col = 0
-        self._fg      = PALETTE_DATA[26]  # #6FAAA6 — teal
+        self._fg      = PALETTE_DATA[32]  # #45AC49 — terminal green
         self._bg      = (0,  0,  0)     # black
 
         self._m56     = None

@@ -63,7 +63,7 @@ TT_EOF       = 'EOF'
 _KEYWORDS = frozenset({
     'room', 'player', 'kind', 'color',
     'on', 'instead', 'of',
-    'go', 'take', 'examine', 'talk', 'to', 'with', 'turn', 'say', 'end',
+    'go', 'take', 'examine', 'talk', 'to', 'with', 'turn', 'say', 'end', 'draw',
 })
 
 # Full direction words.  Abbreviations (n, s, e, w, …) lex as TT_WORD;
@@ -101,7 +101,7 @@ class Lexer:
     recorded on every token from that line — redundant but convenient for
     the parser and for syntax highlighters that work token by token.
 
-    Blank lines and comment lines (-- …) emit no tokens.
+    Blank lines and comment lines (# …) emit no tokens.
     The final token is always TT_EOF.
 
     Token type summary
@@ -123,7 +123,7 @@ class Lexer:
 
         for line_no, raw in enumerate(lines, 1):
             stripped = raw.strip()
-            if not stripped or stripped.startswith('--'):
+            if not stripped or stripped.startswith('#'):
                 continue
 
             raw    = raw.expandtabs(2)
@@ -139,7 +139,7 @@ class Lexer:
                     continue
 
                 # Comment — rest of line
-                if raw[pos:pos+2] == '--':
+                if ch == '#':
                     break
 
                 col = pos + 1   # 1-based column
@@ -200,15 +200,15 @@ class Lexer:
 
 # Palette indices chosen for the T46 colour scheme.
 _HL_COLOUR = {
-    TT_KEYWORD:   _PAL[28],   # #4998A9  cool blue      — room, on, say …
-    TT_DIRECTION: _PAL[29],   # #96C3C9  lighter blue   — north, east …
-    TT_STRING:    _PAL[15],   # #E29D58  amber          — "quoted text"
-    TT_NUMBER:    _PAL[14],   # #D8BA7B  warm gold      — turn numbers
-    TT_WORD:      _PAL[11],   # #E6E9E2  near-white     — names / kinds
-    TT_COLON:     _PAL[25],   # #BAD0D1  light blue-green — handler colon
+    TT_KEYWORD:   _PAL[31],   # #4998A9  cool blue      — room, on, say …
+    TT_DIRECTION: _PAL[30],   # #96C3C9  lighter blue   — north, east …
+    TT_STRING:    _PAL[12],   # #E29D58  amber          — "quoted text"
+    TT_NUMBER:    _PAL[16],   # #D8BA7B  warm gold      — turn numbers
+    TT_WORD:      _PAL[19],   # #E6E9E2  near-white     — names / kinds
+    TT_COLON:     _PAL[28],   # #BAD0D1  light blue-green — handler colon
 }
-_HL_COMMENT = _PAL[30]        # #98A6A1  grey-blue      — -- comments
-HL_DEFAULT  = _PAL[11]        # #E6E9E2  near-white     — unclassified (exported)
+_HL_COMMENT = _PAL[24]        # #98A6A1  grey-blue      — # comments
+HL_DEFAULT  = _PAL[19]        # #E6E9E2  near-white     — unclassified (exported)
 
 
 def highlight_line(raw_text):
@@ -223,7 +223,7 @@ def highlight_line(raw_text):
         return []
 
     # Full-line comment
-    if stripped.startswith('--'):
+    if stripped.startswith('#'):
         return [(0, len(raw_text), _HL_COMMENT)]
 
     spans = []
@@ -238,7 +238,7 @@ def highlight_line(raw_text):
             continue
 
         # Inline comment — colour rest of line and stop
-        if raw_text[pos:pos+2] == '--':
+        if ch == '#':
             spans.append((pos, n - pos, _HL_COMMENT))
             break
 
@@ -371,10 +371,11 @@ class World:
         'words' is the set used for noun matching.
         """
         living_kinds = {'woman', 'man', 'crow', 'fae', 'tree', 'stork', 'being'}
+        fixed_kinds  = {'scenery'}
         living_from_kinds = set()
         if 'being' in self.kinds:
             living_from_kinds = set(self.kinds['being'])
-        takeable = (kind not in living_kinds) and (kind not in living_from_kinds)
+        takeable = (kind not in living_kinds) and (kind not in living_from_kinds) and (kind not in fixed_kinds)
         words = set(name.lower().split()) | {kind.lower()}
         obj = {
             'id':          self._next_obj_id,
@@ -443,7 +444,7 @@ class Parser:
         while i < len(lines):
             line     = lines[i]
             stripped = line.strip()
-            if stripped.startswith('--') or not stripped:
+            if stripped.startswith('#') or not stripped:
                 out.append(line)
                 i += 1
                 continue
@@ -678,14 +679,20 @@ class Parser:
                     current_room['exits'][values[0]] = strs[0].value
                     continue
 
-                # Object declaration — kind "Name" or kind "Name" "Description"
+                # Object declaration — three forms:
+                #   kind "Name"               — takeable object, name quoted
+                #   kind "Name" "Description" — takeable object, name + desc
+                #   kind word "Description"   — scenery/NPC, name unquoted
                 if strs:
-                    world.add_object(
-                        values[0],
-                        strs[0].value,
-                        strs[1].value if len(strs) > 1 else '',
-                        current_room['name'],
-                    )
+                    if len(strs) == 1 and len(types) >= 2 and types[1] == TT_WORD:
+                        # Unquoted name: kind word "Description"
+                        world.add_object(values[0], values[1], strs[0].value,
+                                         current_room['name'])
+                    else:
+                        # Quoted name: kind "Name" or kind "Name" "Description"
+                        world.add_object(values[0], strs[0].value,
+                                         strs[1].value if len(strs) > 1 else '',
+                                         current_room['name'])
                     continue
 
                 error(line_no, f'unrecognised line in room body: '
@@ -727,6 +734,15 @@ class Parser:
                     current_handler.append(('say', strs[0].value))
                     continue
 
+                # go "Room Name" — scripted movement to a named room
+                if types[0] == TT_KEYWORD and values[0] == 'go' and strs:
+                    current_handler.append(('go', strs[0].value))
+                    continue
+
+                if values[0] == 'draw' and strs:
+                    current_handler.append(('draw', strs[0].value))
+                    continue
+
                 # Object creation in a handler body: kind "Name" "Description"
                 if strs:
                     current_handler.append((
@@ -747,6 +763,9 @@ class Parser:
                         error(line_no, "'say' needs a quoted string")
                         continue
                     current_sub_handler.append(('say', strs[0].value))
+                    continue
+                if types[0] == TT_KEYWORD and values[0] == 'go' and strs:
+                    current_sub_handler.append(('go', strs[0].value))
                     continue
                 if types[0] == TT_KEYWORD and values[0] == 'end':
                     current_sub_handler.append(('end',))
@@ -967,7 +986,8 @@ class Interpreter:
     WRAP = 72
 
     def __init__(self, world: World, output=None, input_fn=None, status_fn=None,
-                 wait_key_fn=None, set_color_fn=None):
+                 wait_key_fn=None, set_color_fn=None, say_pause=0.0, say_color=None,
+                 draw_fn=None, src_dir=None):
         self.world        = world
         self._output      = output  or (lambda s: print(s, end=''))
         self._input       = input_fn or input
@@ -976,33 +996,56 @@ class Interpreter:
         self._parser      = InputParser()
         self._status_fn   = status_fn
         self._running     = True
+        self._say_pause   = say_pause   # seconds to sleep after each say line
+        self._say_color   = say_color   # default RGB for untagged say text (None = terminal default)
+        self._draw_fn     = draw_fn     # fn(name) — display a .spans image by stem name
+        self._src_dir     = src_dir     # directory containing the .grue file
 
     def _say(self, text: str):
+        import time, re
         if not text:
             self._output('\n')
+            return
+        # Optional leading [N] sets a per-line delay in tenths of a second.
+        m = re.match(r'^\[(\d+)\]', text)
+        if m:
+            time.sleep(int(m.group(1)) / 10.0)
+            text = text[m.end():]
+        if not text:
             return
         # Parse inline color tags: [name]...[/name] or [name]... to end of string.
         # Segments: list of (text, rgb|None)
         segments = self._parse_color_tags(text)
+        # Apply say_color to any untagged segment
+        if self._say_color:
+            segments = [(s, rgb if rgb is not None else self._say_color)
+                        for s, rgb in segments]
         if len(segments) == 1 and segments[0][1] is None:
-            # No color tags — plain wrap
+            # No color — plain wrap
             for line in textwrap.wrap(text, self.WRAP):
                 self._output(line + '\n')
+                if self._say_pause:
+                    time.sleep(self._say_pause)
         else:
             # Colored output — wrap the plain text, then re-emit with colors.
             plain = ''.join(s for s, _ in segments)
+            char_colors = [rgb for s, rgb in segments for _ in s]
             wrapped = textwrap.wrap(plain, self.WRAP)
-            # Re-map segments onto wrapped lines character by character.
-            seg_iter = iter((ch, rgb) for s, rgb in segments for ch in s)
+            # Track position in plain so we skip spaces textwrap removed.
+            pos = 0
             for line in wrapped:
-                for _ in line:
-                    ch, rgb = next(seg_iter)
+                for ch in line:
+                    while pos < len(plain) and plain[pos] != ch:
+                        pos += 1
                     if self._set_color:
-                        self._set_color(rgb)
+                        self._set_color(char_colors[pos] if pos < len(char_colors) else None)
                     self._output(ch)
+                    pos += 1
                 if self._set_color:
                     self._set_color(None)
                 self._output('\n')
+                if self._say_pause:
+                    time.sleep(self._say_pause)
 
     def _parse_color_tags(self, text: str):
         """Split text into [(fragment, rgb|None)] segments using world.colors."""
@@ -1041,7 +1084,7 @@ class Interpreter:
     def _resolve_noun(self, noun_words, candidates):
         matches = self._match_objects(noun_words, candidates)
         if not matches:
-            return None, "You don't see that here."
+            return None, "I don't see that here."
         if len(matches) == 1:
             return matches[0], None
         names = ', '.join(o['name'] for o in matches)
@@ -1051,6 +1094,11 @@ class Interpreter:
         for stmt in body:
             if stmt[0] == 'say':
                 self._say(stmt[1])
+            elif stmt[0] == 'go':
+                self._do_go_room(stmt[1])
+            elif stmt[0] == 'draw':
+                if self._draw_fn:
+                    self._draw_fn(stmt[1])
             elif stmt[0] == 'end':
                 self._output('\n')
                 self._say('The neural engram ends here. Press any key.')
@@ -1080,7 +1128,13 @@ class Interpreter:
             self._status_fn(room['name'], list(room['exits'].keys()))
 
     def _describe_room(self, room):
-        self._say(room['name'])
+        room_color = self.world.colors.get('room')
+        if room_color and self._set_color:
+            self._set_color(room_color)
+            self._output(room['name'] + '\n')
+            self._set_color(None)
+        else:
+            self._say(room['name'])
         self._output('\n')
         if room['desc']:
             self._say(room['desc'])
@@ -1115,7 +1169,7 @@ class Interpreter:
             return True
         dest_name = room['exits'].get(direction)
         if dest_name is None:
-            self._say("You can't go that way.")
+            self._say("I can't go that way.")
             return False
         dest = self.world.room_by_name(dest_name)
         if dest is None:
@@ -1126,7 +1180,20 @@ class Interpreter:
         self._output('\n')
         self._describe_room(dest)
         self._update_status()
+        self._fire_turn_zero(dest)
         return True
+
+    def _do_go_room(self, room_name):
+        dest = self.world.room_by_name(room_name)
+        if dest is None:
+            self._say(f"(Room '{room_name}' not found — map error.)")
+            return
+        self.world.player['location'] = dest['name']
+        dest['turn_counter'] = 0
+        self._output('\n')
+        self._describe_room(dest)
+        self._update_status()
+        self._fire_turn_zero(dest)
 
     def _do_take(self, noun_words):
         scope = self.world.objects_in_scope()
@@ -1245,6 +1312,13 @@ class Interpreter:
             self._say(f'You are {self.world.player["name"]}.')
         return False
 
+    def _fire_turn_zero(self, room):
+        """Fire 'on turn 0:' handlers — runs once on first entry to a room."""
+        for h in room['handlers']:
+            if h['type'] == 'turn_n' and h['n'] == 0 and not h['fired']:
+                self._run_body(h['body'])
+                h['fired'] = True
+
     def _fire_turn_handlers(self):
         room = self.world.current_room()
         if room is None:
@@ -1278,6 +1352,7 @@ class Interpreter:
             self._output('\n')
             self._describe_room(start)
             self._update_status()
+            self._fire_turn_zero(start)
 
         while self._running:
             self._output('\n')
@@ -1347,11 +1422,14 @@ class Interpreter:
 # ---------------------------------------------------------------------------
 
 def load_and_run(source: str, output=None, input_fn=None, status_fn=None,
-                 wait_key_fn=None, set_color_fn=None):
+                 wait_key_fn=None, set_color_fn=None, say_pause=0.0, say_color=None,
+                 draw_fn=None, src_dir=None):
     """Parse 'source' as a .grue file and run the game. Raises GrueError on error."""
     world  = Parser().parse(source)
     interp = Interpreter(world, output=output, input_fn=input_fn, status_fn=status_fn,
-                         wait_key_fn=wait_key_fn, set_color_fn=set_color_fn)
+                         wait_key_fn=wait_key_fn, set_color_fn=set_color_fn,
+                         say_pause=say_pause, say_color=say_color,
+                         draw_fn=draw_fn, src_dir=src_dir)
     interp.run()
 
 
