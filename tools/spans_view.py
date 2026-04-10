@@ -192,18 +192,18 @@ def render(surf, w, h, layers, delay=0, screen=None, scale=1):
 # T46 terminal renderer  (no pygame surface — sends receive() commands)
 # ---------------------------------------------------------------------------
 
-def render_to_terminal(terminal, layers):
+def render_to_terminal(terminal, w, h, layers):
     """
     Render a parsed spans layer list directly to a T46 terminal via receive().
-    Used by the Grue interpreter draw command — no local pygame surface needed.
+    Uses the image's own dimensions (w, h) — not the terminal's GFX size —
+    so the image is not stretched or padded incorrectly.
     """
     for layer_num, (pidx, spans_str, seed) in enumerate(layers):
         terminal.receive({'type': 'pen', 'colour': pidx})
         if layer_num == 0:
-            # Sky: full-screen rect using pen colour
-            from t46 import GFX_W, GFX_H
+            # Sky: fill exactly the image area, not the full framebuffer
             terminal.receive({'type': 'rect', 'x': 0, 'y': 0,
-                              'w': GFX_W, 'h': GFX_H, 'colour': pidx})
+                              'w': w, 'h': h, 'colour': pidx})
             continue
         for x, y, length in parse_boundary(spans_str):
             terminal.receive({'type': 'rect', 'x': x, 'y': y,

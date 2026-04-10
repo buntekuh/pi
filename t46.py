@@ -384,18 +384,15 @@ class T46:
         elif t == "text":
             self._draw_text(cmd)
         elif t == "line":
-            pal = _build_palette()
-            pygame.draw.line(self.gfx_fb, pal[cmd["colour"]],
+            pygame.draw.line(self.gfx_fb, cmd["colour"],
                              (cmd["x1"], cmd["y1"]), (cmd["x2"], cmd["y2"]))
         elif t == "fill":
             _flood_fill(self.gfx_fb, cmd["x"], cmd["y"], cmd["colour"])
         elif t == "rect":
-            pal = _build_palette()
-            pygame.draw.rect(self.gfx_fb, pal[cmd["colour"]],
+            pygame.draw.rect(self.gfx_fb, cmd["colour"],
                              (cmd["x"], cmd["y"], cmd["w"], cmd["h"]))
         elif t == "plot":
-            pal = _build_palette()
-            self.gfx_fb.set_at((cmd["x"], cmd["y"]), pal[cmd["colour"]])
+            self.gfx_fb.set_at((cmd["x"], cmd["y"]), cmd["colour"])
 
     # ------------------------------------------------------------------
     # Internal rendering helpers  (main thread only)
@@ -549,16 +546,41 @@ def _build_palette():
 
 
 def _flood_fill(surface, x, y, colour):
-    target = surface.get_at((x, y))[0]  # indexed surface returns index
+    """
+    Scanline flood fill on an 8-bit indexed surface.
+    Fills whole horizontal spans with draw.rect (fast C path) rather than
+    one pixel at a time, keeping the main thread responsive.
+    colour is a palette index (int); target is the index at the seed point.
+    """
+    target = surface.get_at((x, y))[0]   # palette index at seed
     if target == colour:
         return
+    sw, sh = surface.get_size()
     stack = [(x, y)]
-    w, h = surface.get_size()
     while stack:
         cx, cy = stack.pop()
-        if cx < 0 or cy < 0 or cx >= w or cy >= h:
+        if cy < 0 or cy >= sh:
             continue
         if surface.get_at((cx, cy))[0] != target:
             continue
-        surface.set_at((cx, cy), colour)
-        stack.extend([(cx+1, cy), (cx-1, cy), (cx, cy+1), (cx, cy-1)])
+        # Extend left and right to find the full span on this row
+        xl = cx
+        while xl > 0 and surface.get_at((xl - 1, cy))[0] == target:
+            xl -= 1
+        xr = cx
+        while xr < sw - 1 and surface.get_at((xr + 1, cy))[0] == target:
+            xr += 1
+        # Fill the entire span in one C-speed rect call
+        pygame.draw.rect(surface, colour, (xl, cy, xr - xl + 1, 1))
+        # Push one seed per contiguous target-coloured run in rows above and below
+        for ny in (cy - 1, cy + 1):
+            if not (0 <= ny < sh):
+                continue
+            xi = xl
+            while xi <= xr:
+                if surface.get_at((xi, ny))[0] == target:
+                    stack.append((xi, ny))
+                    while xi <= xr and surface.get_at((xi, ny))[0] == target:
+                        xi += 1
+                else:
+                    xi += 1

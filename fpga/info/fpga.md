@@ -2,21 +2,22 @@
 
 ## Manifesto
 
-The M56 is a learning device. The idea of the M56 is to have a computer that is so simple, that every single aspect can easily be understood. At the same time it evades the stumbling blocks and pitfalls of early computers that had to work around limited resources.
+The M56 is a learning device. The idea is to have a computer so simple that every single aspect can be understood. At the same time it evades the stumbling blocks and pitfalls of early computers that had to work around limited resources.
 
 The M56 opts to be limited in scope. It is not a high power workhorse. In essence it is a toy of a computer. The limitation exists in order to simplify the machine.
 
 The M56 is a computer simple enough that every layer can be held in your head
-at once From the logic gates in the FPGA fabric to the CPU instruction
-set. From the ultra simple operating system to the type-safe Forth based programming language Pi the OS and all the tools are implemented in. From an interactive fiction
-interpreter, all the way up to the text adventure worlds a user creates and
-plays.
+at once. From the logic gates in the FPGA fabric to the CPU instruction
+set. From the ultra simple operating system to the Forth-based programming
+language Pi the OS and all the tools are implemented in. From an interactive
+fiction interpreter, all the way up to the text adventure worlds a user creates
+and plays.
 
 No layer is a mystery. No component requires a specialist to
 comprehend. A curious person with time can trace a
 command typed at a terminal to the electrons that execute it and back again.
 
-The computer system uses a mainframe <-> terminal set up. The terminal, called T46 edits text and displays graphics. The terminal is implemented in Python. The graphics system, the display, the keyboard all these are not part of the M56 computer. They are excluded and are not what is being taught. What remains is a computer with an ultra simple 16 bit Risc processor, a very simple filesystem, single priority interrupts, extremely basic i/o and limited RAM. It can connect to the T46 terminal, a sd card reader and network with other M56 computers.
+The computer system uses a mainframe/terminal setup. The terminal, called T46, edits text and displays graphics. The terminal is implemented in Python. The display, keyboard, and graphics system are not part of the M56 computer — they are excluded and are not what is being taught. What remains is a computer with an ultra-simple 32-bit RISC processor, a very simple filesystem, single-priority interrupts, extremely basic I/O, and 512 KB of RAM. It connects to the T46 terminal, an SD card reader, and can network with other M56 computers.
 
 This simplicity is not a limitation. It is the point.
 
@@ -45,9 +46,9 @@ The pi dialect of Forth was developed to make it easier to be used by modern dev
 
 While it is an interpreted language it is extremely near to how computers operate. This makes it an ideal language to run an OS on, in a language that is easily understood by those who are willing to think the way a machine does.
 
-#### The Risc CPU
+#### The RISC CPU
 
-The Risc CPU is implemented with a tiny set of opcodes that make it Turing complete, yet extremely easy to understand. Mission critical parts of the OS like the Forth interpreter are implemented in assembly.
+The M56 is a 32-bit RISC CPU with a fixed 32-bit instruction width and 21 opcodes. Every instruction is the same size, every register is the same width. Mission-critical parts of the OS are implemented in assembly.
 
 ## The Stack
 

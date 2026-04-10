@@ -717,18 +717,7 @@ class OS:
 
                 _grue_dir = str(Path(src_path).parent)
                 def draw_fn(name):
-                    spans_path = str(Path(_grue_dir) / f"{name}.spans")
-                    try:
-                        spans_data = self.fs.read_file(spans_path)
-                    except Exception:
-                        return
-                    from tools.spans_view import parse_spans, render_to_terminal
-                    _, _, layers = parse_spans(spans_data)
-                    term.receive({'type': 'mode', 'mode': 'graphics'})
-                    render_to_terminal(term, layers)
-                    status_fn('Press a key.', [])
-                    wait_key_fn()
-                    term.receive({'type': 'mode', 'mode': 'text'})
+                    pass  # graphics deferred until Titania event model is ready
             else:
                 set_color_fn = None
                 _say_color  = None
