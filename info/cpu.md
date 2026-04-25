@@ -56,10 +56,11 @@ call these fixed addresses — the implementation behind them may change, but th
 addresses never move.
 
 ```
-0x00001000   _mul     Jump.Al  mul_impl   ; software multiply
-0x00001004   _div     Jump.Al  div_impl   ; software divide
-0x00001008   _mod     Jump.Al  mod_impl   ; software modulo
-0x0000100C   ...
+0x00001000   _mul      Jump.Al  mul_impl    ; software multiply
+0x00001004   _div      Jump.Al  div_impl    ; software divide
+0x00001008   _mod      Jump.Al  mod_impl    ; software modulo
+0x0000100C   _print    Jump.Al  print_impl  ; print string to UART — R1 = pointer to null-terminated string
+0x00001010   _printnum Jump.Al  printnum_impl ; print integer to UART — R1 = value
 ...
 ```
 
@@ -86,48 +87,51 @@ arbitrarily.
 
 ## Opcodes
 
-18 real opcodes. Everything else is an assembler macro or a ROM subroutine.
+19 real opcodes. Everything else is an assembler macro or a ROM subroutine.
+
+All mnemonics are exactly three lowercase letters.
 
 | Code | Mnemonic | Description |
 |------|----------|-------------|
-| 0    | Move     | 32-bit word load, store, and register-to-register |
-| 1    | MoveB    | Byte load or store |
-| 2    | Add      | Add |
-| 3    | Sub      | Subtract |
-| 4    | And      | Bitwise AND |
-| 5    | Or       | Bitwise OR |
-| 6    | Xor      | Bitwise XOR |
-| 7    | Not      | Bitwise NOT (unary) |
-| 8    | Shift    | Logical shift left or right |
-| 9    | ShiftA   | Arithmetic shift right (sign-preserving) |
-| 10   | Swap     | Swap high and low 16-bit halves of register |
-| 11   | Jump     | Conditional register-relative offset |
-| 12   | Call     | Conditional call (push PC, jump) |
-| 13   | Ret      | Conditional return (pop PC) |
-| 14   | RetI     | Return from interrupt (pop PC + FLAGS) |
-| 15   | Halt     | Halt CPU |
-| 16   | In       | Read I/O port into register (blocking) |
-| 17   | Out      | Write register to I/O port |
+| 0    | mov      | 32-bit word load, store, and register-to-register |
+| 1    | mvb      | Byte load or store |
+| 2    | add      | Add |
+| 3    | sub      | Subtract |
+| 4    | and      | Bitwise AND |
+| 5    | orr      | Bitwise OR |
+| 6    | xor      | Bitwise XOR |
+| 7    | not      | Bitwise NOT (unary) |
+| 8    | shl      | Logical shift left |
+| 9    | shr      | Logical shift right |
+| 10   | sar      | Arithmetic shift right (sign-preserving) |
+| 11   | swp      | Swap high and low 16-bit halves of register |
+| 12   | jmp      | Conditional register-relative offset |
+| 13   | cal      | Conditional call (push PC, jump) |
+| 14   | ret      | Conditional return (pop PC) |
+| 15   | rti      | Return from interrupt (pop PC + FLAGS) |
+| 16   | hlt      | Halt CPU |
+| 17   | inp      | Read I/O port into register (blocking) |
+| 18   | out      | Write register to I/O port |
 
-Opcodes 18–31 are reserved for future use.
+Opcodes 19–31 are reserved for future use.
 
 ### Assembler Macros
 
 Conveniences that expand to real instructions. Not in hardware.
 
 ```
-Push src         →  Sub SP, #4 ; Move src, [SP]
-Pop  dest        →  Move [SP], dest ; Add SP, #4
-Nop              →  Add R0, #0
-Clr  dest        →  Xor dest, dest
-Inc  dest        →  Add dest, #1
-Dec  dest        →  Sub dest, #1
-EI               →  Or  FLAGS, #0x10
-DI               →  And FLAGS, #~0x10
-Jump.cond off    →  Jump R15, (cond, off)
-Ret.cond         →  Ret  (cond)
-Mul  dest, src   →  Call.Al _mul
-Div  dest, src   →  Call.Al _div
+psh src          →  sub SP, #4 ; mov src, [SP]
+pop dest         →  mov [SP], dest ; add SP, #4
+nop              →  add R0, #0
+clr dest         →  xor dest, dest
+inc dest         →  add dest, #1
+dec dest         →  sub dest, #1
+ei               →  orr FLAGS, #0x10
+di               →  and FLAGS, #~0x10
+jmp.cond off     →  jmp R15, (cond, off)
+ret.cond         →  ret (cond)
+mul dest, src    →  cal.al _mul
+div dest, src    →  cal.al _div
 ```
 
 ### ROM Subroutines
@@ -135,9 +139,11 @@ Div  dest, src   →  Call.Al _div
 Complex operations implemented once in ROM, called by convention:
 
 ```
-_mul    software multiply   — shift-and-add
-_div    software divide     — shift-and-subtract
-_mod    software modulo
+_mul      software multiply    — shift-and-add
+_div      software divide      — shift-and-subtract
+_mod      software modulo
+_print    print null-terminated string to UART — R1 = string pointer
+_printnum print integer as decimal to UART    — R1 = value
 
 ; Note: _mul, _div, _mod are leaf functions — candidates for a QuickCall/R13
 ; convention (return via R13 instead of stack) once calling conventions are settled.
@@ -160,7 +166,8 @@ Bit  18..0    (...)    (19 bits)   — destination register and/or offset
 ```
 Move #imm19, dest
 ```
-Load 19-bit unsigned immediate into dest, zero-extended to 32 bits.
+Load 19-bit immediate into dest, sign-extended to 32 bits. Range: -262144 to +262143.
+Values outside this range must be loaded via the literal pool (mode 4 with R15).
 ```
 opcode | mode=0 | dest | (imm19)
 ```
@@ -225,7 +232,7 @@ Modes 3 and 5 (indirect write) are not valid — the result always goes to a reg
 
 | Mode | Source operand         |
 |------|------------------------|
-| 0    | 19-bit immediate       |
+| 0    | 19-bit immediate (sign-extended) |
 | 1    | register               |
 | 2    | word at [src]          |
 | 4    | word at [src+off]      |
@@ -233,44 +240,48 @@ Modes 3 and 5 (indirect write) are not valid — the result always goes to a reg
 Result written to the register field. FLAGS updated after every ALU operation.
 
 ```
-Add  dest, #imm19      →  dest = dest + imm19
-Add  dest, src         →  dest = dest + src
-Add  dest, [src]       →  dest = dest + mem[src]
-Add  dest, [src+off]   →  dest = dest + mem[src+off]
+add  dest, #imm19      →  dest = dest + sign_extend(imm19)
+add  dest, src         →  dest = dest + src
+add  dest, [src]       →  dest = dest + mem[src]
+add  dest, [src+off]   →  dest = dest + mem[src+off]
 ```
 
-(Sub, And, Or, Xor follow the same pattern.)
+(sub, and, orr, xor follow the same pattern.)
 
 Multiply and divide are ROM subroutines, not hardware opcodes. The assembler
-macros `Mul` and `Div` expand to `Call.Al _mul` and `Call.Al _div`.
+macros `mul` and `div` expand to `cal.al _mul` and `cal.al _div`.
 
 ---
 
 ## Unary Instructions
 
-### Not
+### not
 ```
-Not dest    →  dest = ~dest
+not dest    →  dest = ~dest
 ```
 Updates Z and N flags.
 
-### Shift — Logical Shift
+### shl — Logical Shift Left
 ```
-Shift dest, #n
+shl dest, #n
 ```
-Bits [4:0] of the 19-bit field hold a 5-bit signed shift count.
-- Positive → shift left
-- Negative (bit 4 set) → logical shift right
+Shift dest left by n bits. Bits [4:0] of the 19-bit field hold the shift count.
 
-### ShiftA — Arithmetic Shift Right
+### shr — Logical Shift Right
 ```
-ShiftA dest, #n
+shr dest, #n
 ```
-Right shift by n bits, sign bit (bit 31) replicated.
+Shift dest right by n bits, zero-filling from the left.
 
-### Swap
+### sar — Arithmetic Shift Right
 ```
-Swap dest    →  dest = ((dest & 0xFFFF) << 16) | (dest >> 16)
+sar dest, #n
+```
+Shift dest right by n bits, sign bit (bit 31) replicated.
+
+### swp
+```
+swp dest    →  dest = ((dest & 0xFFFF) << 16) | (dest >> 16)
 ```
 Swaps high and low 16-bit halves.
 
