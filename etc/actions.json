@@ -1,0 +1,18 @@
+{
+  ".asm": [
+    {"name": "Run",     "params": ""},
+    {"name": "Debug",   "params": "-debug"},
+    {"name": "Compile", "params": "-compile -o NAME.o"}
+  ],
+  ".grue": [
+    {"name": "Run",   "params": "-grue"},
+    {"name": "Debug", "params": "-grue -debug"}
+  ],
+  ".bin": [
+    {"name": "Run",   "params": ""},
+    {"name": "Debug", "params": "-debug"}
+  ],
+  "*": [
+    {"name": "Edit",  "params": "-edit"}
+  ]
+}
