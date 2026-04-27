@@ -35,8 +35,10 @@ except ImportError:
 
 # ── Palette ──────────────────────────────────────────────────────────────────
 # (0x16, 0x60, 0x84)    teal
-C_BG        = (0x16, 0x60, 0x84)   # teal desktop
-C_TITLE     = (0x4b, 0x60, 0x7f)   # steel-blue title bar
+# (0x4b, 0x60, 0x7f)    blue
+# 4381ac
+C_BG        = (0x43, 0x81, 0xac)   # teal desktop
+C_TITLE     = (0x00, 0x00, 0x00)   # steel-blue title bar
 C_STRIPE    = (0x38, 0x4c, 0x63)   # darker stripe in title bar
 C_TITLE_TXT = (0xe8, 0xd8, 0xc9)   # cream text on title bar
 C_BODY      = (0xe8, 0xd8, 0xc9)   # cream window body
@@ -53,6 +55,10 @@ SCREEN_H = 768
 TITLE_H  = 28
 PATH_H   = 22
 BORDER   = 2
+WIN_B1    = 3                        # outer black border
+WIN_BG    = 3                        # desktop-colour gap
+WIN_B2    = 1                        # inner black border
+WIN_INSET = WIN_B1 + WIN_BG + WIN_B2 # total content inset
 ICON_SZ  = 48
 CELL_W   = 90
 CELL_H   = 82
@@ -62,14 +68,33 @@ DBL_MS   = 380   # double-click interval in milliseconds
 _ICON_DIR = Path(__file__).parent / 'assets' / 'img'
 
 
-def _load_icon(rel):
+def _draw_window_border(surf, x, y, w, h):
+    """Three-layer window border: outer black / desktop-colour gap / inner black."""
+    pygame.draw.rect(surf, C_BORDER, (x, y, w, h), WIN_B1)
+    pygame.draw.rect(surf, C_BG,
+                     (x + WIN_B1, y + WIN_B1, w - WIN_B1 * 2, h - WIN_B1 * 2), WIN_BG)
+    pygame.draw.rect(surf, C_BORDER,
+                     (x + WIN_B1 + WIN_BG, y + WIN_B1 + WIN_BG,
+                      w - (WIN_B1 + WIN_BG) * 2, h - (WIN_B1 + WIN_BG) * 2), WIN_B2)
+
+
+def _load_icon(rel, size=ICON_SZ):
     try:
         s = pygame.image.load(str(_ICON_DIR / rel)).convert_alpha()
-        return pygame.transform.smoothscale(s, (ICON_SZ, ICON_SZ))
+        return pygame.transform.smoothscale(s, (size, size))
     except Exception:
-        s = pygame.Surface((ICON_SZ, ICON_SZ), pygame.SRCALPHA)
+        s = pygame.Surface((size, size), pygame.SRCALPHA)
         s.fill((180, 160, 140, 255))
         return s
+
+_icon_up    = None
+_icon_close = None
+
+def _get_ui_icons():
+    global _icon_up, _icon_close
+    if _icon_up is None:
+        _icon_up    = _load_icon('up.png',    size=16)
+        _icon_close = _load_icon('close.png', size=16)
 
 # ── Filesystem mounts ─────────────────────────────────────────────────────────
 
@@ -344,7 +369,7 @@ class ErrorDialog:
         ok_s = fl.render('OK', True, C_LABEL)
         surf.blit(ok_s, ok_s.get_rect(center=btn_r.center))
 
-        pygame.draw.rect(surf, C_BORDER, self.rect, BORDER)
+        _draw_window_border(surf, *self.rect.topleft, *self.rect.size)
 
     def handle_event(self, event):
         """Returns 'dismiss' when OK is clicked or Escape pressed, else None."""
@@ -386,11 +411,12 @@ class ExplorerWindow:
 
     @property
     def _content_rect(self):
+        I = WIN_INSET
         return pygame.Rect(
-            self.pos[0] + BORDER,
-            self.pos[1] + TITLE_H + PATH_H,
-            self.size[0] - BORDER * 2,
-            self.size[1] - TITLE_H - PATH_H - BORDER,
+            self.pos[0] + I,
+            self.pos[1] + I + TITLE_H + PATH_H,
+            self.size[0] - I * 2,
+            self.size[1] - I * 2 - TITLE_H - PATH_H,
         )
 
     def _refresh(self):
@@ -404,7 +430,8 @@ class ExplorerWindow:
 
     @property
     def _up_rect(self):
-        return pygame.Rect(self.pos[0], self.pos[1] + TITLE_H, PATH_H, PATH_H)
+        I = WIN_INSET
+        return pygame.Rect(self.pos[0] + I, self.pos[1] + I + TITLE_H, PATH_H, PATH_H)
 
     def _go_up(self):
         if self.path != '/':
@@ -438,41 +465,43 @@ class ExplorerWindow:
         ft, fp, fl = fonts
         x, y = self.pos
         w, h = self.size
+        I = WIN_INSET
 
         # Window body background
-        pygame.draw.rect(surf, C_BODY, (x + BORDER, y + TITLE_H, w - BORDER * 2, h - TITLE_H))
+        pygame.draw.rect(surf, C_BODY, (x + I, y + I + TITLE_H, w - I * 2, h - I * 2 - TITLE_H))
 
         # Title bar
-        pygame.draw.rect(surf, C_TITLE, (x, y, w, TITLE_H))
-        for sx in range(x + 8, x + w - TITLE_H - 4, 5):
-            pygame.draw.line(surf, C_STRIPE, (sx, y + 6), (sx, y + TITLE_H - 6))
+        pygame.draw.rect(surf, C_TITLE, (x + I, y + I, w - I * 2, TITLE_H))
+        for sx in range(x + I + 8, x + w - I - TITLE_H - 4, 5):
+            pygame.draw.line(surf, C_STRIPE, (sx, y + I + 6), (sx, y + I + TITLE_H - 6))
         title_s = ft.render(self.mount.label.upper(), True, C_TITLE_TXT)
-        tr = title_s.get_rect(center=(x + (w - TITLE_H) // 2, y + TITLE_H // 2))
+        tr = title_s.get_rect(center=(x + I + (w - I * 2 - TITLE_H) // 2, y + I + TITLE_H // 2))
         pygame.draw.rect(surf, C_TITLE, tr.inflate(12, 6))
         surf.blit(title_s, tr)
 
         # Close button
-        close_r = pygame.Rect(x + w - TITLE_H, y, TITLE_H, TITLE_H)
+        _get_ui_icons()
+        close_r = pygame.Rect(x + w - I - TITLE_H, y + I, TITLE_H, TITLE_H)
         pygame.draw.rect(surf, C_BORDER, close_r, BORDER)
-        xs = ft.render('×', True, C_TITLE_TXT)
-        surf.blit(xs, xs.get_rect(center=close_r.center))
+        surf.blit(_icon_close, _icon_close.get_rect(center=close_r.center))
 
         # Path bar
-        pygame.draw.rect(surf, C_PATHBAR, (x, y + TITLE_H, w, PATH_H))
-        pygame.draw.line(surf, C_BORDER, (x, y + TITLE_H), (x + w, y + TITLE_H))
-        pygame.draw.line(surf, C_BORDER, (x, y + TITLE_H + PATH_H), (x + w, y + TITLE_H + PATH_H))
+        pygame.draw.rect(surf, C_PATHBAR, (x + I, y + I + TITLE_H, w - I * 2, PATH_H))
+        pygame.draw.line(surf, C_BORDER, (x + I, y + I + TITLE_H), (x + w - I, y + I + TITLE_H))
+        pygame.draw.line(surf, C_BORDER, (x + I, y + I + TITLE_H + PATH_H), (x + w - I, y + I + TITLE_H + PATH_H))
 
         # Up button
         at_root = self.path == '/'
         up_r = self._up_rect
-        up_col = (0xb0, 0xa8, 0x98) if at_root else C_LABEL
         pygame.draw.rect(surf, C_BORDER, up_r, BORDER)
-        us = fp.render('↑', True, up_col)
-        surf.blit(us, us.get_rect(center=up_r.center))
+        icon = _icon_up.copy() if at_root else _icon_up
+        if at_root:
+            icon.set_alpha(80)
+        surf.blit(icon, icon.get_rect(center=up_r.center))
 
         # Path label (starts after the up button)
         ps = fp.render(self._path_label(), True, C_LABEL)
-        surf.blit(ps, (x + PATH_H + 4, y + TITLE_H + (PATH_H - ps.get_height()) // 2))
+        surf.blit(ps, (x + I + PATH_H + 4, y + I + TITLE_H + (PATH_H - ps.get_height()) // 2))
 
         # Icon grid (clipped to content area)
         cr = self._content_rect
@@ -502,8 +531,8 @@ class ExplorerWindow:
             dim.fill((0, 0, 0, 90))
             surf.blit(dim, (x, y))
 
-        # Outer border (on top so it's always crisp)
-        pygame.draw.rect(surf, C_BORDER, (x, y, w, h), BORDER)
+        # Layered border: outer black / desktop-colour gap / inner black
+        _draw_window_border(surf, x, y, w, h)
 
         # Context menu and error dialog float above everything
         if self._menu:
@@ -537,10 +566,11 @@ class ExplorerWindow:
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             pos = event.pos
-            close_r = pygame.Rect(self.pos[0] + self.size[0] - TITLE_H,
-                                  self.pos[1], TITLE_H, TITLE_H)
-            title_r = pygame.Rect(self.pos[0], self.pos[1],
-                                  self.size[0] - TITLE_H, TITLE_H)
+            I = WIN_INSET
+            close_r = pygame.Rect(self.pos[0] + self.size[0] - I - TITLE_H,
+                                  self.pos[1] + I, TITLE_H, TITLE_H)
+            title_r = pygame.Rect(self.pos[0] + I, self.pos[1] + I,
+                                  self.size[0] - I * 2 - TITLE_H, TITLE_H)
 
             if close_r.collidepoint(pos):
                 return 'close'
