@@ -14,12 +14,11 @@ conviction. From the flip-flop to the scripting language, every part of the
 system is designed to fit in one sitting — not because it is limited, but
 because simplicity is a design goal, not an afterthought.
 
-
-Titania is a complete fantasy computer: CPU, OS, languages, and tools, built
-from first principles on real FPGA hardware. Every layer is visible, every
-decision is documented, and nothing is a black box. A student can start at any
-layer and follow the thread in either direction — down to the silicon or up to
-the adventure game running on top.
+Titania is a complete computer: RISC-V CPU on real FPGA hardware, OS,
+languages, and tools, built from first principles. Every layer is visible,
+every decision is documented, and nothing is a black box. A student can start
+at any layer and follow the thread in either direction — down to the silicon
+or up to the adventure game running on top.
 
 The system is also a book. Not a textbook that must be read in order, but a
 map: each chapter explains one layer of Titania, stands alone, and points
@@ -28,16 +27,11 @@ system connects.
 
 ## The book
 
-Titania is also a book. Not a textbook that must be read in order, but a map:
-each chapter explains one layer, stands alone, and points outward to deeper
-resources for the curious. Each language chapter exists because the previous
-layer had a pain point it could not solve.
-
 | Chapter | Layer |
 |---------|-------|
 | 1 | Introduction |
 | 2 | VHDL on the FPGA |
-| 3 | The M56 CPU |
+| 3 | RISC-V (RV32I) |
 | 4 | The memory map |
 | 5 | Titania-0 |
 | 6 | The OS |
@@ -50,12 +44,12 @@ layer had a pain point it could not solve.
 
 | Layer | Description |
 |-------|-------------|
-| M56 | 32-bit RISC CPU on Digilent Cmod A7-35T (Artix-7 FPGA) |
+| RISC-V (RV32I) | 32-bit RISC CPU. Implementation: FemtoRV32 (~400 lines Verilog, educational by design) on Digilent Cmod A7-35T (Artix-7 FPGA). RV32I is a published open standard — 47 instructions, uniform encoding, the same ISA the industry is converging on. |
 | Titania OS | Message-passing, simple scheduler, single interrupt level |
-| Filesystem | Cartridge-based (FAT, 512KB), visible/writable flags, no permissions |
+| Filesystem | Cartridge-based (custom FAT, 512KB), visible/writable flags, no permissions |
 | T46 | Terminal: 640×368, 256-colour palette |
-| Titania-0 | BCPL-inspired, typeless, everything is a 32-bit word. Simple enough that its compiler fits in an evening. Bootstraps Titania-1. |
-| Titania-1 | Adds types (INTEGER, CHAR, BYTE, structs, pointers). C without the regret. Used to write the OS, Puck, and Titania-2. |
+| Titania-0 | BCPL-inspired, typeless, everything is a 32-bit word. Simple enough that its compiler fits in an evening. Bootstraps Titania-1. Compiles to RISC-V. |
+| Titania-1 | Adds types (INTEGER, CHAR, BYTE, structs, pointers). C without the regret. Used to write the OS, Puck, and Titania-2. Compiles to RISC-V. |
 | Puck | Interactive fiction engine. Extensible in Titania-1 against a stable API. Named for Titania's companion in A Midsummer Night's Dream. |
 | Titania-2 (Imp) | Interpreted, embeddable scripting language derived from Lox. Follows Crafting Interpreters (Bob Nystrom) through Part II — Functions, then diverges: no classes, no objects, no garbage collector. Closures, a string library, and the Puck embedding API replace the object system. |
 | Grue | The language Puck adventure authors write in. A thin layer on top of Titania-2 with domain syntax for rooms, items, and actions. Authors write real code — conditions, logic, variables — not pseudo-English. Grue is honest about being a programming language. Named after the creature from Zork. |
@@ -63,12 +57,35 @@ layer had a pain point it could not solve.
 ## Bootstrapping path
 
 ```
-M56 assembly → Titania-0 compiler → Titania-1 compiler → OS, Puck, Titania-2
+RISC-V assembly → Titania-0 compiler → Titania-1 compiler → OS, Puck, Titania-2
 ```
 
 Each step is built using only the layer below it. A student can follow the
 entire chain from VHDL flip-flops to a Grue adventure running on hardware,
 with no magic transitions and no black boxes.
+
+## CPU: RISC-V RV32I on FemtoRV32
+
+The CPU chapter is not about a fantasy ISA — it is about RISC-V, the same
+instruction set the industry is converging on. RV32I has 47 instructions with
+a uniform 32-bit encoding. The base integer ISA fits on one page.
+
+The implementation is FemtoRV32 by Bruno Levy: ~400 lines of documented
+Verilog, designed explicitly for teaching processor design. It fits on the
+Cmod A7-35T with thousands of LUTs to spare. A reader who finishes chapter 3
+understands the same ISA that is in their phone, their router, and
+increasingly their laptop.
+
+The book pitch: *"From RISC-V flip-flops to a working adventure game —
+every layer visible, nothing a black box."*
+
+## Hardware
+
+- Board: Digilent Cmod A7-35T (Artix-7 FPGA, 33K LUTs)
+- Clock: 12 MHz onboard oscillator; PLL multiplies to 50–75 MHz for CPU core
+- UART: buart (J1 CPU, BSD-2), translated to VHDL, 115200 bps via FT2232HQ USB chip
+- SRAM: 512KB on-board cellular RAM (19-bit address, 8-bit data)
+- Storage: SD card via SPI (one cartridge = one SD card, or .cart file in emulator)
 
 ## Design rules
 
