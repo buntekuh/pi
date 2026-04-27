@@ -52,13 +52,13 @@ layer had a pain point it could not solve.
 |-------|-------------|
 | M56 | 32-bit RISC CPU on Digilent Cmod A7-35T (Artix-7 FPGA) |
 | Titania OS | Message-passing, simple scheduler, single interrupt level |
-| Filesystem | Tree of nodes, visible/writable flags, no permissions |
+| Filesystem | Cartridge-based (FAT, 512KB), visible/writable flags, no permissions |
 | T46 | Terminal: 640×368, 256-colour palette |
 | Titania-0 | BCPL-inspired, typeless, everything is a 32-bit word. Simple enough that its compiler fits in an evening. Bootstraps Titania-1. |
 | Titania-1 | Adds types (INTEGER, CHAR, BYTE, structs, pointers). C without the regret. Used to write the OS, Puck, and Titania-2. |
 | Puck | Interactive fiction engine. Extensible in Titania-1 against a stable API. Named for Titania's companion in A Midsummer Night's Dream. |
-| Titania-2 (Imp) | Interpreted, embeddable scripting language derived from Lox. Follows Crafting Interpreters (Bob Nystrom) through Part II — Functions, then diverges: no classes, no objects, no garbage collector. Closures, a string library, and the Puck embedding API replace the object system. Lives inside Puck as the event handler and extension layer. |
-| Grue | The language Puck adventure authors write in. Readable by non-programmers. Powered by Titania-2 underneath. |
+| Titania-2 (Imp) | Interpreted, embeddable scripting language derived from Lox. Follows Crafting Interpreters (Bob Nystrom) through Part II — Functions, then diverges: no classes, no objects, no garbage collector. Closures, a string library, and the Puck embedding API replace the object system. |
+| Grue | The language Puck adventure authors write in. A thin layer on top of Titania-2 with domain syntax for rooms, items, and actions. Authors write real code — conditions, logic, variables — not pseudo-English. Grue is honest about being a programming language. Named after the creature from Zork. |
 
 ## Bootstrapping path
 
@@ -76,5 +76,6 @@ with no magic transitions and no black boxes.
 - No security model. No users. No permissions. Simplicity over safety theatre.
 - Filesystem visible/writable flags are a first-class game mechanic.
 - When naming things, use the Titania mythology.
+- Grue authors write real code. Do not hide programming behind pseudo-English grammar (cf. Inform 7). The goal is to get people programming, not to abstract programming away.
 
-**How to apply:** When designing a layer, ask "can this be explained in one chapter?" When naming things, use Titania. When tempted to add complexity, ask what Wirth would cut.
+**How to apply:** When designing a layer, ask "can this be explained in one chapter?" When naming things, use Titania. When tempted to add complexity, ask what Wirth would cut. When designing Grue syntax, expose the code — don't hide it.

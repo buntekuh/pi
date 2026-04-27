@@ -28,10 +28,7 @@ def actions_for(filename, actions):
     ext = Path(filename).suffix.lower()
     return actions.get(ext) or actions.get('*') or []
 
-try:
-    from fs import FS
-except ImportError:
-    FS = None
+from cartridge import Cartridge, TYPE_DIR, TYPE_FILE
 
 # ── Palette ──────────────────────────────────────────────────────────────────
 # (0x16, 0x60, 0x84)    teal
@@ -153,13 +150,12 @@ class HostMount:
 
 
 class EmulatorConnection:
-    """Speaks the M56 text protocol against an in-process FS object."""
+    """Speaks the M56 text protocol against an in-process Cartridge."""
 
-    def __init__(self, fs):
-        self._fs = fs
+    def __init__(self, cart: Cartridge):
+        self._cart = cart
 
     def send(self, cmd: str) -> str:
-        # Command format: "PORT VERB [args...]"
         parts = cmd.strip().split()
         if len(parts) < 2:
             return 'ERR empty 0\n'
@@ -169,23 +165,18 @@ class EmulatorConnection:
         if verb == 'read':
             return self._read(args[0] if args else '/', port)
         if verb == 'write':
-            # format: PORT write PATH SIZE HEXDATA
             path, hex_data = args[0], args[2] if len(args) > 2 else ''
             return self._write(path, hex_data, port)
         return f'ERR unknown {verb} {port}\n'
 
     def _ls(self, path: str, port: str) -> str:
         try:
-            names = self._fs.ls(path)
             lines = []
-            for name in names:
-                cp = path.rstrip('/') + '/' + name
-                st = self._fs.stat(cp)
-                hidden = str(not st['visible']).lower()
-                if st['is_dir']:
-                    lines.append(f"{name} D {hidden} {str(st['writable']).lower()}")
+            for name, typ, size in self._cart.ls(path):
+                if typ == TYPE_DIR:
+                    lines.append(f'{name} D')
                 else:
-                    lines.append(f"{name} {st['size']} {hidden}")
+                    lines.append(f'{name} {size}')
             lines.append(f'OK {port}')
             return '\n'.join(lines) + '\n'
         except Exception as e:
@@ -193,19 +184,14 @@ class EmulatorConnection:
 
     def _read(self, path: str, port: str) -> str:
         try:
-            data = self._fs.read(path)
-            hex_data = data.hex()
-            return f'SIZE {len(data)}\n{hex_data}\nOK {port}\n'
+            data = self._cart.read_file(path)
+            return f'SIZE {len(data)}\n{data.hex()}\nOK {port}\n'
         except Exception as e:
             return f'ERR {e} {port}\n'
 
     def _write(self, path: str, hex_data: str, port: str) -> str:
         try:
-            data = bytes.fromhex(hex_data)
-            if self._fs.exists(path):
-                self._fs.write(path, data)
-            else:
-                self._fs.create(path, data)
+            self._cart.write_file(path, bytes.fromhex(hex_data))
             return f'OK {port}\n'
         except Exception as e:
             return f'ERR {e} {port}\n'
@@ -675,14 +661,19 @@ class Desktop:
 
         self._actions = load_actions()
 
-        self._mounts = [HostMount(Path.home())]
-        if FS is not None:
-            fs = FS()
-            fs.mkdir('/home')
-            fs.create('/home/hello.asm', b'; hello world\n')
-            fs.mkdir('/games')
-            fs.create('/games/adventure.grue', b'room start\n  "A dark place."\n')
-            self._mounts.append(M56Mount(EmulatorConnection(fs)))
+        self._cart_path = Path(__file__).parent / 'etc' / 'boot.cart'
+        self._cart = Cartridge()
+        if self._cart_path.exists():
+            self._cart.load(str(self._cart_path))
+        else:
+            self._cart.format()
+            self._cart.mkdir('/home')
+            self._cart.write_file('/home/hello.asm', b'; hello world\n')
+            self._cart.mkdir('/games')
+            self._cart.write_file('/games/adventure.grue', b'room start\n  "A dark place."\n')
+            self._cart.save(str(self._cart_path))
+
+        self._mounts = [HostMount(Path.home()), M56Mount(EmulatorConnection(self._cart))]
 
         self._windows = []          # bottom → top
         self._sidebar_click = {}    # mount index → last click time
@@ -741,6 +732,7 @@ class Desktop:
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
+                    self._cart.save(str(self._cart_path))
                     pygame.quit(); sys.exit()
 
                 # Sidebar: double-click to open explorer

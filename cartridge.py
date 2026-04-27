@@ -17,7 +17,8 @@ Directory entry (32 bytes):
   type        B    0=free  1=file  2=dir
   first       H    first block (0 if empty file)
   size        I    bytes (files) or 0 (dirs track via entries)
-  reserved    9s
+  flags       B    bit 0 = hidden, bit 1 = read-only
+  reserved    8s
 """
 
 import struct
@@ -49,10 +50,13 @@ TYPE_FREE         = 0
 TYPE_FILE         = 1
 TYPE_DIR          = 2
 
+FLAG_HIDDEN       = 0x01   # not shown in ls()
+FLAG_READONLY     = 0x02   # directory cannot be written to
+
 ENTRY_SIZE        = 32
 ENTRIES_PER_BLOCK = BLOCK_SIZE // ENTRY_SIZE              # 16
 
-ENTRY_FMT         = '<16sBHI9s'   # name, type, first, size, _reserved
+ENTRY_FMT         = '<16sBHIB8s'  # name, type, first, size, flags, _reserved
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +126,16 @@ class Cartridge:
         self._cwd_block = ROOT_BLOCK
 
     def ls(self, path=None):
-        """Return list of (name, type, size) for entries in path (default cwd)."""
+        """Return list of (name, type, size) for visible entries in path."""
+        dir_block = self._resolve_dir(path)
+        return [
+            (e['name'], e['type'], e['size'])
+            for e in self._dir_entries(dir_block)
+            if e['type'] != TYPE_FREE and not (e['flags'] & FLAG_HIDDEN)
+        ]
+
+    def ls_all(self, path=None):
+        """Return all entries including hidden ones."""
         dir_block = self._resolve_dir(path)
         return [
             (e['name'], e['type'], e['size'])
@@ -130,22 +143,25 @@ class Cartridge:
             if e['type'] != TYPE_FREE
         ]
 
-    def mkdir(self, path):
+    def mkdir(self, path, hidden=False, readonly=False):
         """Create a directory. Parent must exist."""
         parent_path, name = self._split(path)
         parent_block = self._resolve_dir(parent_path)
         if self._dir_find(parent_block, name):
             raise AlreadyExists(path)
+        self._check_writable(parent_path)
         block = self._alloc_block()
         self._fat_set(block, FAT_EOF)
-        self._dir_add(parent_block, name, TYPE_DIR, block, 0)
+        flags = (FLAG_HIDDEN if hidden else 0) | (FLAG_READONLY if readonly else 0)
+        self._dir_add(parent_block, name, TYPE_DIR, block, 0, flags)
 
-    def write_file(self, path, data):
+    def write_file(self, path, data, hidden=False):
         """Write bytes to a file, creating or overwriting it."""
         if isinstance(data, str):
             data = data.encode()
         parent_path, name = self._split(path)
         parent_block = self._resolve_dir(parent_path)
+        self._check_writable(parent_path)
 
         existing = self._dir_find(parent_block, name)
         if existing:
@@ -155,7 +171,16 @@ class Cartridge:
             self._dir_remove(parent_block, name)
 
         first = self._write_chain(data) if data else 0
-        self._dir_add(parent_block, name, TYPE_FILE, first, len(data))
+        flags = FLAG_HIDDEN if hidden else 0
+        self._dir_add(parent_block, name, TYPE_FILE, first, len(data), flags)
+
+    def set_hidden(self, path, value: bool):
+        """Show or hide a file or directory."""
+        self._update_flags(path, FLAG_HIDDEN, value)
+
+    def set_readonly(self, path, value: bool):
+        """Lock or unlock a directory."""
+        self._update_flags(path, FLAG_READONLY, value)
 
     def read_file(self, path):
         """Return bytes contents of a file."""
@@ -197,8 +222,15 @@ class Cartridge:
             return False
 
     def stat(self, path):
-        """Return entry dict for path."""
-        return self._resolve_entry(path)
+        """Return entry dict for path including hidden and readonly flags."""
+        e = self._resolve_entry(path)
+        return {
+            'name':     e['name'],
+            'is_dir':   e['type'] == TYPE_DIR,
+            'size':     e['size'],
+            'hidden':   bool(e['flags'] & FLAG_HIDDEN),
+            'readonly': bool(e['flags'] & FLAG_READONLY),
+        }
 
     # ------------------------------------------------------------------
     # Path helpers
@@ -334,6 +366,37 @@ class Cartridge:
     # Directory
     # ------------------------------------------------------------------
 
+    def _check_writable(self, path):
+        """Raise FSError if the directory at path is read-only."""
+        if path == '/':
+            return
+        try:
+            e = self._resolve_entry(path)
+            if e['flags'] & FLAG_READONLY:
+                raise FSError(f'read-only: {path}')
+        except (NotFound, NotADirectory):
+            pass
+
+    def _update_flags(self, path, flag, value):
+        """Set or clear a single flag bit on an existing entry."""
+        parent_path, name = self._split(path)
+        parent_block = self._resolve_dir(parent_path)
+        name_b = name.encode()[:16]
+        for b in self._chain(parent_block) or [parent_block]:
+            blk = bytearray(self._read_block(b))
+            for i in range(ENTRIES_PER_BLOCK):
+                off = i * ENTRY_SIZE
+                n, typ = blk[off:off+16].rstrip(b'\x00'), blk[off+16]
+                if typ != TYPE_FREE and n == name_b:
+                    flags_off = off + 16 + 1 + 2 + 4   # after name, type, first, size
+                    if value:
+                        blk[flags_off] |= flag
+                    else:
+                        blk[flags_off] &= ~flag
+                    self._write_block(b, bytes(blk))
+                    return
+        raise NotFound(path)
+
     def _dir_entries(self, dir_block):
         """Return all non-free entries in the directory chain."""
         entries = []
@@ -341,13 +404,14 @@ class Cartridge:
             blk = self._read_block(b)
             for i in range(ENTRIES_PER_BLOCK):
                 raw = blk[i*ENTRY_SIZE: (i+1)*ENTRY_SIZE]
-                name_b, typ, first, size, _ = struct.unpack(ENTRY_FMT, raw)
+                name_b, typ, first, size, flags, _ = struct.unpack(ENTRY_FMT, raw)
                 if typ != TYPE_FREE:
                     entries.append({
                         'name':  name_b.rstrip(b'\x00').decode(errors='replace'),
                         'type':  typ,
                         'first': first,
                         'size':  size,
+                        'flags': flags,
                         '_block': b,
                         '_slot':  i,
                     })
@@ -359,17 +423,17 @@ class Cartridge:
             blk = self._read_block(b)
             for i in range(ENTRIES_PER_BLOCK):
                 raw = blk[i*ENTRY_SIZE: (i+1)*ENTRY_SIZE]
-                n, typ, first, size, _ = struct.unpack(ENTRY_FMT, raw)
+                n, typ, first, size, flags, _ = struct.unpack(ENTRY_FMT, raw)
                 if typ != TYPE_FREE and n.rstrip(b'\x00') == name_b:
-                    return {'name': name, 'type': typ,
-                            'first': first, 'size': size,
+                    return {'name': name, 'type': typ, 'first': first,
+                            'size': size, 'flags': flags,
                             '_block': b, '_slot': i}
         return None
 
-    def _dir_add(self, dir_block, name, typ, first, size):
+    def _dir_add(self, dir_block, name, typ, first, size, flags=0):
         """Write a new directory entry, extending the dir chain if needed."""
         name_b = name.encode()[:16].ljust(16, b'\x00')
-        packed = struct.pack(ENTRY_FMT, name_b, typ, first, size, b'\x00'*9)
+        packed = struct.pack(ENTRY_FMT, name_b, typ, first, size, flags, b'\x00'*8)
 
         # Find a free slot in existing blocks
         for b in self._chain(dir_block) or [dir_block]:
