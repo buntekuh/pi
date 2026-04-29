@@ -5,13 +5,10 @@
 # Ubuntu: sudo apt install gcc-riscv64-unknown-elf
 #         (use riscv64-unknown-elf- prefix, -march=rv32i forces 32-bit)
 
-PREFIX  = riscv32-unknown-elf-
+PREFIX  = riscv64-unknown-elf-
 AS      = $(PREFIX)as
 LD      = $(PREFIX)ld
 OBJCOPY = $(PREFIX)objcopy
-
-# If you only have the 64-bit toolchain:
-# PREFIX  = riscv64-unknown-elf-
 
 ARCH = rv32i
 ABI  = ilp32
@@ -22,7 +19,7 @@ echo.o: echo.s
 	$(AS) -march=$(ARCH) -mabi=$(ABI) -o $@ $<
 
 echo.elf: echo.o
-	$(LD) -Ttext=0x00000000 -o $@ $<
+	$(LD) -m elf32lriscv -Ttext=0x00000000 -o $@ $<
 
 echo.bin: echo.elf
 	$(OBJCOPY) -O binary $< $@
