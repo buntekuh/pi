@@ -11,7 +11,7 @@
 PROJECT=titania
 PART=xc7a35tcpg236-1
 DB_DIR=/usr/share/nextpnr/prjxray-db
-CHIPDB_DIR=/usr/share/nextpnr/xilinx-chipdb
+CHIPDB_DIR=~/chipdb
 VERILOGS="femtorv32_quark.v buart.v top.v"
 
 set -ex
