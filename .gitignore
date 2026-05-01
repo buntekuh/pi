@@ -210,12 +210,16 @@ tools/palette.html
 
 .DS_Store
 
+# Documentation build
+documentation/public/
+documentation/website/node_modules/
+
 # Game content — lives in its own git repository
 home/
 
 .claude/
 info/ui/
-fpga/info/cmod_a7_rm.pdf
+#fpga/info/cmod_a7_rm.pdf
 *.o
 
 # FPGA toolchain binaries (fetched from Nix store via fpga/femtorv32/bin/openxc7-toolchain.sh)
