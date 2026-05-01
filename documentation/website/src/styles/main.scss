@@ -1,0 +1,78 @@
+$bg:       #1a1a2e;
+$surface:  #16213e;
+$accent:   #e94560;
+$text:     #eaeaea;
+$muted:    #888;
+$code-bg:  #0f3460;
+$font-mono: 'Courier New', Courier, monospace;
+$font-body: Georgia, 'Times New Roman', serif;
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    background: $bg;
+    color: $text;
+    font-family: $font-body;
+    font-size: 18px;
+    line-height: 1.7;
+}
+
+main {
+    max-width: 740px;
+    margin: 0 auto;
+    padding: 4rem 2rem;
+}
+
+h1, h2, h3 {
+    font-family: $font-mono;
+    color: $accent;
+    margin: 2rem 0 0.75rem;
+    line-height: 1.2;
+}
+
+h1 { font-size: 2rem; }
+h2 { font-size: 1.4rem; }
+h3 { font-size: 1.1rem; color: $text; }
+
+p { margin-bottom: 1.2rem; }
+
+a { color: $accent; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+pre, code {
+    font-family: $font-mono;
+    background: $code-bg;
+    border-radius: 4px;
+}
+
+code { padding: 0.1em 0.4em; font-size: 0.9em; }
+
+pre {
+    padding: 1.2rem;
+    overflow-x: auto;
+    margin-bottom: 1.5rem;
+
+    code { background: none; padding: 0; }
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 1.5rem;
+    font-family: $font-mono;
+    font-size: 0.9rem;
+
+    th, td {
+        text-align: left;
+        padding: 0.5rem 0.75rem;
+        border-bottom: 1px solid $surface;
+    }
+
+    th { color: $accent; }
+}
+
+hr {
+    border: none;
+    border-top: 1px solid $surface;
+    margin: 2.5rem 0;
+}
