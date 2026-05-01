@@ -10,9 +10,14 @@
 
 PROJECT=titania
 PART=xc7a35tcpg236-1
-DB_DIR=/usr/share/nextpnr/prjxray-db
-CHIPDB_DIR=~/chipdb
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+TOOLS_DIR="${SCRIPT_DIR}/tools"
+DB_DIR="${TOOLS_DIR}/prjxray-extract/opt/nextpnr-xilinx/external/prjxray-db"
+CHIPDB_DIR="${SCRIPT_DIR}/resources"
 VERILOGS="femtorv32_quark.v buart.v top.v"
+
+export PATH="${TOOLS_DIR}/bin:${PATH}"
+export LD_LIBRARY_PATH="${TOOLS_DIR}/lib:${LD_LIBRARY_PATH}"
 
 set -ex
 
@@ -20,7 +25,7 @@ set -ex
 make -C firmware
 
 # Step 2: synthesise
-yosys -p "synth_xilinx -nowidelut -flatten -abc9 -arch xc7 -top top; write_json ${PROJECT}.json" ${VERILOGS}
+yosys -p "synth_xilinx -nowidelut -flatten -abc9 -arch xc7 -top top; delete t:\$scopeinfo; write_json ${PROJECT}.json" ${VERILOGS}
 
 # Step 3: place & route
 nextpnr-xilinx \
@@ -31,9 +36,9 @@ nextpnr-xilinx \
     --fasm ${PROJECT}.fasm
 
 # Step 4: bitstream
-fasm2frames --part ${PART} --db-root ${DB_DIR}/artix7 ${PROJECT}.fasm > ${PROJECT}.frames
+fasm2frames --part ${PART} --db-root "${DB_DIR}/artix7" ${PROJECT}.fasm > ${PROJECT}.frames
 xc7frames2bit \
-    --part_file ${DB_DIR}/artix7/${PART}/part.yaml \
+    --part_file "${DB_DIR}/artix7/${PART}/part.yaml" \
     --part_name ${PART} \
     --frm_file ${PROJECT}.frames \
     --output_file ${PROJECT}.bit

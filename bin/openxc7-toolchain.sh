@@ -1,2 +1,2 @@
-nix develop github:openxc7/toolchain-nix --extra-experimental-features 'nix-command flakes'
-
+#!/usr/bin/env bash
+exec "$(dirname "$0")/../fpga/femtorv32/bin/install-toolchain.sh" "$@"

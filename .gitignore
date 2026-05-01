@@ -218,6 +218,12 @@ info/ui/
 fpga/info/cmod_a7_rm.pdf
 *.o
 
+# FPGA toolchain binaries (fetched from Nix store via fpga/femtorv32/bin/openxc7-toolchain.sh)
+fpga/femtorv32/tools/bin/nextpnr-xilinx-bin
+fpga/femtorv32/tools/bin/bbasm
+fpga/femtorv32/tools/bin/xc7frames2bit
+fpga/femtorv32/tools/bin/python3.8
+
 # FPGA build artefacts
 *.elf
 *.bin
