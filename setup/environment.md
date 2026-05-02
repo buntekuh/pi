@@ -3,7 +3,7 @@
 ## Host Machine
 
 - **OS:** Debian GNU/Linux 13 (trixie), x86_64
-- **Reproducible environment:** see `flake.nix` in the learn-fpga repo root
+- **Reproducible environment:** see `flake.nix` in `pi/setup/`
 
 ## FPGA Board
 
@@ -18,7 +18,7 @@ all on the same cable).
 | yosys | Verilog synthesis |
 | openfpgaloader | Flash bitstream to FPGA over USB/JTAG |
 | iverilog | Verilog simulation |
-| ghdl | VHDL simulation and synthesis frontend for yosys |
+| ghdl | VHDL simulation and synthesis (mcode backend, v5.0.1) |
 | gtkwave | Waveform viewer (works with iverilog and GHDL output) |
 | nextpnr-xilinx | Place & route for Xilinx Artix-7 (custom install, see below) |
 
@@ -35,10 +35,11 @@ Installed at `/home/buntekuh/pi/fpga/femtorv32/tools/`. Provides:
 Required environment variables (add to `~/.bashrc`, or set via Nix shellHook):
 
 ```bash
-export PRJXRAY_DB_DIR=<tools>/prjxray-extract/opt/nextpnr-xilinx/external/prjxray-db
-export NEXTPNR_CHIPDB_DIR=<tools>/resources
-export PATH="<tools>/bin:$PATH"
-export LD_LIBRARY_PATH="<tools>/lib:$LD_LIBRARY_PATH"
+export FEMTORV32_DIR=/path/to/femtorv32
+export PRJXRAY_DB_DIR=$FEMTORV32_DIR/tools/prjxray-extract/opt/nextpnr-xilinx/external/prjxray-db
+export NEXTPNR_CHIPDB_DIR=$FEMTORV32_DIR/resources
+export PATH="$FEMTORV32_DIR/tools/bin:$PATH"
+export LD_LIBRARY_PATH="$FEMTORV32_DIR/tools/lib:$LD_LIBRARY_PATH"
 ```
 
 Chipdb file: `$NEXTPNR_CHIPDB_DIR/xc7a35tcpg236-1.bin`
@@ -58,6 +59,19 @@ Chipdb file: `$NEXTPNR_CHIPDB_DIR/xc7a35tcpg236-1.bin`
 | LEDS[6] | 30 | T2 |
 | LEDS[7] | 31 | U1 |
 | GND | 25 | — |
+
+## VHDL synthesis
+
+The `ghdl-yosys-plugin` does not build against GHDL 5.0.1 (API mismatch).
+Instead, use `ghdl synth` directly to produce a Verilog netlist, which yosys
+then synthesises normally:
+
+```bash
+ghdl synth --std=08 --out=verilog design.vhd -e ENTITY_NAME > design_ghdl.v
+yosys ... design_ghdl.v
+```
+
+This is handled automatically by `run_cmod_a7.sh` when a `.vhd` file is passed.
 
 ## udev rules (non-NixOS only)
 
