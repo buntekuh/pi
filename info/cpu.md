@@ -1,11 +1,7 @@
 # M56 CPU
 
-> **Open questions — resolve before implementation:**
-> 1. **Instruction encoding** — complete bit field layout needed for all instruction classes.
-> 2. **`jmp`/`jpr` offset field** — with cond(4) + Rcmp(4) fields, the immediate is 19 bits. Confirm this covers the full address space for absolute jumps.
-> 3. **`mov-h` bit placement** — exactly which bits of `Rdst` does the 19-bit immediate map to? Needs a precise definition.
-> 4. **Memory map** — ROM size unknown; peripheral I/O region address is provisional.
-> 5. **Calling convention** — register usage for arguments and return values not yet defined.
+> **Open question:**
+> **Memory map** — ROM size unknown; peripheral I/O region address is provisional.
 
 The M56 is a 32-bit RISC CPU. Instructions are 32 bits wide. All registers are
 32-bit. The physical address space is 512 KB of SRAM — the full 32-bit address
@@ -97,7 +93,7 @@ carries exactly what each mode needs. It is never split arbitrarily.
 | 9    | sar      | Arithmetic shift right — sign bit replicated |
 | 10   | jmp      | Conditional absolute jump — unsigned address |
 | 11   | jpr      | Conditional relative jump — signed PC-relative offset |
-| 12   | hlt      | Halt CPU |
+| 12   | wfi      | Wait for interrupt — suspends execution until an interrupt fires |
 | 13   | eai      | Enable interrupts |
 | 14   | dai      | Disable interrupts |
 
@@ -118,6 +114,10 @@ after the jump) onto the stack before jumping, turning it into a subroutine call
 Conveniences that expand to real instructions. Not in hardware.
 
 ```
+jmp    label          →  jmp.al  label
+jmp-s  label          →  jmp-s.al label
+jpr    label          →  jpr.al  label
+jpr-s  label          →  jpr-s.al label
 psh Rsrc              →  sub SP, #4 ; mov Rsrc, [SP]
 pop Rdst              →  mov [SP], Rdst ; add SP, #4
 cal label             →  jmp-s label
@@ -263,8 +263,13 @@ macros `mul` and `div` expand to `jmp-s _mul` and `jmp-s _div`.
 
 ### not
 ```
-not Rdst    →  Rdst = ~Rdst
+not Rsrc    →  Rsrc = ~Rsrc
 ```
+In-place bitwise NOT. No second operand.
+```
+opcode | 0000 | Rsrc | 0...0
+```
+Non-destructive NOT: `mov Rsrc, Rdst` then `not Rdst`.
 
 ### shf — Logical Shift
 ```
@@ -279,10 +284,12 @@ Assembler aliases: `shl Rsrc, #n` → `shf Rsrc, #n` and `shr Rsrc, #n` → `shf
 
 ### sar — Arithmetic Shift Right
 ```
-sar Rsrc, #count       ; mode 0 — immediate count
-sar Rsrc, Rcounter     ; mode 2 — register count
+sar Rsrc, #count       ; mode 0 — immediate signed count
+sar Rsrc, Rcounter     ; mode 2 — register signed count
 ```
-Shifts Rsrc right by count bits, replicating sign bit (bit 31). Result written back to Rsrc.
+Shifts Rsrc right by |count| bits, replicating sign bit (bit 31). Uses the same signed count
+convention as `shf`: negative count means right. Positive counts are unused — `shf` handles
+left shifts. Result written back to Rsrc.
 ```
 opcode | mode | Rsrc | (#count or Rcounter)
 ```
@@ -307,18 +314,18 @@ Bits 2..0: condition
 
 | Bits 3..0 | Suffix   | Condition |
 |-----------|----------|-----------|
-| 0         | (none)   | Unconditional |
+| 0         | .al      | Always (unconditional) |
 | 1         | .z       | Rcmp equals zero |
 | 2         | .nz      | Rcmp not equal to zero |
 | 3         | .n       | Rcmp bit 31 set (negative) |
 | 4         | .nn      | Rcmp bit 31 clear (non-negative) |
-| 8         | -s       | Unconditional subroutine |
+| 8         | -s.al    | Always (unconditional subroutine) |
 | 9         | -s.z     | Rcmp equals zero |
 | 10        | -s.nz    | Rcmp not equal to zero |
 | 11        | -s.n     | Rcmp bit 31 set (negative) |
 | 12        | -s.nn    | Rcmp bit 31 clear (non-negative) |
 
-Rcmp is a register operand. Unconditional jumps carry no register field.
+Rcmp is a register operand. When condition is `.al`, Rcmp is unused; the assembler writes zeros.
 
 ```asm
 jmp      label           ; absolute jump, unconditional
@@ -355,6 +362,11 @@ Interrupts are enabled and disabled with dedicated opcodes:
 ```
 eai    ; enable interrupts
 dai    ; disable interrupts
+```
+
+`wfi`, `eai`, and `dai` carry no operands. All bits after the opcode are zero.
+```
+opcode | 0...0(27)
 ```
 
 When an interrupt fires and interrupts are enabled:
