@@ -1,10 +1,10 @@
 # M56 CPU
 
 > **Open questions — resolve before implementation:**
-> 1. **Instruction encoding** — bit field layout is not fully specified for all instruction classes. `mov`/ALU, `jmp`/`cal`/`ret`, unary (`not`, `shl`, `shr`, `sar`), and no-operand instructions (`eai`, `dai`, `hlt`, `rti`) each need a complete and consistent encoding table.
-> 2. **`jmp` offset field** — currently shown as 19 bits but the condition (3 bits) + register (4 bits) fields leave 20 bits, not 19. Needs resolving.
-> 3. **`mov-h` bit placement** — exactly which bits of `dest` does the 19-bit immediate map to? Needs a precise definition.
-> 4. **Memory map** — ROM size unknown; peripheral I/O region address is provisional (marked in the peripherals section).
+> 1. **Instruction encoding** — complete bit field layout needed for all instruction classes.
+> 2. **`jmp`/`jpr` offset field** — with cond(4) + Rcmp(4) fields, the immediate is 19 bits. Confirm this covers the full address space for absolute jumps.
+> 3. **`mov-h` bit placement** — exactly which bits of `Rdst` does the 19-bit immediate map to? Needs a precise definition.
+> 4. **Memory map** — ROM size unknown; peripheral I/O region address is provisional.
 > 5. **Calling convention** — register usage for arguments and return values not yet defined.
 
 The M56 is a 32-bit RISC CPU. Instructions are 32 bits wide. All registers are
@@ -15,12 +15,13 @@ range is wired to that, with addresses above 0x0007FFFF unmapped.
 
 ## Registers
 
-16 general-purpose registers, all 32-bit. Two have a fixed role by convention:
+16 general-purpose registers, all 32-bit. Two have a fixed role by hardware; the rest are convention:
 
 | Name   | Alias | Notes |
 |--------|-------|-------|
-| R0     |       | Conventional scratch register                    |
-| R1–R13 |       | General purpose                                  |
+| R0–R2  |       | Scratch registers                                |
+| R3     |       | Leaf return address (by convention)              |
+| R4–R13 |       | General purpose                                  |
 | R14    | SP    | Stack pointer. Stack grows downward.             |
 | R15    | PC    | Program counter. Advances by 4 after each fetch. |
 
@@ -54,8 +55,8 @@ addresses never move.
 0x00001000   _mul      jmp  mul_impl    ; software multiply
 0x00001004   _div      jmp  div_impl    ; software divide
 0x00001008   _mod      jmp  mod_impl    ; software modulo
-0x0000100C   _print    jmp  print_impl  ; print string to UART — R1 = pointer to null-terminated string
-0x00001010   _printnum jmp  printnum_impl ; print integer to UART — R1 = value
+0x0000100C   _print    jmp  print_impl  ; print null-terminated string — Rsrc = pointer
+0x00001010   _printnum jmp  printnum_impl ; print integer to UART — Rsrc = value
 ...
 ```
 
@@ -66,14 +67,14 @@ addresses never move.
 Every instruction is exactly **32 bits**, 4-byte aligned in memory.
 
 ```
-Bit  31..27   opcode    (5 bits)   — 32 possible opcodes, 18 defined
+Bit  31..27   opcode    (5 bits)   — 32 possible opcodes, 15 defined
 Bit  26..23   mode      (4 bits)   — addressing mode
 Bit  22..19   register  (4 bits)   — one explicit register
 Bit  18..0    (...)    (19 bits)   — immediate, offset, or second register
 ```
 
 The `mode` field means the same thing across all instructions that take a source
-operand: Move, MoveB, and all ALU instructions share modes 0–2. The 19-bit field
+operand: Move, MoveB, ALU, and shift instructions share modes 0–2. The 19-bit field
 carries exactly what each mode needs. It is never split arbitrarily.
 
 ---
@@ -81,8 +82,6 @@ carries exactly what each mode needs. It is never split arbitrarily.
 ## Opcodes
 
 15 real opcodes. Everything else is an assembler macro or a ROM subroutine.
-
-All mnemonics are exactly three lowercase letters.
 
 | Code | Mnemonic | Description |
 |------|----------|-------------|
@@ -93,33 +92,45 @@ All mnemonics are exactly three lowercase letters.
 | 4    | and      | Bitwise AND |
 | 5    | orr      | Bitwise OR |
 | 6    | xor      | Bitwise XOR |
-| 7    | not      | Bitwise NOT (unary) |
-| 8    | shl      | Logical shift left |
-| 9    | shr      | Logical shift right |
-| 10   | sar      | Arithmetic shift right (sign-preserving) |
-| 11   | jmp      | Conditional jump — compare register against zero, branch to PC+offset |
+| 7    | not      | Bitwise NOT (unary, in place) |
+| 8    | shf      | Logical shift — signed count, positive=left, negative=right |
+| 9    | sar      | Arithmetic shift right — sign bit replicated |
+| 10   | jmp      | Conditional absolute jump — unsigned address |
+| 11   | jpr      | Conditional relative jump — signed PC-relative offset |
 | 12   | hlt      | Halt CPU |
 | 13   | eai      | Enable interrupts |
 | 14   | dai      | Disable interrupts |
 
 Opcodes 15–31 are reserved for future use.
 
+The `-s` suffix on any jump saves the return address (address of the instruction
+after the jump) onto the stack before jumping, turning it into a subroutine call:
+
+| Mnemonic | Description |
+|----------|-------------|
+| jmp      | absolute jump |
+| jmp-s    | absolute subroutine call |
+| jpr      | relative jump |
+| jpr-s    | relative subroutine call |
+
 ### Assembler Macros
 
 Conveniences that expand to real instructions. Not in hardware.
 
 ```
-psh src          →  sub SP, #4 ; mov src, [SP]
-pop dest         →  mov [SP], dest ; add SP, #4
-cal label        →  psh R15 ; jmp label
-ret              →  pop R15
-rti              →  pop R15 ; eai
-nop              →  add R0, #0
-clr dest         →  xor dest, dest
-inc dest         →  add dest, #1
-dec dest         →  sub dest, #1
-mul dest, src    →  psh R15 ; jmp _mul
-div dest, src    →  psh R15 ; jmp _div
+psh Rsrc              →  sub SP, #4 ; mov Rsrc, [SP]
+pop Rdst              →  mov [SP], Rdst ; add SP, #4
+cal label             →  jmp-s label
+ret                   →  pop R15
+rti                   →  pop R15 ; eai
+nop                   →  add R0, #0
+clr Rdst              →  xor Rdst, Rdst
+inc Rdst              →  add Rdst, #1
+dec Rdst              →  sub Rdst, #1
+mul Rsrc, Rdst        →  jmp-s _mul
+div Rsrc, Rdst        →  jmp-s _div
+shl Rsrc, #n          →  shf Rsrc, #n
+shr Rsrc, #n          →  shf Rsrc, #-n
 ```
 
 ### ROM Subroutines
@@ -130,8 +141,8 @@ Complex operations implemented once in ROM, called by convention:
 _mul      software multiply    — shift-and-add
 _div      software divide      — shift-and-subtract
 _mod      software modulo
-_print    print null-terminated string to UART — R1 = string pointer
-_printnum print integer as decimal to UART    — R1 = value
+_print    print null-terminated string to UART — Rsrc = string pointer
+_printnum print integer as decimal to UART    — Rsrc = value
 ```
 
 ---
@@ -143,76 +154,76 @@ All Move and MoveB instructions share the same field layout:
 ```
 Bit  31..27   opcode    (5 bits)
 Bit  26..23   mode      (4 bits)
-Bit  22..19   register  (4 bits)   — source or address register
+Bit  22..19   Rsrc/Rdst (4 bits)   — source or address register
 Bit  18..0    (...)    (19 bits)   — destination register and/or offset
 ```
 
 ### Mode 0 — Immediate
 ```
-mov #imm19, dest
+mov #imm19, Rdst
 ```
-Load 19-bit immediate into dest, sign-extended to 32 bits. Range: -262144 to +262143.
+Load 19-bit immediate into Rdst, sign-extended to 32 bits. Range: -262144 to +262143.
 ```
-opcode | mode=0 | dest | (imm19)
+opcode | mode=0 | Rdst | (imm19)
 ```
 
 ### Mode 1 — Move High Immediate
 ```
-mov-h #imm19, dest
+mov-h #imm19, Rdst
 ```
-Load 19-bit immediate into the upper bits of dest (bits 31..13), zeroing the lower 13 bits.
+Load 19-bit immediate into the upper bits of Rdst (bits 31..13), zeroing the lower 13 bits.
 Combined with mode 0, any 32-bit constant can be loaded in two instructions:
 ```asm
 mov-h  #0x7FFFF, R0    ; R0 = 0xFFFFE000
 mov    #0x1FFF,  R0    ; R0 = 0xFFFFFFFF
 ```
 ```
-opcode | mode=1 | dest | (imm19)
+opcode | mode=1 | Rdst | (imm19)
 ```
 
 ### Mode 2 — Register to Register
 ```
-mov src, dest
+mov Rsrc, Rdst
 ```
-Copy src into dest.
+Copy Rsrc into Rdst.
 ```
-opcode | mode=2 | src | (dest)
+opcode | mode=2 | Rsrc | (Rdst)
 ```
 
 ### Mode 3 — Indirect Read
 ```
-mov [src], dest
+mov [Rsrc], Rdst
 ```
-Read 32-bit word at address in src into dest.
+Read 32-bit word at address in Rsrc into Rdst.
 ```
-opcode | mode=3 | src | (dest)
+opcode | mode=3 | Rsrc | (Rdst)
 ```
 
 ### Mode 4 — Indirect Write
 ```
-mov src, [dest]
+mov Rsrc, [Rdst]
 ```
-Write src to address held in dest.
+Write Rsrc to address held in Rdst.
 ```
-opcode | mode=4 | src | (dest)
+opcode | mode=4 | Rsrc | (Rdst)
 ```
 
 ### Mode 5 — Indexed Read
 ```
-mov [src+off], dest
+mov [Rsrc+off], Rdst
 ```
-Read 32-bit word at (src + off) into dest.
+Read 32-bit word at (Rsrc + off) into Rdst.
 ```
-opcode | mode=5 | src | (dest[18:15], offset[14:0])
+opcode | mode=5 | Rsrc | (Rdst[18:15], offset[14:0])
 ```
 
 ### Mode 6 — Indexed Write
 ```
-mov src, [dest+off]
+mov Rsrc, [Rdst+off]
 ```
-Write src to (dest + off).
+Write Rsrc to (Rdst + off).
 ```
-opcode | mode=6 | src | (dest[18..15], offset[14..0])
+opcode | mode=6 | Rsrc | (Rdst[18:15], offset[14:0])
 ```
 
 Modes 7–15 are reserved for future use.
@@ -225,7 +236,7 @@ MoveB uses the same mode encoding as Move. Modes 3 and 5 read a byte
 ## ALU Instructions
 
 Add, Sub, And, Orr, Xor use the same `mode` field as Move to select the source
-operand. The `register` field is always the destination (and left-hand operand).
+operand. The register field is always Rdst (the destination and left-hand operand).
 Only modes 0, 1 and 2 are valid — the ALU never accesses memory directly.
 
 | Mode | Source operand                   |
@@ -234,71 +245,104 @@ Only modes 0, 1 and 2 are valid — the ALU never accesses memory directly.
 | 1    | 19-bit high immediate            |
 | 2    | register                         |
 
-Result written to the register field.
+Result written back to Rdst.
 
 ```
-add  dest, #imm19      →  dest = dest + sign_extend(imm19)
-add  dest, src         →  dest = dest + src
+add  Rdst, #imm19      →  Rdst = Rdst + sign_extend(imm19)
+add  Rdst, Rsrc        →  Rdst = Rdst + Rsrc
 ```
 
 (sub, and, orr, xor follow the same pattern.)
 
 Multiply and divide are ROM subroutines, not hardware opcodes. The assembler
-macros `mul` and `div` expand to `cal _mul` and `cal _div`.
+macros `mul` and `div` expand to `jmp-s _mul` and `jmp-s _div`.
 
 ---
 
-## Unary Instructions
+## Unary and Shift Instructions
 
 ### not
 ```
-not dest    →  dest = ~dest
+not Rdst    →  Rdst = ~Rdst
 ```
 
-### shl — Logical Shift Left
+### shf — Logical Shift
 ```
-shl dest, #n
+shf Rsrc, #count       ; mode 0 — immediate signed count
+shf Rsrc, Rcounter     ; mode 2 — register signed count
 ```
-Shift dest left by n bits. Bits [4:0] of the 19-bit field hold the shift count.
-
-### shr — Logical Shift Right
+Positive count shifts left; negative count shifts right. Result written back to Rsrc.
 ```
-shr dest, #n
+opcode | mode | Rsrc | (#count or Rcounter)
 ```
-Shift dest right by n bits, zero-filling from the left.
+Assembler aliases: `shl Rsrc, #n` → `shf Rsrc, #n` and `shr Rsrc, #n` → `shf Rsrc, #-n`.
 
 ### sar — Arithmetic Shift Right
 ```
-sar dest, #n
+sar Rsrc, #count       ; mode 0 — immediate count
+sar Rsrc, Rcounter     ; mode 2 — register count
 ```
-Shift dest right by n bits, sign bit (bit 31) replicated.
+Shifts Rsrc right by count bits, replicating sign bit (bit 31). Result written back to Rsrc.
+```
+opcode | mode | Rsrc | (#count or Rcounter)
+```
 
 ---
 
-## Jump
+## Jump and Subroutine
 
-`jmp` is the only branch opcode. Plain `jmp` is unconditional; with a suffix it tests a register against zero. The offset is signed and PC-relative — the assembler calculates it from the label.
+Two jump opcodes: `jmp` (absolute, unsigned address) and `jpr` (relative, signed offset).
+The `-s` suffix saves the return address onto the stack before jumping.
+
+Encoding: `opcode(5) | cond(4) | Rcmp(4) | address/offset(19)`
+
+The condition field (4 bits):
+
+```
+Bit 3:     subroutine flag — 0 = jump only, 1 = push return address before jumping
+Bits 2..0: condition
+```
 
 ### Condition Codes
 
-| Code | Suffix | Condition |
-|------|--------|-----------|
-| 0    | .z     | Register equals zero |
-| 1    | .nz    | Register not equal to zero |
-| 2    | .n     | Register bit 31 set (negative) |
-| 3    | .nn    | Register bit 31 clear (non-negative) |
+| Bits 3..0 | Suffix   | Condition |
+|-----------|----------|-----------|
+| 0         | (none)   | Unconditional |
+| 1         | .z       | Rcmp equals zero |
+| 2         | .nz      | Rcmp not equal to zero |
+| 3         | .n       | Rcmp bit 31 set (negative) |
+| 4         | .nn      | Rcmp bit 31 clear (non-negative) |
+| 8         | -s       | Unconditional subroutine |
+| 9         | -s.z     | Rcmp equals zero |
+| 10        | -s.nz    | Rcmp not equal to zero |
+| 11        | -s.n     | Rcmp bit 31 set (negative) |
+| 12        | -s.nn    | Rcmp bit 31 clear (non-negative) |
+
+Rcmp is a register operand. Unconditional jumps carry no register field.
 
 ```asm
-jmp    label        ; unconditional
-jmp.z  R1, label    ; jump if R1 == 0
-jmp.nz R1, label    ; jump if R1 != 0
-jmp.n  R1, label    ; jump if R1 < 0  (signed)
-jmp.nn R1, label    ; jump if R1 >= 0 (signed)
+jmp      label           ; absolute jump, unconditional
+jmp.z    Rcmp, label     ; absolute jump if Rcmp == 0
+jmp.nz   Rcmp, label     ; absolute jump if Rcmp != 0
+jmp.n    Rcmp, label     ; absolute jump if Rcmp < 0
+jmp.nn   Rcmp, label     ; absolute jump if Rcmp >= 0
+
+jmp-s    label           ; absolute subroutine call, unconditional
+jmp-s.z  Rcmp, label     ; absolute subroutine call if Rcmp == 0
+
+jpr      label           ; relative jump, unconditional
+jpr.z    Rcmp, label     ; relative jump if Rcmp == 0
+jpr.nz   Rcmp, label     ; relative jump if Rcmp != 0
+jpr.n    Rcmp, label     ; relative jump if Rcmp < 0
+jpr.nn   Rcmp, label     ; relative jump if Rcmp >= 0
+
+jpr-s    label           ; relative subroutine call, unconditional
+jpr-s.z  Rcmp, label     ; relative subroutine call if Rcmp == 0
 ```
 
 For computed jumps (function pointers, dispatch tables), write directly to R15:
 ```asm
-mov  R1, R15        ; jump to address in R1
+mov  Rsrc, R15           ; jump to address in Rsrc
 ```
 
 ---
@@ -319,7 +363,7 @@ When an interrupt fires and interrupts are enabled:
 3. Interrupts are disabled automatically
 4. PC jumps to the interrupt vector at `0x00000010`
 
-Return from interrupt is via the `rti` opcode: pops PC and re-enables interrupts.
+Return from interrupt via the `rti` assembler macro: `pop R15 ; eai`
 
 ---
 
