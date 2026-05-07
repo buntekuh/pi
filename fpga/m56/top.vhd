@@ -51,11 +51,15 @@ architecture rtl of SOC is
     signal uart_valid   : STD_LOGIC;
     signal uart_busy    : STD_LOGIC;
     signal uart_rx_data : STD_LOGIC_VECTOR(7 downto 0);
+    signal uart_rd      : STD_LOGIC;
+    signal uart_wr      : STD_LOGIC;
 
 begin
 
     resetn   <= not btn(0);
     sel_uart <= mem_addr(22);
+    uart_rd  <= mem_re and sel_uart and not mem_we;
+    uart_wr  <= mem_we and sel_uart;
 
     mem_rdat <= bram_rdat when sel_uart = '0' else
                 (31 downto 10 => '0') & uart_busy & uart_valid & uart_rx_data;
@@ -84,8 +88,8 @@ begin
             baud    => BAUD,
             rx      => uart_rxd_in,
             tx      => uart_txd_out,
-            rd      => mem_re and sel_uart and not mem_we,
-            wr      => mem_we and sel_uart,
+            rd      => uart_rd,
+            wr      => uart_wr,
             valid   => uart_valid,
             busy    => uart_busy,
             tx_data => mem_wdat(7 downto 0),

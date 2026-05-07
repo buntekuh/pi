@@ -3,7 +3,7 @@ library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 
 package firmware_pkg is
-    constant MEM_WORDS : integer := 32768;
+    constant MEM_WORDS : integer := 1024;
     type bram_init_t is array(0 to MEM_WORDS-1) of std_logic_vector(31 downto 0);
     constant FIRMWARE : bram_init_t := (
         0 => x"00A00200",

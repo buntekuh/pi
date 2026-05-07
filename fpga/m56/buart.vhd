@@ -62,6 +62,10 @@ end architecture rtl;
 --   8N1 transmitter. Assert wr for one clock with tx_data valid.
 --   Busy goes high immediately and stays high until the stop bit is done.
 ------------------------------------------------------------------------
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.NUMERIC_STD.ALL;
+
 entity uart_tx is
     generic (CLKFREQ : integer := 12_000_000);
     port (
@@ -126,6 +130,10 @@ end architecture rtl;
 --   then samples at bit-centre positions 3,5,7,...,17.
 --   Assert rd for one clock to acknowledge a received byte and clear valid.
 ------------------------------------------------------------------------
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.NUMERIC_STD.ALL;
+
 entity rxuart is
     generic (CLKFREQ : integer := 12_000_000);
     port (
@@ -155,7 +163,7 @@ begin
     hhN     <= hh(1 downto 0) & rx;
     idle    <= '1' when bitcount = "11111" else '0';
     valid_s <= '1' when bitcount = to_unsigned(18, 5) else '0';
-    startbit <= idle and (hhN(2 downto 1) = "10");  -- falling edge on rx
+    startbit <= '1' when idle = '1' and hhN(2 downto 1) = "10" else '0';  -- falling edge on rx
 
     -- baudgen runs at 2x baud so we can detect the start-bit centre
     baud2 <= baud(30 downto 0) & '0';
@@ -222,6 +230,10 @@ end architecture rtl;
 --           rx_data => rx_byte
 --       );
 ------------------------------------------------------------------------
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.NUMERIC_STD.ALL;
+
 entity buart is
     generic (CLKFREQ : integer := 12_000_000);
     port (
