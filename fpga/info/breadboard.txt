@@ -1,0 +1,63 @@
+So all you need is 3 extra LEDs on the breadboard and you're fully equipped for the entire tutorial.
+
+i bought red leds, they are called "LED 5 rt/-25x" i presume the 25x just means that there are 25 in the box. Then it says: ca. 300mcd/10mA 60' diffus
+Standard 5mm red LEDs, good choice. The specs tell you:
+
+5mm — standard size
+300mcd at 10mA — brightness at rated current (quite bright)
+60° diffuse — wide viewing angle, frosted lens
+For your circuit, the key is the current limiting resistor. Red LEDs typically have a forward voltage of ~2.0V, and the Cmod A7 GPIO runs at 3.3V:
+
+
+R = (3.3V - 2.0V) / I
+You don't need the full 10mA — these will be very visible at 3-5mA. So:
+
+Resistor	Current	Brightness
+270Ω	~4.8mA	bright
+330Ω	~3.9mA	good — recommended
+470Ω	~2.8mA	slightly dimmer, still fine
+330Ω is the classic choice and will look great. The FPGA GPIO pins are comfortable up to about 12mA, so you're well within limits.
+
+Wiring per LED:
+
+
+GPIO pin → 330Ω resistor → LED anode (+, longer leg) → LED cathode (-, shorter leg) → GND
+Do you have 330Ω resistors, or do you need to calculate a combination from what you have?
+
+i dont think i have 330 ohm resistors, the lady calculated 660 or something like that and sold me 3 different resistors all the way from 1 k to 660. Using the large resistors is probably safer anyway, only if i dont see anything i can buy a smaller resistor
+That's sensible advice from the lady. At 1kΩ you'd get:
+
+
+(3.3 - 2.0) / 1000 = 1.3mA
+At 300mcd/10mA these LEDs are pretty bright, so at 1.3mA they'll still be clearly visible — just not blinding. Perfectly fine for indicator LEDs on a desk.
+
+Start with the 1kΩ ones, if they're visible enough (they almost certainly will be) you're done. You can always swap down to the 660Ω later if you want more brightness. No risk of damaging anything either way.
+
+so the connection is: pin -> resistor -> led -> ground ? and then i need to find the ground pin on the board and connect it to the breadboard ground line
+Exactly. And there will be multiple GND pins on the Cmod A7's DIP header — you only need to connect one of them to the breadboard ground rail, then all three LEDs share that rail.
+
+The Digilent reference manual will show you the exact header pinout for both the GPIO pins and where the GND pins are. Do you have the manual, or do you want me to help you find the right pins from the datasheet?
+
+which way does the large bit in the led go? toward ground or toward the resistor (phase)
+The longer leg (anode, +) goes toward the resistor (the positive/power side), and the shorter leg (cathode, -) goes toward ground.
+
+
+GPIO pin → resistor → [longer leg] LED [shorter leg] → GND
+If you've already clipped the legs to the same length, most 5mm LEDs have a flat edge on the rim of the plastic body on the cathode (negative/ground) side.
+
+Perfect, got everything I need. Here's the plan:
+
+### important
+
+Important finding from the manual: The RGB LED is wired opposite to what you'd expect — its anodes connect to 3.3V and cathodes to the FPGA, so it lights up on logic LOW, not HIGH. Don't use it for the tutorial — it would need inverted logic. Stick with 5 breadboard LEDs.
+
+For the 5 breadboard LEDs, use DIP pins 26–30 — they're right next to GND (pin 25) on the right side of the board, which makes wiring very tidy:
+
+LEDS	DIP pin	Package pin
+LEDS[0]	26	R3
+LEDS[1]	27	T3
+LEDS[2]	28	R2
+LEDS[3]	29	T1
+LEDS[4]	30	T2
+GND	25	—
+Wiring: DIP pin → resistor → LED (long leg) → LED (short leg) → GND rail → DIP pin 25.
