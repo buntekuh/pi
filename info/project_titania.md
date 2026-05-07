@@ -42,6 +42,14 @@ system connects.
 
 ## Stack
 
+Modern programming languages stand on a long line of predecessors. In this project, we examine several languages that preceded today’s mainstream languages and explore why each was necessary to evolve computing from simple to increasingly complex structures.
+
+One such lineage is:
+
+Algol → CPL → BCPL → B → C → C++ → Java
+
+Within this line, we focus specifically on BCPL as an early systems language and on C as the ideal middle ground between low‑level languages that directly express machine logic and high‑level languages that more closely match human thought.
+
 | Layer | Description |
 |-------|-------------|
 | RISC-V (RV32I) | 32-bit RISC CPU. Implementation: FemtoRV32 (~400 lines Verilog, educational by design) on Digilent Cmod A7-35T (Artix-7 FPGA). RV32I is a published open standard — 47 instructions, uniform encoding, the same ISA the industry is converging on. |
