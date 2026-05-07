@@ -64,17 +64,16 @@ begin
     mem_rdat <= bram_rdat when sel_uart = '0' else
                 (31 downto 10 => '0') & uart_busy & uart_valid & uart_rx_data;
 
-    -- Synchronous BRAM — 1-cycle read latency
+    -- Asynchronous BRAM read (LUTRAM), synchronous write.
+    -- Async read is required: the CPU presents the fetch address at the FETCH→EXEC
+    -- clock edge, so a registered read would always lag one instruction behind.
+    bram_rdat <= bram(to_integer(unsigned(mem_addr(16 downto 2))));
+
     process(clk)
     begin
         if rising_edge(clk) then
-            if sel_uart = '0' then
-                if mem_we = '1' then
-                    bram(to_integer(unsigned(mem_addr(16 downto 2)))) <= mem_wdat;
-                end if;
-                if mem_re = '1' then
-                    bram_rdat <= bram(to_integer(unsigned(mem_addr(16 downto 2))));
-                end if;
+            if sel_uart = '0' and mem_we = '1' then
+                bram(to_integer(unsigned(mem_addr(16 downto 2)))) <= mem_wdat;
             end if;
         end if;
     end process;
