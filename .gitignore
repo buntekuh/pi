@@ -236,3 +236,9 @@ fpga/**/*.json
 *.fasm
 *.frames
 *.bit
+
+# GHDL intermediate Verilog output.
+# This is a generated file (produced by: ghdl synth --out=verilog ... -e SOC).
+# TODO: commit *_ghdl.v once the M56 CPU is feature-complete, so the synthesised
+#       Verilog is readable as a reference snapshot of the design.
+*_ghdl.v
