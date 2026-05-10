@@ -69,13 +69,14 @@ irq_tx:
         and     R2, #0x200          ; isolate bit 9: TX busy
         jpr.nz  R2, irq_tx          ; busy — retry (also serves as outer loop head)
 
-        mov     [R0], R2            ; R2 = 32-bit word from buffer (byte in bits 7..0)
-        and     R2, #0xFF           ; keep only the byte
-        mov     R2, [R13]           ; transmit: write R2 to UART address
+         mov     R7, [R13]
+;        mov     [R0], R2            ; R2 = 32-bit word from buffer (byte in bits 7..0)
+;        and     R2, #0xFF           ; keep only the byte
+;        mov     R2, [R13]           ; transmit: write R2 to UART address
 
-        add     R0, #4              ; advance read pointer by one word
-        sub     R1, #1              ; one fewer byte to send
-        jpr.nz  R1, irq_tx          ; more bytes remain — loop back to TX wait
+;        add     R0, #4              ; advance read pointer by one word
+:        sub     R1, #1              ; one fewer byte to send
+:        jpr.nz  R1, irq_tx          ; more bytes remain — loop back to TX wait
 
 irq_done:
         ; restore caller's registers in reverse order

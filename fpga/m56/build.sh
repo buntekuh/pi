@@ -50,6 +50,7 @@ if [ "${MODE}" = "b" ] || [ "${MODE}" = "br" ]; then
         firmware/firmware_pkg.vhd \
         decoder.vhd \
         uart.vhd \
+        interrupt.vhd \
         cpu.vhd \
         system.vhd \
         -e SOC > ${PROJECT}_ghdl.v

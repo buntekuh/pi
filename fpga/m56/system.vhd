@@ -206,7 +206,7 @@ begin
     uart0: entity work.uart
         generic map (CLOCKFREQUENCY => CLOCK_FREQUENCY)
         port map (
-            clk     => clk,
+            clock   => clk,
             resetn  => resetn,
             baud    => BAUD,            -- 115200
             rx      => uart_rxd_in,     -- serial input from PC
