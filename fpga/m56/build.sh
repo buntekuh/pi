@@ -11,6 +11,9 @@
 #   ./build.sh -br                — build and run (default)
 #   ./build.sh -br cmod_a7        — build and run for a specific board
 #   ./build.sh -br cmod_a7 flash  — build and write to flash (survives power cycle)
+#   ./build.sh -p                 — patch only: asm → patch_fasm → bitstream (~5 s)
+#   ./build.sh -pr                — patch and load to SRAM
+#   ./build.sh -pr flash          — patch and write to flash
 
 # Parse arguments — order does not matter
 MODE="br"
@@ -19,7 +22,7 @@ FLASH=""
 
 for arg in "$@"; do
     case "$arg" in
-        -b|-r|-br) MODE="${arg#-}" ;;
+        -b|-r|-br|-p|-pr) MODE="${arg#-}" ;;
         flash)     FLASH="flash" ;;
         *)         BOARD="$arg" ;;
     esac
@@ -39,6 +42,30 @@ export LD_LIBRARY_PATH="${TOOLS_DIR}/lib:${LD_LIBRARY_PATH}"
 
 set -ex
 
+# ── Fast patch mode ──────────────────────────────────────────────────────────
+# Reassemble firmware and patch the existing titania.fasm in-place,
+# then regenerate frames + bitstream.  Skips synthesis and place-and-route.
+# Requires a titania.fasm from a prior full build.
+if [ "${MODE}" = "p" ] || [ "${MODE}" = "pr" ]; then
+    python3 tools/asm.py firmware/echo.s firmware/firmware.hex
+    python3 tools/patch_fasm.py ${PROJECT}.fasm firmware/firmware.hex
+    fasm2frames --part ${PART} --db-root "${DB_DIR}/artix7" ${PROJECT}.fasm > ${PROJECT}.frames
+    xc7frames2bit \
+        --part_file "${DB_DIR}/artix7/${PART}/part.yaml" \
+        --part_name ${PART} \
+        --frm_file ${PROJECT}.frames \
+        --output_file ${PROJECT}.bit
+fi
+
+if [ "${MODE}" = "pr" ]; then
+    if [ "${FLASH}" = "flash" ]; then
+        openFPGALoader --freq 30e6 -c digilent --fpga-part ${LOADER_PART_FLASH} -f ${PROJECT}.bit
+    else
+        openFPGALoader --freq 30e6 -c digilent --fpga-part ${LOADER_PART_SRAM} ${PROJECT}.bit
+    fi
+fi
+
+# ── Full build ────────────────────────────────────────────────────────────────
 if [ "${MODE}" = "b" ] || [ "${MODE}" = "br" ]; then
 
     # Step 1: assemble firmware → hex + VHDL init package
