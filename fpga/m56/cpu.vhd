@@ -72,7 +72,12 @@ entity m56_cpu is
         memory_read_data : in  STD_LOGIC_VECTOR(31 downto 0);  -- data read back
         memory_write_data : out STD_LOGIC_VECTOR(31 downto 0);  -- data to write
         memory_write_enable   : out STD_LOGIC;                      -- write enable pulse
-        memory_read_enable   : out STD_LOGIC                       -- read enable pulse
+        memory_read_enable   : out STD_LOGIC;                      -- read enable pulse
+
+        -- Interrupt interface
+        interrupt_request    : in  STD_LOGIC;                      -- '1' when a peripheral is requesting attention
+        irq_status           : in  STD_LOGIC_VECTOR(31 downto 0); -- one bit per source; written to R13 on entry
+        interrupts_enabled   : out STD_LOGIC                       -- '1' when the CPU will accept interrupts
     );
 end entity m56_cpu;
 
@@ -92,7 +97,7 @@ architecture rtl of m56_cpu is
     );
 
     -- The execution state machine.
-    type state_type is (FETCH, EXEC, LOAD, STORE);
+    type state_type is (FETCH, EXEC, LOAD, STORE, INTERRUPT_ENTRY);
     signal state    : state_type := FETCH;
     signal load_destination : integer range 0 to 15;  -- which register LOAD will write into
 
@@ -108,10 +113,22 @@ architecture rtl of m56_cpu is
     signal d_is_mov   : std_logic;  -- '1' if this is a mov instruction
     signal d_is_alu   : std_logic;  -- '1' if this is add/sub/and/orr/xor
     signal d_is_jpr   : std_logic;  -- '1' if this is a relative jump
+    signal d_is_wfi   : std_logic;  -- '1' if this is a wait-for-interrupt
+    signal d_is_eai   : std_logic;  -- '1' if this is enable-interrupts
+    signal d_is_dai   : std_logic;  -- '1' if this is disable-interrupts
+    signal d_is_rti   : std_logic;  -- '1' if this is return-from-interrupt
     signal d_jmp_sub  : std_logic;  -- '1' if jump is a subroutine call
     signal d_jmp_cond : std_logic_vector(2 downto 0);  -- jump condition code
 
+    -- Interrupt enable flag.  Starts disabled at reset; the program must
+    -- execute eai to allow interrupts.  Automatically cleared when the CPU
+    -- enters an interrupt handler, so the handler cannot be interrupted again.
+    signal interrupts_enabled_reg : std_logic := '0';
+
 begin
+
+    -- Expose the interrupt enable flag so system.vhd can read it (e.g. for an LED or status register).
+    interrupts_enabled <= interrupts_enabled_reg;
 
     -- ── Decoder ─────────────────────────────────────────────────────────────
     -- The decoder is always watching memory_read_data.  During EXEC, memory_read_data contains
@@ -133,9 +150,10 @@ begin
             is_sar   => open,       -- not yet implemented
             is_jmp   => open,       -- absolute jump not yet implemented
             is_jpr   => d_is_jpr,
-            is_wfi   => open,       -- wait-for-interrupt not yet implemented
-            is_eai   => open,       -- enable interrupts not yet implemented
-            is_dai   => open,       -- disable interrupts not yet implemented
+            is_wfi   => d_is_wfi,
+            is_eai   => d_is_eai,
+            is_dai   => d_is_dai,
+            is_rti   => d_is_rti,
             jmp_sub  => d_jmp_sub,
             jmp_cond => d_jmp_cond
         );
@@ -161,6 +179,7 @@ begin
             memory_write_data <= (others => '0');
             memory_write_enable   <= '0';
             memory_read_enable   <= '1';   -- tell Block RAM to read immediately when reset releases
+            interrupts_enabled_reg <= '0';  -- interrupts disabled until the program issues eai
 
         -- ── Every rising clock edge ────────────────────────────────────────
         elsif rising_edge(clk) then
@@ -197,10 +216,30 @@ begin
                     register_index  := to_integer(unsigned(d_reg));
                     destination_register := to_integer(unsigned(d_imm19(3 downto 0)));
 
+                    -- ── Interrupt check ──────────────────────────────────────
+                    -- Before executing the decoded instruction, check whether a
+                    -- peripheral is requesting attention and the CPU is willing to
+                    -- accept it.  If so, the instruction is not executed — the CPU
+                    -- saves the return address and jumps to the handler instead.
+                    -- registers(15) already holds (instruction address + 4), set in
+                    -- FETCH, which is exactly the address the handler returns to.
+                    if interrupt_request = '1' and interrupts_enabled_reg = '1' then
+                        -- Push return address onto the stack.
+                        -- SP (R14) decrements by 4; the new SP is the write address.
+                        registers(14) <= std_logic_vector(unsigned(registers(14)) - 4);
+                        memory_address    <= std_logic_vector(unsigned(registers(14)) - 4);
+                        memory_write_data <= registers(15);
+                        memory_write_enable <= '1';
+                        -- R13 receives the interrupt status word so the handler
+                        -- knows which source(s) fired without any extra memory read.
+                        registers(13) <= irq_status;
+                        interrupts_enabled_reg <= '0';
+                        state <= INTERRUPT_ENTRY;
+
                     -- ── mov family ──────────────────────────────────────────
                     -- All load, store, and register-copy operations share opcode 0.
                     -- The mode field says which variant this is.
-                    if d_is_mov = '1' then
+                    elsif d_is_mov = '1' then
                         case d_mode is
 
                             -- mov-h #imm19, Rdst  (mode 1)
@@ -308,9 +347,52 @@ begin
                         memory_read_enable <= '1';
                         state  <= FETCH;
 
+                    -- ── eai — enable interrupts ──────────────────────────────
+                    -- From this point on, interrupt_request = '1' will be acted on.
+                    elsif d_is_eai = '1' then
+                        interrupts_enabled_reg <= '1';
+                        memory_address <= registers(15);
+                        memory_read_enable <= '1';
+                        state <= FETCH;
+
+                    -- ── dai — disable interrupts ──────────────────────────────
+                    -- Blocks interrupt delivery until eai is issued again.
+                    -- The handler issues dai on entry (automatically, via interrupt
+                    -- check above) and eai before returning, so dai in user code is
+                    -- only needed for short critical sections.
+                    elsif d_is_dai = '1' then
+                        interrupts_enabled_reg <= '0';
+                        memory_address <= registers(15);
+                        memory_read_enable <= '1';
+                        state <= FETCH;
+
+                    -- ── wfi — wait for interrupt ──────────────────────────────
+                    -- Suspends execution by re-fetching this same instruction
+                    -- on every cycle until an interrupt fires.  The interrupt check
+                    -- at the top of EXEC will catch it and redirect to the handler.
+                    -- Note: interrupts must be enabled (eai) before calling wfi,
+                    -- otherwise the CPU will spin here forever.
+                    elsif d_is_wfi = '1' then
+                        memory_address <= std_logic_vector(unsigned(registers(15)) - 4);
+                        memory_read_enable <= '1';
+                        state <= FETCH;
+
+                    -- ── rti — return from interrupt ───────────────────────────
+                    -- Atomically enables interrupts and jumps to R13.
+                    -- R13 was loaded from the stack by the handler's closing
+                    -- sequence before this instruction runs.
+                    -- Because interrupts_enabled_reg is still '0' during this
+                    -- EXEC cycle, the interrupt check at the top cannot fire here —
+                    -- any pending interrupt will only be seen in the next EXEC,
+                    -- by which point PC already points at the return address.
+                    elsif d_is_rti = '1' then
+                        interrupts_enabled_reg <= '1';
+                        memory_address <= registers(13);
+                        memory_read_enable <= '1';
+                        state <= FETCH;
+
                     -- ── Unknown / unimplemented instruction ──────────────────
-                    -- Quietly skip it and continue.  This handles wfi, eai, dai, etc.
-                    -- that are not yet wired up.
+                    -- Quietly skip it and continue.
                     else
                         memory_address <= registers(15);
                         memory_read_enable   <= '1';
@@ -349,6 +431,16 @@ begin
                     memory_address <= registers(15);    -- back to fetching instructions
                     memory_read_enable   <= '1';
                     state    <= FETCH;
+
+                -- ── INTERRUPT_ENTRY ──────────────────────────────────────────
+                -- EXEC pushed the return address onto the stack (write_enable='1').
+                -- That write is completing during this cycle.
+                -- Clear write_enable and redirect to the interrupt vector.
+                when INTERRUPT_ENTRY =>
+                    memory_write_enable <= '0';
+                    memory_address      <= x"00000010";
+                    memory_read_enable  <= '1';
+                    state               <= FETCH;
 
             end case;
         end if;

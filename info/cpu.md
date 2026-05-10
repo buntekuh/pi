@@ -17,7 +17,8 @@ range is wired to that, with addresses above 0x0007FFFF unmapped.
 |--------|-------|-------|
 | R0–R2  |       | Scratch registers                                |
 | R3     |       | Leaf return address (by convention)              |
-| R4–R13 |       | General purpose                                  |
+| R4–R12 |       | General purpose                                  |
+| R13    | LR    | Interrupt link register — hardware saves PC here on interrupt entry |
 | R14    | SP    | Stack pointer. Stack grows downward.             |
 | R15    | PC    | Program counter. Advances by 4 after each fetch. |
 
@@ -96,8 +97,9 @@ carries exactly what each mode needs. It is never split arbitrarily.
 | 12   | wfi      | Wait for interrupt — suspends execution until an interrupt fires |
 | 13   | eai      | Enable interrupts |
 | 14   | dai      | Disable interrupts |
+| 15   | rti      | Return from interrupt — enable interrupts and jump to R13 (see Interrupts section for why this must be a single instruction) |
 
-Opcodes 15–31 are reserved for future use.
+Opcodes 16–31 are reserved for future use.
 
 The `-s` suffix on any jump saves the return address (address of the instruction
 after the jump) onto the stack before jumping, turning it into a subroutine call:
@@ -122,7 +124,6 @@ psh Rsrc              →  sub SP, #4 ; mov Rsrc, [SP]
 pop Rdst              →  mov [SP], Rdst ; add SP, #4
 cal label             →  jmp-s label
 ret                   →  pop R15
-rti                   →  pop R15 ; eai
 nop                   →  add R0, #0
 clr Rdst              →  xor Rdst, Rdst
 inc Rdst              →  add Rdst, #1
@@ -370,12 +371,34 @@ opcode | 0...0(27)
 ```
 
 When an interrupt fires and interrupts are enabled:
-1. The current instruction completes
-2. PC is pushed onto the stack
-3. Interrupts are disabled automatically
-4. PC jumps to the interrupt vector at `0x00000010`
+1. The current instruction is abandoned (not executed)
+2. PC (the return address) is pushed onto the stack
+3. R13 is written with the interrupt status word (one bit per source)
+4. Interrupts are disabled automatically
+5. PC jumps to the interrupt vector at `0x00000010`
 
-Return from interrupt via the `rti` assembler macro: `pop R15 ; eai`
+To return from an interrupt, the handler must first clear the interrupt source
+(e.g. read the UART byte so `uart_valid` drops), then re-enable interrupts, then jump back:
+
+```asm
+; at end of handler — source must be clear before eai!
+eai             ; re-enable interrupts
+mov  R13, R15   ; return to interrupted code
+```
+
+`rti` must be a single hardware instruction rather than a macro expanding to `eai ; mov R13, R15`.
+If those were two separate instructions, a new interrupt arriving between them would overwrite R13
+before the jump happened — the return address would be lost. As a single instruction, `rti` sets
+`interrupts_enabled` and `PC` in the same clock cycle. Any pending interrupt can only be seen in
+the *next* cycle, by which point PC is already at the return address.
+
+Return from an interrupt handler using the `rti` instruction, preceded by loading the return address from the stack into R13:
+
+```asm
+; handler exit sequence
+pop  R13        ; R13 = return address (mov [SP], R13 ; add SP, #4)
+rti             ; enable interrupts and jump to R13
+```
 
 ---
 

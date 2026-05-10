@@ -126,6 +126,11 @@ architecture rtl of SOC is
     signal uart_rd      : STD_LOGIC;   -- pulse to acknowledge / clear the received byte
     signal uart_wr      : STD_LOGIC;   -- pulse to start transmitting a byte
 
+    -- ── Interrupt signals ────────────────────────────────────────────────
+    signal interrupt_pending  : STD_LOGIC;                      -- '1' when any source is requesting
+    signal irq_status         : STD_LOGIC_VECTOR(31 downto 0); -- one bit per source; written to R13 on entry
+    signal interrupts_enabled : STD_LOGIC;                     -- '1' when CPU will accept interrupts
+
 begin
 
     -- ── Simple wiring ─────────────────────────────────────────────────────
@@ -180,6 +185,17 @@ begin
         end if;
     end process;
 
+    -- ── Interrupt controller ──────────────────────────────────────────────
+    -- Collects interrupt sources and tells the CPU when one is pending.
+    -- Currently the only source is uart_valid (a byte has arrived).
+    -- The CPU jumps to interrupt_vector when it decides to handle the request.
+    irq0: entity work.interrupt_controller
+        port map (
+            uart_rx_valid     => uart_valid,
+            interrupt_pending => interrupt_pending,
+            irq_status        => irq_status
+        );
+
     -- ── UART ──────────────────────────────────────────────────────────────
     -- uart handles everything to do with serial communication:
     --   - baud rate generation (counting clock cycles to get 115200 bps timing)
@@ -213,7 +229,10 @@ begin
             memory_read_data => memory_read_data,
             memory_write_data => memory_write_data,
             memory_write_enable   => memory_write_enable,
-            memory_read_enable   => memory_read_enable
+            memory_read_enable   => memory_read_enable,
+            interrupt_request    => interrupt_pending,
+            irq_status           => irq_status,
+            interrupts_enabled   => interrupts_enabled
         );
 
     -- ── LEDs ──────────────────────────────────────────────────────────────

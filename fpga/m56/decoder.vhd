@@ -44,9 +44,10 @@ entity M56_Decoder is
         is_sar   : out std_logic;   -- opcode  9 : arithmetic shift right (not yet wired)
         is_jmp   : out std_logic;   -- opcode 10 : absolute jump (not yet wired)
         is_jpr   : out std_logic;   -- opcode 11 : relative jump — used by echo.s
-        is_wfi   : out std_logic;   -- opcode 12 : wait for interrupt (not yet wired)
-        is_eai   : out std_logic;   -- opcode 13 : enable interrupts (not yet wired)
-        is_dai   : out std_logic;   -- opcode 14 : disable interrupts (not yet wired)
+        is_wfi   : out std_logic;   -- opcode 12 : wait for interrupt
+        is_eai   : out std_logic;   -- opcode 13 : enable interrupts
+        is_dai   : out std_logic;   -- opcode 14 : disable interrupts
+        is_rti   : out std_logic;   -- opcode 15 : return from interrupt (enable interrupts, jump to R13)
 
         -- Jump-specific sub-fields (only meaningful when is_jmp or is_jpr is '1')
         jmp_sub  : out std_logic;                      -- '1' = subroutine call (save return address)
@@ -89,6 +90,7 @@ begin
     is_wfi <= '1' when op = "01100" else '0';   -- opcode 12
     is_eai <= '1' when op = "01101" else '0';   -- opcode 13
     is_dai <= '1' when op = "01110" else '0';   -- opcode 14
+    is_rti <= '1' when op = "01111" else '0';   -- opcode 15
 
     -- For jumps, slice the condition code out of the mode field.
     -- Bit 26 is the "subroutine" flag (call vs plain jump).
