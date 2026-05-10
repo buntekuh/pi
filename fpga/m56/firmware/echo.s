@@ -1,121 +1,98 @@
 ; echo.s — UART echo with BTN1 interrupt buffer replay
 ;
-; Normal operation: reads bytes from the UART, echoes them immediately,
-; and stores each byte into a RAM buffer.
+; Normal operation: reads bytes from the UART, echoes each byte immediately,
+; and appends it to a RAM buffer (one byte per 32-bit word).
 ;
-; BTN1 press: an interrupt fires.  The handler replays the entire buffer
-; back to the UART a second time, proving:
-;   (a) the interrupt fired and the handler ran
-;   (b) the handler returned correctly and normal operation resumed
+; BTN1 press: an interrupt fires.  The handler replays the entire buffer back
+; to the UART, proving that the interrupt fired, the handler ran correctly,
+; and that normal operation resumes on return.
 ;
-; BTN1 is level-sensitive: the interrupt fires on every EXEC cycle while
-; the button is held.  Each handler run replays the buffer once and returns.
-; Release the button to stop.
+; BTN1 is level-sensitive.  Each handler invocation replays the buffer once;
+; release the button to stop.
 ;
-; ─── Memory layout ────────────────────────────────────────────────────────
+; ─── Memory layout ───────────────────────────────────────────────────────────
 ;
-;   0x000000   jpr main          reset entry — skip past the handler
-;   0x000004   (reserved)        three spare instruction slots before
-;   0x000008   (reserved)        the interrupt vector
-;   0x00000C   (reserved)
-;   0x000010   handler           interrupt vector — CPU jumps here on interrupt
-;   0x000080   main              normal program
-;   0x000100   buffer            one byte stored per 32-bit word
+;   0x000000   reset vector   jpr main — skip past the interrupt vector area
+;   0x000010   handler        interrupt vector (CPU jumps here on any IRQ)
+;   0x000080   main           handler is exactly 28 instructions (0x70 bytes)
+;   0x000100   buffer         one byte stored per 32-bit word
 ;
-; ─── Registers (main loop) ────────────────────────────────────────────────
+; ─── Registers (main) ────────────────────────────────────────────────────────
 ;
-;   R4   UART address (0x400000) — constant
-;   R5   buffer base address (0x000100) — constant
-;   R6   buffer write pointer — starts at R5, advances by 4 per byte stored
+;   R4   UART address constant  (0x400000)
+;   R5   buffer base constant   (0x000100)
+;   R6   buffer write pointer   (advances by 4 per byte stored)
 ;   R7   byte count in buffer
 ;
-; ─── Registers (handler) ──────────────────────────────────────────────────
+; ─── Registers (handler) ─────────────────────────────────────────────────────
 ;
-;   R0, R1, R2 are saved on the stack and used freely.
-;   R13 is repurposed as the UART address during the handler body;
-;       it is loaded with the return address via pop at the end, then rti jumps to it.
+;   R0   read pointer (initialised from R5)           saved / restored
+;   R1   bytes remaining (initialised from R7)        saved / restored
+;   R2   UART address   (0x400000)                    saved / restored
+;   R3   scratch — UART status word, buffer word      not saved (main never uses R3)
 
-; ── Reset entry (0x000000) ───────────────────────────────────────────────
+; ── Reset vector (0x000000) ─────────────────────────────────────────────────
         jpr     main
+        nop                         ; } three reserved slots:
+        nop                         ; } must not execute, exist only to
+        nop                         ; } pad to the interrupt vector at 0x000010
 
-; Three reserved instruction slots (0x000004 – 0x00000C).
-; Must not be executed; exist only to pad to the interrupt vector at 0x000010.
-        add     R0, #0
-        add     R0, #0
-        add     R0, #0
-
-; ── Interrupt handler (0x000010) ─────────────────────────────────────────
-; On entry: PC has been pushed to the stack by the CPU,
-;           R13 = irq_status (bit 1 set = BTN1 fired),
-;           interrupts are disabled.
+; ── Interrupt handler (0x000010) ────────────────────────────────────────────
+; On entry: return PC is on top of the stack (pushed by hardware),
+;           R13 = irq_status (bit 1 = BTN1), interrupts are disabled.
 handler:
-        sub     R14, #4
-        mov     R0, [R14]           ; push R0
-        sub     R14, #4
-        mov     R1, [R14]           ; push R1
-        sub     R14, #4
-        mov     R2, [R14]           ; push R2
+        psh     R0
+        psh     R1
+        psh     R2
 
-        ; R5 = buffer base (set in main, not modified here)
-        ; R7 = byte count  (set in main, not modified here)
-        mov-h   #0x200, R13         ; R13 = 0x400000 — UART address, used throughout body
-        mov     R5, R0              ; R0 = read pointer, starts at buffer base
+        mov     R5, R0              ; R0 = read pointer = buffer base
         mov     R7, R1              ; R1 = bytes remaining
-        jpr.z   R1, irq_done        ; nothing in buffer, skip replay
+        mov-h   #0x200, R2          ; R2 = 0x400000 (UART address)
+        jpr.z   R1, irq_done        ; buffer empty — nothing to replay
 
 irq_tx:
-        ; wait for UART transmitter to be free, then send next byte
-        mov     [R13], R2           ; R2 = UART status word
-        and     R2, #0x200          ; isolate bit 9: TX busy
-        jpr.nz  R2, irq_tx          ; busy — retry (also serves as outer loop head)
+        mov     [R2], R3            ; R3 = UART status word
+        and     R3, #0x200          ; bit 9: TX busy?
+        jpr.nz  R3, irq_tx          ; busy — spin
 
-         mov     R7, [R13]
-;        mov     [R0], R2            ; R2 = 32-bit word from buffer (byte in bits 7..0)
-;        and     R2, #0xFF           ; keep only the byte
-;        mov     R2, [R13]           ; transmit: write R2 to UART address
-
-;        add     R0, #4              ; advance read pointer by one word
-;        sub     R1, #1              ; one fewer byte to send
-;        jpr.nz  R1, irq_tx          ; more bytes remain — loop back to TX wait
+        mov     [R0], R3            ; R3 = 32-bit word from buffer (byte in bits 7..0)
+        and     R3, #0xFF           ; strip upper 24 bits
+        mov     R3, [R2]            ; transmit the byte
+        add     R0, #4              ; advance read pointer by one word
+        sub     R1, #1              ; one fewer byte to replay
+        jpr.nz  R1, irq_tx          ; loop until buffer is drained
 
 irq_done:
-        ; restore caller's registers in reverse order
-        mov     [R14], R2
-        add     R14, #4             ; pop R2
-        mov     [R14], R1
-        add     R14, #4             ; pop R1
-        mov     [R14], R0
-        add     R14, #4             ; pop R0
+        pop     R2
+        pop     R1
+        pop     R0
+        pop     R13                 ; return PC pushed by CPU on interrupt entry
+        rti                         ; re-enable interrupts and jump to R13
 
-        ; return: load the PC that was pushed by hardware into R13, then rti
-        mov     [R14], R13          ; R13 = return address (pushed by CPU on interrupt entry)
-        add     R14, #4             ; SP now restored to its pre-interrupt value
-        rti                         ; enable interrupts and jump to R13
-
-; ── Main program (0x000080) ──────────────────────────────────────────────
+; ── Main program (0x000080) ─────────────────────────────────────────────────
 main:
-        mov-h   #0x200, R4          ; R4 = 0x400000  (UART address)
-        and     R5, #0              ; R5 = 0
-        orr     R5, #0x100          ; R5 = 0x000100  (buffer base)
+        mov-h   #0x200, R4          ; R4 = 0x400000 (UART address)
+        clr     R5
+        orr     R5, #0x100          ; R5 = 0x000100 (buffer base)
         mov     R5, R6              ; R6 = write pointer = buffer base
-        and     R7, #0              ; R7 = 0          (buffer empty)
+        clr     R7                  ; R7 = 0 (buffer empty)
         eai                         ; enable interrupts — BTN1 can now fire
 
 wait_rx:
         mov     [R4], R0            ; R0 = UART status word
-        mov     R0, R1              ; R1 = copy for bit test
+        mov     R0, R1              ; R1 = copy for bit tests
         and     R1, #0x100          ; bit 8: RX valid?
-        jpr.z   R1, wait_rx         ; not ready — keep waiting
+        jpr.z   R1, wait_rx         ; not yet — spin
 
-        and     R0, #0xFF           ; R0 = received byte
+        and     R0, #0xFF           ; R0 = received byte (strip status bits)
 
 wait_tx:
         mov     [R4], R1            ; R1 = UART status
         and     R1, #0x200          ; bit 9: TX busy?
-        jpr.nz  R1, wait_tx         ; busy — keep waiting
+        jpr.nz  R1, wait_tx         ; busy — spin
 
-        mov     R0, [R4]            ; echo: transmit the received byte
+        mov     R0, [R4]            ; echo: write received byte to UART
         mov     R0, [R6]            ; store byte to buffer at write pointer
         add     R6, #4              ; advance write pointer
-        add     R7, #1              ; one more byte in buffer
+        inc     R7                  ; one more byte in buffer
         jpr     wait_rx             ; loop forever
