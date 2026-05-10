@@ -64,8 +64,8 @@ entity interrupt_controller is
     port (
         -- Interrupt sources.
         -- Each line is '1' while the peripheral is requesting attention.
-        -- The CPU handler must read the peripheral to clear the line.
-        uart_rx_valid    : in  STD_LOGIC;   -- UART received a byte (stays high until byte is read)
+        uart_rx_valid    : in  STD_LOGIC;   -- UART received a byte (not yet used as interrupt source)
+        btn1             : in  STD_LOGIC;   -- second button — level high while pressed
 
         -- To the CPU.
         interrupt_pending : out STD_LOGIC;                      -- '1' = at least one source is requesting
@@ -76,13 +76,15 @@ end entity interrupt_controller;
 architecture rtl of interrupt_controller is
 begin
 
-    -- Any asserted source makes an interrupt pending.
-    -- As more sources are added, OR them in here:
-    --   interrupt_pending <= uart_rx_valid or spi_done or timer_tick;
-    interrupt_pending <= uart_rx_valid;
+    -- btn1 fires interrupts; uart_rx_valid is tracked in the status word but does
+    -- not yet trigger interrupts — the echo firmware still polls the UART directly.
+    -- When UART becomes interrupt-driven, add:  interrupt_pending <= btn1 or uart_rx_valid;
+    interrupt_pending <= btn1;
 
     -- One bit per source.  The CPU writes this to R13 on interrupt entry
     -- so the handler can dispatch without any extra memory reads.
-    irq_status <= (0 => uart_rx_valid, others => '0');
+    --   bit 0 = uart_rx_valid
+    --   bit 1 = btn1
+    irq_status <= (0 => uart_rx_valid, 1 => btn1, others => '0');
 
 end architecture rtl;

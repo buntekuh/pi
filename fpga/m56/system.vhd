@@ -186,12 +186,14 @@ begin
     end process;
 
     -- ── Interrupt controller ──────────────────────────────────────────────
-    -- Collects interrupt sources and tells the CPU when one is pending.
-    -- Currently the only source is uart_valid (a byte has arrived).
-    -- The CPU jumps to interrupt_vector when it decides to handle the request.
+    -- btn1 (BTN1, the button furthest from USB) fires interrupts.
+    -- uart_valid is wired in but not yet an interrupt source — the firmware
+    -- still polls the UART.  Both appear in irq_status so the handler can
+    -- read R13 on entry and know exactly which source fired.
     irq0: entity work.interrupt_controller
         port map (
             uart_rx_valid     => uart_valid,
+            btn1              => btn(1),
             interrupt_pending => interrupt_pending,
             irq_status        => irq_status
         );

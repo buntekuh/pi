@@ -15,8 +15,11 @@ import sys
 OPCODES = {
     'mov': 0, 'mvb': 1, 'add': 2, 'sub': 3, 'and': 4,
     'orr': 5, 'xor': 6, 'not': 7, 'shf': 8, 'sar': 9,
-    'jmp': 10, 'jpr': 11, 'wfi': 12, 'eai': 13, 'dai': 14,
+    'jmp': 10, 'jpr': 11, 'wfi': 12, 'eai': 13, 'dai': 14, 'rti': 15,
 }
+
+# Instructions that take no operands — encoded with all fields zero.
+ZERO_OPERAND = {'wfi', 'eai', 'dai', 'rti'}
 
 COND = {'al': 0, 'z': 1, 'nz': 2, 'n': 3, 'nn': 4}
 
@@ -69,6 +72,12 @@ def assemble(source):
         mn   = parts[0].lower()
         tail = parts[1] if len(parts) > 1 else ''
         ops  = split_ops(tail) if tail else []
+
+        # --- zero-operand instructions: wfi, eai, dai, rti ---
+        if mn in ZERO_OPERAND:
+            words.append(encode(OPCODES[mn], 0, 0, 0))
+            pc += 4
+            continue
 
         # --- jpr[.cond] ---
         if mn.startswith('jpr'):
