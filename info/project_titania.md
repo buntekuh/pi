@@ -14,6 +14,24 @@ conviction. From the flip-flop to the scripting language, every part of the
 system is designed to fit in one sitting — not because it is limited, but
 because simplicity is a design goal, not an afterthought.
 
+Andrew Tanenbaum built MINIX not to be the fastest or the most capable Unix,
+but to be the one you could learn from and teach whole generations of students.
+Tanenbaum was criticised for choosing clarity over performance. He was right to
+make that choice as a teacher, and Titania makes the same choices.
+
+The PDP-8 was a machine so constrained it seems almost a joke by modern
+standards, yet beloved for generations because its constraints made it
+completely knowable. You could understand a PDP-8. Both C and Unix were
+invented on a PDP.
+
+The crown jewels that give the project its purpose are the Grue text adventuring
+system and the languages built to run it. Grue is a very simple but extensible
+text adventure runtime — it invites users to play, tinker, and make worlds come
+alive. The languages above it (Titania-0 and Titania-1) are close enough to how
+computers operate that anyone willing to think like a machine can understand
+them. The whole stack exists so that a curious person can write a world and then
+follow that world all the way down to the electrons.
+
 Titania is a complete computer: RISC-V CPU on real FPGA hardware, OS,
 languages, and tools, built from first principles. Every layer is visible,
 every decision is documented, and nothing is a black box. A student can start
