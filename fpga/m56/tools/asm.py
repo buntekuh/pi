@@ -47,8 +47,55 @@ def split_ops(tail):
     return [o.strip() for o in tail.split(',')]
 
 
+def expand_macros(lines):
+    """Expand assembler macros into real instructions.
+
+    Multi-instruction macros (psh, pop, ret) produce multiple output lines.
+    All other macros produce exactly one line.
+    Labels and blank lines pass through unchanged.
+    """
+    out = []
+    for line in lines:
+        if not line or line.endswith(':'):
+            out.append(line)
+            continue
+        parts = line.split(None, 1)
+        mn   = parts[0].lower()
+        tail = parts[1].strip() if len(parts) > 1 else ''
+        ops  = [o.strip() for o in tail.split(',')] if tail else []
+
+        if mn == 'nop':
+            out.append('add R0, #0')
+        elif mn == 'clr':
+            out.append(f'xor {ops[0]}, {ops[0]}')
+        elif mn == 'inc':
+            out.append(f'add {ops[0]}, #1')
+        elif mn == 'dec':
+            out.append(f'sub {ops[0]}, #1')
+        elif mn == 'psh':
+            out.append('sub R14, #4')
+            out.append(f'mov {ops[0]}, [R14]')
+        elif mn == 'pop':
+            out.append(f'mov [R14], {ops[0]}')
+            out.append('add R14, #4')
+        elif mn == 'ret':
+            out.append('mov [R14], R15')
+            out.append('add R14, #4')
+        elif mn == 'cal':
+            out.append(f'jmp-s {tail}')
+        elif mn == 'shl':
+            out.append(f'shf {tail}')
+        elif mn == 'shr':
+            count = ops[1].lstrip('#')
+            out.append(f'shf {ops[0]}, #-{count}')
+        else:
+            out.append(line)
+    return out
+
+
 def assemble(source):
     lines = [clean(l) for l in source.splitlines()]
+    lines = expand_macros(lines)
 
     # Pass 1 — assign an address to every label
     symbols = {}
