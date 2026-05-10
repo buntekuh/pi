@@ -97,9 +97,13 @@ architecture rtl of m56_cpu is
     );
 
     -- The execution state machine.
-    type state_type is (FETCH, EXEC, LOAD, STORE, INTERRUPT_ENTRY);
+    -- CALL_STORE mirrors INTERRUPT_ENTRY: it completes a stack push started in
+    -- EXEC (for jmp-s / jpr-s subroutine calls) then redirects to the call target.
+    type state_type is (FETCH, EXEC, LOAD, STORE, INTERRUPT_ENTRY, CALL_STORE);
     signal state    : state_type := FETCH;
     signal load_destination : integer range 0 to 15;  -- which register LOAD will write into
+    signal load_is_byte     : std_logic := '0';       -- '1' = LOAD captures only bits 7..0
+    signal call_target      : std_logic_vector(31 downto 0);  -- saved jmp-s destination
 
     -- Decoder output signals — wired from the decoder module below.
     -- These are combinational: they update instantly whenever memory_read_data changes.
@@ -111,7 +115,12 @@ architecture rtl of m56_cpu is
     signal d_imm19    : std_logic_vector(18 downto 0); -- 19-bit immediate
     signal d_imm32    : std_logic_vector(31 downto 0); -- imm19 sign-extended to 32 bits
     signal d_is_mov   : std_logic;  -- '1' if this is a mov instruction
+    signal d_is_mvb   : std_logic;  -- '1' if this is a byte move
     signal d_is_alu   : std_logic;  -- '1' if this is add/sub/and/orr/xor
+    signal d_is_not   : std_logic;  -- '1' if this is bitwise NOT
+    signal d_is_shf   : std_logic;  -- '1' if this is a logical shift
+    signal d_is_sar   : std_logic;  -- '1' if this is an arithmetic shift right
+    signal d_is_jmp   : std_logic;  -- '1' if this is an absolute jump
     signal d_is_jpr   : std_logic;  -- '1' if this is a relative jump
     signal d_is_wfi   : std_logic;  -- '1' if this is a wait-for-interrupt
     signal d_is_eai   : std_logic;  -- '1' if this is enable-interrupts
@@ -136,19 +145,19 @@ begin
     -- therefore always valid and ready to use in EXEC.
     dec: entity work.M56_Decoder
         port map (
-            instruction => memory_read_data,   -- instruction word from Block RAM
+            instruction => memory_read_data,
             opcode   => d_opcode,
             mode     => d_mode,
             reg      => d_reg,
             imm19    => d_imm19,
             imm32    => d_imm32,
             is_mov   => d_is_mov,
-            is_mvb   => open,       -- byte move not yet implemented in CPU
+            is_mvb   => d_is_mvb,
             is_alu   => d_is_alu,
-            is_not   => open,       -- not yet implemented
-            is_shf   => open,       -- not yet implemented
-            is_sar   => open,       -- not yet implemented
-            is_jmp   => open,       -- absolute jump not yet implemented
+            is_not   => d_is_not,
+            is_shf   => d_is_shf,
+            is_sar   => d_is_sar,
+            is_jmp   => d_is_jmp,
             is_jpr   => d_is_jpr,
             is_wfi   => d_is_wfi,
             is_eai   => d_is_eai,
@@ -164,6 +173,8 @@ begin
         variable destination_register   : integer range 0 to 15;           -- destination register from imm19[3:0]
         variable take_branch            : boolean;                         -- should this branch be taken?
         variable next_pc                : std_logic_vector(31 downto 0);   -- computed branch target
+        variable alu_src                : std_logic_vector(31 downto 0);   -- ALU second operand (imm or register)
+        variable shift_count            : integer range 0 to 31;           -- magnitude of shift
     begin
 
         -- ── Reset ──────────────────────────────────────────────────────────
@@ -175,11 +186,12 @@ begin
                 others => (others => '0')
             );
             state    <= FETCH;
-            memory_address <= (others => '0');  -- address 0 for first fetch
+            memory_address <= (others => '0');
             memory_write_data <= (others => '0');
             memory_write_enable   <= '0';
-            memory_read_enable   <= '1';   -- tell Block RAM to read immediately when reset releases
-            interrupts_enabled_reg <= '0';  -- interrupts disabled until the program issues eai
+            memory_read_enable   <= '1';
+            interrupts_enabled_reg <= '0';
+            load_is_byte <= '0';
 
         -- ── Every rising clock edge ────────────────────────────────────────
         elsif rising_edge(clk) then
@@ -242,6 +254,14 @@ begin
                     elsif d_is_mov = '1' then
                         case d_mode is
 
+                            -- mov #imm, Rdst  (mode 0)
+                            -- Sign-extend the 19-bit immediate to 32 bits and load.
+                            when "0000" =>
+                                registers(register_index) <= d_imm32;
+                                memory_address <= registers(15);
+                                memory_read_enable   <= '1';
+                                state    <= FETCH;
+
                             -- mov-h #imm19, Rdst  (mode 1)
                             -- Load a 19-bit value into the UPPER bits of a register.
                             -- The value lands at bits 31..13 and zeros bits 12..0.
@@ -293,28 +313,144 @@ begin
                                 state    <= FETCH;
                         end case;
 
+                    -- ── mvb — byte move ──────────────────────────────────────
+                    -- Mode 3: byte read  — load one byte from [Rsrc], zero-extend to 32 bits.
+                    -- Mode 4: byte write — store low byte of Rsrc to [Rdst].
+                    --   Note: byte write does NOT read-modify-write; it writes the byte
+                    --   zero-extended to a full word, so the three surrounding bytes in
+                    --   the same word are zeroed.  Suitable for UART (bits 7..0 only);
+                    --   avoid for BRAM locations shared with other bytes.
+                    elsif d_is_mvb = '1' then
+                        case d_mode is
+                            when "0011" =>  -- mvb [Rsrc], Rdst — byte read
+                                memory_address     <= registers(register_index);
+                                memory_read_enable <= '1';
+                                load_destination   <= destination_register;
+                                load_is_byte       <= '1';
+                                state              <= LOAD;
+                            when "0100" =>  -- mvb Rsrc, [Rdst] — byte write (simplified)
+                                memory_address     <= registers(destination_register);
+                                memory_write_data  <= (31 downto 8 => '0') & registers(register_index)(7 downto 0);
+                                memory_write_enable <= '1';
+                                state              <= STORE;
+                            when others =>
+                                memory_address <= registers(15);
+                                memory_read_enable <= '1';
+                                state <= FETCH;
+                        end case;
+
                     -- ── ALU family ───────────────────────────────────────────
                     -- add, sub, and, orr, xor  (opcodes 2-6)
-                    -- All operate on one register and a 32-bit immediate (from imm32).
-                    -- Result is written back to the same register (Rdst).
-                    -- Mode 0 = immediate operand (the only mode echo.s uses).
+                    -- Mode 0: second operand is the sign-extended 19-bit immediate.
+                    -- Mode 2: second operand is a register (destination_register field).
                     elsif d_is_alu = '1' then
+                        if d_mode = "0010" then
+                            alu_src := registers(destination_register);
+                        else
+                            alu_src := d_imm32;
+                        end if;
                         case d_opcode is
-                            when "00010" =>  -- add Rdst, #imm
-                                registers(register_index) <= std_logic_vector(unsigned(registers(register_index)) + unsigned(d_imm32));
-                            when "00011" =>  -- sub Rdst, #imm
-                                registers(register_index) <= std_logic_vector(unsigned(registers(register_index)) - unsigned(d_imm32));
-                            when "00100" =>  -- and Rdst, #imm
-                                registers(register_index) <= registers(register_index) and d_imm32;
-                            when "00101" =>  -- orr Rdst, #imm
-                                registers(register_index) <= registers(register_index) or  d_imm32;
-                            when "00110" =>  -- xor Rdst, #imm
-                                registers(register_index) <= registers(register_index) xor d_imm32;
+                            when "00010" =>  -- add Rdst, src
+                                registers(register_index) <= std_logic_vector(unsigned(registers(register_index)) + unsigned(alu_src));
+                            when "00011" =>  -- sub Rdst, src
+                                registers(register_index) <= std_logic_vector(unsigned(registers(register_index)) - unsigned(alu_src));
+                            when "00100" =>  -- and Rdst, src
+                                registers(register_index) <= registers(register_index) and alu_src;
+                            when "00101" =>  -- orr Rdst, src
+                                registers(register_index) <= registers(register_index) or  alu_src;
+                            when "00110" =>  -- xor Rdst, src
+                                registers(register_index) <= registers(register_index) xor alu_src;
                             when others  => null;
                         end case;
                         memory_address <= registers(15);
                         memory_read_enable   <= '1';
                         state    <= FETCH;
+
+                    -- ── not — bitwise NOT ────────────────────────────────────
+                    -- Flips every bit of the register in place.  Unary; no second operand.
+                    elsif d_is_not = '1' then
+                        registers(register_index) <= not registers(register_index);
+                        memory_address <= registers(15);
+                        memory_read_enable <= '1';
+                        state <= FETCH;
+
+                    -- ── shf — logical shift ───────────────────────────────────
+                    -- Signed count: positive = shift left (fill zeros), negative = shift right (fill zeros).
+                    -- Mode 0: count from sign-extended imm19.
+                    -- Mode 2: count from low 5 bits of registers(destination_register), treated as signed.
+                    elsif d_is_shf = '1' then
+                        if d_mode = "0010" then
+                            -- register count: treat as signed 32-bit, use low 5 bits as magnitude
+                            if registers(destination_register)(31) = '0' then
+                                shift_count := to_integer(unsigned(registers(destination_register)(4 downto 0)));
+                                registers(register_index) <= std_logic_vector(shift_left(unsigned(registers(register_index)), shift_count));
+                            else
+                                shift_count := to_integer(unsigned(not registers(destination_register)(4 downto 0)) + 1);
+                                registers(register_index) <= std_logic_vector(shift_right(unsigned(registers(register_index)), shift_count));
+                            end if;
+                        else
+                            -- immediate count: sign from bit 18 of imm19
+                            if d_imm19(18) = '0' then
+                                shift_count := to_integer(unsigned(d_imm19(4 downto 0)));
+                                registers(register_index) <= std_logic_vector(shift_left(unsigned(registers(register_index)), shift_count));
+                            else
+                                shift_count := to_integer(unsigned(not d_imm19(4 downto 0)) + 1);
+                                registers(register_index) <= std_logic_vector(shift_right(unsigned(registers(register_index)), shift_count));
+                            end if;
+                        end if;
+                        memory_address <= registers(15);
+                        memory_read_enable <= '1';
+                        state <= FETCH;
+
+                    -- ── sar — arithmetic shift right ──────────────────────────
+                    -- Shifts right by |count|, replicating the sign bit.
+                    -- Mode 0: count from imm19 (positive = shift right; negative unused).
+                    -- Mode 2: count from low 5 bits of registers(destination_register).
+                    elsif d_is_sar = '1' then
+                        if d_mode = "0010" then
+                            shift_count := to_integer(unsigned(registers(destination_register)(4 downto 0)));
+                        else
+                            shift_count := to_integer(unsigned(d_imm19(4 downto 0)));
+                        end if;
+                        registers(register_index) <= std_logic_vector(shift_right(signed(registers(register_index)), shift_count));
+                        memory_address <= registers(15);
+                        memory_read_enable <= '1';
+                        state <= FETCH;
+
+                    -- ── jmp — absolute jump ───────────────────────────────────
+                    -- Jumps to a 19-bit unsigned address (covers the full 512 KB address space).
+                    -- jmp-s (d_jmp_sub='1') pushes the return address before jumping;
+                    -- the push completes in the CALL_STORE state, like interrupt entry.
+                    elsif d_is_jmp = '1' then
+                        take_branch := false;
+                        case d_jmp_cond is
+                            when "000" => take_branch := true;
+                            when "001" => take_branch := (registers(register_index) = x"00000000");
+                            when "010" => take_branch := (registers(register_index) /= x"00000000");
+                            when "011" => take_branch := (registers(register_index)(31) = '1');
+                            when "100" => take_branch := (registers(register_index)(31) = '0');
+                            when others => null;
+                        end case;
+                        if take_branch then
+                            next_pc := (31 downto 19 => '0') & d_imm19;  -- zero-extend address
+                            if d_jmp_sub = '1' then
+                                -- subroutine call: push return address, complete in CALL_STORE
+                                registers(14) <= std_logic_vector(unsigned(registers(14)) - 4);
+                                memory_address    <= std_logic_vector(unsigned(registers(14)) - 4);
+                                memory_write_data <= registers(15);
+                                memory_write_enable <= '1';
+                                call_target <= next_pc;
+                                state <= CALL_STORE;
+                            else
+                                memory_address <= next_pc;
+                                memory_read_enable <= '1';
+                                state <= FETCH;
+                            end if;
+                        else
+                            memory_address <= registers(15);
+                            memory_read_enable <= '1';
+                            state <= FETCH;
+                        end if;
 
                     -- ── jpr — relative jump ──────────────────────────────────
                     -- Jump to (PC + offset) if a condition is met.
@@ -337,15 +473,25 @@ begin
                         end case;
 
                         if take_branch then
-                            -- Compute branch target = PC + signed offset.
-                            -- d_imm32 is the sign-extended offset from the instruction.
-                            next_pc  := std_logic_vector(unsigned(registers(15)) + unsigned(d_imm32));
-                            memory_address <= next_pc;  -- send the branch target to Block RAM
+                            next_pc := std_logic_vector(unsigned(registers(15)) + unsigned(d_imm32));
+                            if d_jmp_sub = '1' then
+                                -- jpr-s: push return address, complete redirect in CALL_STORE
+                                registers(14) <= std_logic_vector(unsigned(registers(14)) - 4);
+                                memory_address    <= std_logic_vector(unsigned(registers(14)) - 4);
+                                memory_write_data <= registers(15);
+                                memory_write_enable <= '1';
+                                call_target <= next_pc;
+                                state <= CALL_STORE;
+                            else
+                                memory_address <= next_pc;
+                                memory_read_enable <= '1';
+                                state <= FETCH;
+                            end if;
                         else
-                            memory_address <= registers(15); -- no branch: next instruction as normal
+                            memory_address <= registers(15);
+                            memory_read_enable <= '1';
+                            state <= FETCH;
                         end if;
-                        memory_read_enable <= '1';
-                        state  <= FETCH;
 
                     -- ── eai — enable interrupts ──────────────────────────────
                     -- From this point on, interrupt_request = '1' will be acted on.
@@ -411,8 +557,14 @@ begin
                 --
                 -- Pre-load the NEXT fetch address so FETCH can do its job.
                 when LOAD =>
-                    registers(load_destination) <= memory_read_data;   -- store the result
-                    memory_address <= registers(15);          -- next instruction address for Block RAM
+                    -- For mvb (byte read), extract only the low 8 bits and zero-extend.
+                    if load_is_byte = '1' then
+                        registers(load_destination) <= (31 downto 8 => '0') & memory_read_data(7 downto 0);
+                        load_is_byte <= '0';
+                    else
+                        registers(load_destination) <= memory_read_data;
+                    end if;
+                    memory_address <= registers(15);
                     memory_read_enable   <= '1';
                     state    <= FETCH;
 
@@ -431,6 +583,15 @@ begin
                     memory_address <= registers(15);    -- back to fetching instructions
                     memory_read_enable   <= '1';
                     state    <= FETCH;
+
+                -- ── CALL_STORE ───────────────────────────────────────────────
+                -- Completes the stack push started by jmp-s or jpr-s in EXEC,
+                -- then redirects to the saved call target.
+                when CALL_STORE =>
+                    memory_write_enable <= '0';
+                    memory_address      <= call_target;
+                    memory_read_enable  <= '1';
+                    state               <= FETCH;
 
                 -- ── INTERRUPT_ENTRY ──────────────────────────────────────────
                 -- EXEC pushed the return address onto the stack (write_enable='1').

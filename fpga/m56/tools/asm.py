@@ -79,18 +79,64 @@ def assemble(source):
             pc += 4
             continue
 
-        # --- jpr[.cond] ---
+        # --- jpr[.cond] and jpr-s[.cond] ---
         if mn.startswith('jpr'):
-            cond_name = mn.split('.')[1] if '.' in mn else 'al'
-            cond = COND[cond_name]
-            if cond == 0:                   # jpr / jpr.al — no Rcmp operand
+            sub   = 1 if '-s' in mn else 0
+            parts = mn.replace('-s', '').split('.')
+            cond_name = parts[1] if len(parts) > 1 else 'al'
+            cond  = COND[cond_name]
+            mode  = (sub << 3) | cond        # bit 3 = subroutine flag
+            if cond == 0:
                 rcmp  = 0
                 label = ops[0]
             else:
                 rcmp  = reg(ops[0])
                 label = ops[1]
             offset = symbols[label] - (pc + 4)
-            words.append(encode(11, cond, rcmp, offset))
+            words.append(encode(11, mode, rcmp, offset))
+            pc += 4
+            continue
+
+        # --- jmp[.cond] and jmp-s[.cond] ---
+        if mn.startswith('jmp'):
+            sub   = 1 if '-s' in mn else 0
+            parts = mn.replace('-s', '').split('.')
+            cond_name = parts[1] if len(parts) > 1 else 'al'
+            cond  = COND[cond_name]
+            mode  = (sub << 3) | cond
+            if cond == 0:
+                rcmp  = 0
+                target = imm(ops[0]) if ops[0].startswith('#') else symbols[ops[0]]
+            else:
+                rcmp  = reg(ops[0])
+                target = imm(ops[1]) if ops[1].startswith('#') else symbols[ops[1]]
+            words.append(encode(10, mode, rcmp, target))
+            pc += 4
+            continue
+
+        # --- not Rsrc ---
+        if mn == 'not':
+            words.append(encode(OPCODES['not'], 0, reg(ops[0]), 0))
+            pc += 4
+            continue
+
+        # --- shf Rsrc, #count  or  shf Rsrc, Rcnt ---
+        if mn == 'shf':
+            dst, src = ops[0], ops[1]
+            if src.startswith('#') or src.lstrip('-+').isdigit():
+                words.append(encode(OPCODES['shf'], 0, reg(dst), imm(src)))
+            else:
+                words.append(encode(OPCODES['shf'], 2, reg(dst), reg(src)))
+            pc += 4
+            continue
+
+        # --- sar Rsrc, #count  or  sar Rsrc, Rcnt ---
+        if mn == 'sar':
+            dst, src = ops[0], ops[1]
+            if src.startswith('#') or src.lstrip('-+').isdigit():
+                words.append(encode(OPCODES['sar'], 0, reg(dst), imm(src)))
+            else:
+                words.append(encode(OPCODES['sar'], 2, reg(dst), reg(src)))
             pc += 4
             continue
 
@@ -100,15 +146,29 @@ def assemble(source):
             pc += 4
             continue
 
-        # --- mov (four forms, told apart by brackets) ---
+        # --- mov (five forms) ---
         if mn == 'mov':
             src, dst = ops[0], ops[1]
-            if src.startswith('['):                     # mov [Rsrc], Rdst
+            if src.startswith('#') or src.lstrip('-+').isdigit():  # mov #imm, Rdst
+                words.append(encode(0, 0, reg(dst), imm(src)))
+            elif src.startswith('['):                               # mov [Rsrc], Rdst
                 words.append(encode(0, 3, reg(src.strip('[]')), reg(dst)))
-            elif dst.startswith('['):                   # mov Rsrc, [Rdst]
+            elif dst.startswith('['):                               # mov Rsrc, [Rdst]
                 words.append(encode(0, 4, reg(src), reg(dst.strip('[]'))))
-            else:                                       # mov Rsrc, Rdst
+            else:                                                   # mov Rsrc, Rdst
                 words.append(encode(0, 2, reg(src), reg(dst)))
+            pc += 4
+            continue
+
+        # --- mvb (byte move, same forms as mov minus immediate) ---
+        if mn == 'mvb':
+            src, dst = ops[0], ops[1]
+            if src.startswith('['):                                 # mvb [Rsrc], Rdst
+                words.append(encode(1, 3, reg(src.strip('[]')), reg(dst)))
+            elif dst.startswith('['):                               # mvb Rsrc, [Rdst]
+                words.append(encode(1, 4, reg(src), reg(dst.strip('[]'))))
+            else:
+                raise ValueError(f"mvb requires indirect operand: {line!r}")
             pc += 4
             continue
 
