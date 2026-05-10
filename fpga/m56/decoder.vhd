@@ -23,7 +23,7 @@ use ieee.numeric_std.all;
 entity M56_Decoder is
     port (
         -- Input: the raw 32-bit instruction word from memory
-        instr    : in  std_logic_vector(31 downto 0);
+        instruction : in  std_logic_vector(31 downto 0);
 
         -- Raw fields sliced straight out of the instruction
         opcode   : out std_logic_vector(4 downto 0);   -- bits 31..27
@@ -61,11 +61,11 @@ begin
 
     -- Slice the fixed fields directly out of the instruction word.
     -- In hardware this is literally just wires — no logic at all.
-    op     <= instr(31 downto 27);   -- top 5 bits = opcode
+    op     <= instruction(31 downto 27);   -- top 5 bits = opcode
     opcode <= op;
-    mode   <= instr(26 downto 23);   -- next 4 bits = addressing mode
-    reg    <= instr(22 downto 19);   -- next 4 bits = register number
-    imm19  <= instr(18 downto 0);    -- bottom 19 bits = immediate / offset
+    mode   <= instruction(26 downto 23);   -- next 4 bits = usually addressing mode
+    reg    <= instruction(22 downto 19);   -- next 4 bits = usually register number
+    imm19  <= instruction(18 downto 0);    -- bottom 19 bits = immediate / offset
 
     -- Sign-extend imm19 to 32 bits.
     -- If bit 18 (the MSB of imm19) is '1', the number is negative, so we fill
@@ -73,7 +73,7 @@ begin
     -- If bit 18 is '0', we fill with '0' (positive number, no change).
     -- Example: imm19 = 0x7FFD8 (= -40 in 19-bit two's complement)
     --          imm32 = 0xFFFFFFD8 (= -40 in 32-bit two's complement)
-    imm32  <= (31 downto 19 => instr(18)) & instr(18 downto 0);
+    imm32  <= (31 downto 19 => instruction(18)) & instruction(18 downto 0);
 
     -- One-hot decode: compare the opcode to each known value.
     -- Produces a single '1' flag for whichever instruction family matches.
@@ -93,7 +93,7 @@ begin
     -- For jumps, slice the condition code out of the mode field.
     -- Bit 26 is the "subroutine" flag (call vs plain jump).
     -- Bits 25..23 are the condition (always / zero / nonzero / negative / non-negative).
-    jmp_sub  <= instr(26);
-    jmp_cond <= instr(25 downto 23);
+    jmp_sub  <= instruction(26);
+    jmp_cond <= instruction(25 downto 23);
 
 end architecture rtl;
