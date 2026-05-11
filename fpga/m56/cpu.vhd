@@ -99,7 +99,7 @@ architecture rtl of m56_cpu is
     -- The execution state machine.
     -- CALL_STORE mirrors INTERRUPT_ENTRY: it completes a stack push started in
     -- EXEC (for jmp-s / jpr-s subroutine calls) then redirects to the call target.
-    type state_type is (FETCH, EXEC, LOAD, STORE, INTERRUPT_ENTRY, CALL_STORE);
+    type state_type is (FETCH, EXEC, LOAD_WAIT, LOAD, STORE, INTERRUPT_ENTRY, CALL_STORE);
     signal state    : state_type := FETCH;
     signal load_destination : integer range 0 to 15;  -- which register LOAD will write into
     signal load_is_byte     : std_logic := '0';       -- '1' = LOAD captures only bits 7..0
@@ -293,7 +293,7 @@ begin
                                 memory_address <= registers(register_index);  -- address to read from
                                 memory_read_enable   <= '1';
                                 load_destination <= destination_register;       -- remember which register gets the result
-                                state    <= LOAD;
+                                state    <= LOAD_WAIT;
 
                             -- mov Rsrc, [Rdst]  (mode 4) — indirect WRITE
                             -- Write Rsrc to the address held in Rdst.
@@ -327,7 +327,7 @@ begin
                                 memory_read_enable <= '1';
                                 load_destination   <= destination_register;
                                 load_is_byte       <= '1';
-                                state              <= LOAD;
+                                state              <= LOAD_WAIT;
                             when "0100" =>  -- mvb Rsrc, [Rdst] — byte write
                                 memory_address     <= registers(destination_register);
                                 memory_write_data  <= (31 downto 8 => '0') & registers(register_index)(7 downto 0);
@@ -550,9 +550,20 @@ begin
                         state    <= FETCH;
                     end if;
 
+                -- ── LOAD_WAIT ───────────────────────────────────────────────
+                -- EXEC set memory_address to the data address and transitioned here.
+                -- At the clock edge ending EXEC, the BRAM saw the OLD address (still PC)
+                -- and captured the instruction word — not the data we want.
+                -- LOAD_WAIT holds for one extra cycle so the BRAM can see the correct
+                -- data address and capture the right word.  LOAD then reads it.
+                when LOAD_WAIT =>
+                    state <= LOAD;
+
                 -- ── LOAD ────────────────────────────────────────────────────
-                -- One cycle after EXEC issued a read request (memory_read_enable='1'),
-                -- memory_read_data now contains the data from memory or a peripheral.
+                -- Two cycles after EXEC issued a read request, block_ram_read_data
+                -- now holds the data from the correct address.
+                -- For UART reads (bit 22 set) memory_read_data is combinatorial
+                -- and is also correct here.
                 -- Capture it into the destination register.
                 --
                 -- For a UART read: memory_read_data = { 22'b0, TX_busy, RX_valid, rx_byte }

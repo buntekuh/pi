@@ -55,11 +55,11 @@ irq_tx:
         and     R3, #0x200          ; bit 9: TX busy?
         jpr.nz  R3, irq_tx          ; busy — spin
 
-        mov     [R0], R3            ; R3 = 32-bit word from buffer (byte in bits 7..0)
-        and     R3, #0xFF           ; strip upper 24 bits
-        mov     R3, [R2]            ; transmit the byte
-        add     R0, #4              ; advance read pointer by one word
-        sub     R1, #1              ; one fewer byte to replay
+        mvb     [R0], R3            ; R3 = byte from buffer (zero-extended)
+;        and     R3, #0xFF           ; strip upper 24 bits (not needed — mvb already zero-extends)
+        mvb     #65, [R2]            ; transmit the byte
+        add     R0, #4              ; advance read pointer by one word (4 bytes)
+        dec     R1                  ; one fewer byte to replay
         jpr.nz  R1, irq_tx          ; loop until buffer is drained
 
 irq_done:
@@ -72,8 +72,7 @@ irq_done:
 ; ── Main program (0x000080) ─────────────────────────────────────────────────
 main:
         mov-h   #0x200, R4          ; R4 = 0x400000 (UART address)
-        clr     R5
-        orr     R5, #0x100          ; R5 = 0x000100 (buffer base)
+        mov     #0x100, R5          ; R5 = 0x000100 (buffer base)
         mov     R5, R6              ; R6 = write pointer = buffer base
         clr     R7                  ; R7 = 0 (buffer empty)
         eai                         ; enable interrupts — BTN1 can now fire
@@ -91,8 +90,8 @@ wait_tx:
         and     R1, #0x200          ; bit 9: TX busy?
         jpr.nz  R1, wait_tx         ; busy — spin
 
-        mov     R0, [R4]            ; echo: write received byte to UART
-        mov     R0, [R6]            ; store byte to buffer at write pointer
-        add     R6, #4              ; advance write pointer
+        mvb     R0, [R4]            ; echo: write received byte to UART
+        mvb     R0, [R6]            ; store byte to buffer at write pointer
+        add     R6, #4              ; advance write pointer by one word (4 bytes)
         inc     R7                  ; one more byte in buffer
         jpr     wait_rx             ; loop forever
