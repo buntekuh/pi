@@ -285,15 +285,17 @@ begin
                                 state    <= FETCH;
 
                             -- mov [Rsrc], Rdst  (mode 3) — indirect READ
-                            -- Read a 32-bit word from the address held in Rsrc.
-                            -- This could be a Block RAM address or a peripheral like the UART.
-                            -- We put the address on memory_address, assert memory_read_enable, and go to
-                            -- LOAD — which will capture memory_read_data one cycle later.
+                            -- UART (bit 22 = 1): memory_read_data is combinatorial — go straight to LOAD.
+                            -- BRAM (bit 22 = 0): registered 1-cycle latency — go to LOAD_WAIT first.
                             when "0011" =>
-                                memory_address <= registers(register_index);  -- address to read from
+                                memory_address <= registers(register_index);
                                 memory_read_enable   <= '1';
-                                load_destination <= destination_register;       -- remember which register gets the result
-                                state    <= LOAD_WAIT;
+                                load_destination <= destination_register;
+                                if registers(register_index)(22) = '1' then
+                                    state <= LOAD;
+                                else
+                                    state <= LOAD_WAIT;
+                                end if;
 
                             -- mov Rsrc, [Rdst]  (mode 4) — indirect WRITE
                             -- Write Rsrc to the address held in Rdst.
@@ -327,7 +329,11 @@ begin
                                 memory_read_enable <= '1';
                                 load_destination   <= destination_register;
                                 load_is_byte       <= '1';
-                                state              <= LOAD_WAIT;
+                                if registers(register_index)(22) = '1' then
+                                    state <= LOAD;
+                                else
+                                    state <= LOAD_WAIT;
+                                end if;
                             when "0100" =>  -- mvb Rsrc, [Rdst] — byte write
                                 memory_address     <= registers(destination_register);
                                 memory_write_data  <= (31 downto 8 => '0') & registers(register_index)(7 downto 0);
