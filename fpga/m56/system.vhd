@@ -192,10 +192,12 @@ begin
     -- read R13 on entry and know exactly which source fired.
     irq0: entity work.interrupt_controller
         port map (
-            uart_rx_valid     => uart_valid,
-            btn1              => btn(1),
-            interrupt_pending => interrupt_pending,
-            irq_status        => irq_status
+            clk                => clk,
+            interrupts_enabled => interrupts_enabled,
+            uart_rx_valid      => uart_valid,
+            btn1               => btn(1),
+            interrupt_pending  => interrupt_pending,
+            irq_status         => irq_status
         );
 
     -- ── UART ──────────────────────────────────────────────────────────────

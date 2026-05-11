@@ -24,33 +24,18 @@
 --   5. The handler reads R13 to dispatch per source, clears each source
 --      (e.g. reads the UART byte so uart_rx_valid drops), then returns via rti.
 --
--- ─── Memory layout convention ──────────────────────────────────────────────
+-- ─── Edge detection ────────────────────────────────────────────────────────
 --
---   0x000000:  jmp main        ; first instruction — skip past the handler
---   0x000004:  (reserved)      ; three spare instruction slots
---   0x000008:  (reserved)
---   0x00000C:  (reserved)
---   0x000010:  [handler]       ; interrupt vector — CPU jumps here on interrupt
---              push R0         ; save scratch registers
---              push R1
---              push R2
---              push R13        ; save irq_status before subroutine calls clobber it
---              ...             ; dispatch on R13 bits, service sources
---              pop  R13        ; restore irq_status (rti will overwrite R13 anyway)
---              pop  R2
---              pop  R1
---              pop  R0
---              pop  R13        ; load return address from stack into R13
---              rti             ; enable interrupts and jump to R13
---   main:
---              eai             ; enable interrupts for the first time
---              ...             ; normal program
+-- BTN1 is edge-triggered: the interrupt fires once on the rising edge and
+-- is held pending until the CPU acknowledges it (interrupts_enabled drops).
+-- This prevents level-sensitive re-entry: without edge detection a held
+-- button would re-fire the interrupt on every EXEC cycle after the handler
+-- returned.
 --
 -- ─── irq_status bit layout ──────────────────────────────────────────────────
 --
 --   bit 0 = uart_rx_valid   (UART received a byte)
---   bit 1 = (next source)
---   ...
+--   bit 1 = btn1            (button 1 rising edge)
 --
 -- ─── Adding more interrupt sources ─────────────────────────────────────────
 --
@@ -62,29 +47,45 @@ use IEEE.STD_LOGIC_1164.ALL;
 
 entity interrupt_controller is
     port (
+        clk                : in  STD_LOGIC;
+
+        -- CPU feedback: '0' while the CPU is handling an interrupt.
+        -- Used to clear the latch once the CPU has acknowledged.
+        interrupts_enabled : in  STD_LOGIC;
+
         -- Interrupt sources.
-        -- Each line is '1' while the peripheral is requesting attention.
-        uart_rx_valid    : in  STD_LOGIC;   -- UART received a byte (not yet used as interrupt source)
-        btn1             : in  STD_LOGIC;   -- second button — level high while pressed
+        uart_rx_valid      : in  STD_LOGIC;   -- UART received a byte
+        btn1               : in  STD_LOGIC;   -- second button
 
         -- To the CPU.
-        interrupt_pending : out STD_LOGIC;                      -- '1' = at least one source is requesting
-        irq_status        : out STD_LOGIC_VECTOR(31 downto 0)  -- one bit per source; written to R13 on entry
+        interrupt_pending  : out STD_LOGIC;
+        irq_status         : out STD_LOGIC_VECTOR(31 downto 0)
     );
 end entity interrupt_controller;
 
 architecture rtl of interrupt_controller is
+    signal btn1_prev  : STD_LOGIC := '0';
+    signal btn1_latch : STD_LOGIC := '0';
 begin
 
-    -- btn1 fires interrupts; uart_rx_valid is tracked in the status word but does
-    -- not yet trigger interrupts — the echo firmware still polls the UART directly.
-    -- When UART becomes interrupt-driven, add:  interrupt_pending <= btn1 or uart_rx_valid;
-    interrupt_pending <= btn1;
+    process(clk)
+    begin
+        if rising_edge(clk) then
+            btn1_prev <= btn1;
+            if interrupts_enabled = '0' then
+                -- CPU is taking (or inside) an interrupt: clear the latch.
+                btn1_latch <= '0';
+            elsif btn1 = '1' and btn1_prev = '0' then
+                -- Rising edge while interrupts are enabled: set the latch.
+                btn1_latch <= '1';
+            end if;
+        end if;
+    end process;
 
-    -- One bit per source.  The CPU writes this to R13 on interrupt entry
-    -- so the handler can dispatch without any extra memory reads.
-    --   bit 0 = uart_rx_valid
-    --   bit 1 = btn1
+    interrupt_pending <= btn1_latch;
+
+    -- irq_status reflects the live source levels so the handler can inspect
+    -- which source(s) contributed even after the latch is cleared.
     irq_status <= (0 => uart_rx_valid, 1 => btn1, others => '0');
 
 end architecture rtl;
