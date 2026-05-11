@@ -207,11 +207,13 @@ def assemble(source):
             pc += 4
             continue
 
-        # --- mvb (byte move, same forms as mov minus immediate) ---
+        # --- mvb (byte move) ---
         if mn == 'mvb':
             src, dst = ops[0], ops[1]
             if src.startswith('['):                                 # mvb [Rsrc], Rdst
                 words.append(encode(1, 3, reg(src.strip('[]')), reg(dst)))
+            elif src.startswith('#') and dst.startswith('['):      # mvb #imm, [Rdst]
+                words.append(encode(1, 5, reg(dst.strip('[]')), imm(src)))
             elif dst.startswith('['):                               # mvb Rsrc, [Rdst]
                 words.append(encode(1, 4, reg(src), reg(dst.strip('[]'))))
             else:

@@ -328,9 +328,14 @@ begin
                                 load_destination   <= destination_register;
                                 load_is_byte       <= '1';
                                 state              <= LOAD;
-                            when "0100" =>  -- mvb Rsrc, [Rdst] — byte write (simplified)
+                            when "0100" =>  -- mvb Rsrc, [Rdst] — byte write
                                 memory_address     <= registers(destination_register);
                                 memory_write_data  <= (31 downto 8 => '0') & registers(register_index)(7 downto 0);
+                                memory_write_enable <= '1';
+                                state              <= STORE;
+                            when "0101" =>  -- mvb #imm, [Rdst] — immediate byte write
+                                memory_address     <= registers(register_index);
+                                memory_write_data  <= (31 downto 8 => '0') & d_imm19(7 downto 0);
                                 memory_write_enable <= '1';
                                 state              <= STORE;
                             when others =>
