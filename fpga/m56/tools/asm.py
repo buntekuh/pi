@@ -35,6 +35,19 @@ def imm(s):
     return int(s.strip().lstrip('#'), 0)
 
 
+def resolve(s, symbols):
+    """Resolve s to an integer: numeric literal, char literal 'x', or symbol name."""
+    s = s.strip().lstrip('#')
+    if len(s) == 3 and s[0] == "'" and s[2] == "'":
+        return ord(s[1])
+    try:
+        return int(s, 0)
+    except ValueError:
+        if s in symbols:
+            return symbols[s]
+        raise ValueError(f"undefined symbol: {s!r}")
+
+
 def encode(opcode, mode, r, imm19):
     return (opcode << 27) | (mode << 23) | (r << 19) | (imm19 & 0x7FFFF)
 
@@ -79,8 +92,7 @@ def expand_macros(lines):
             out.append(f'mov [R14], {ops[0]}')
             out.append('add R14, #4')
         elif mn == 'ret':
-            out.append('mov [R14], R15')
-            out.append('add R14, #4')
+            out.append('rts')
         elif mn == 'cal':
             out.append(f'jmp-s {tail}')
         elif mn == 'shl':
@@ -97,6 +109,14 @@ def assemble(source):
     lines = [clean(l) for l in source.splitlines()]
     lines = expand_macros(lines)
 
+    def str_chars(tail):
+        """Return list of ints for a .str directive, including null terminator."""
+        s = tail.strip()
+        if s.startswith('"') and s.endswith('"'):
+            s = s[1:-1]
+        s = s.replace('\\r', '\r').replace('\\n', '\n').replace('\\t', '\t').replace('\\0', '\0')
+        return [ord(c) for c in s] + [0]
+
     # Pass 1 — assign an address to every label
     symbols = {}
     pc = 0
@@ -105,6 +125,10 @@ def assemble(source):
             continue
         if line.endswith(':'):
             symbols[line[:-1]] = pc
+            continue
+        mn1 = line.split()[0].lower()
+        if mn1 == '.str':
+            pc += len(str_chars(line.split(None, 1)[1])) * 4
         else:
             pc += 4
 
@@ -120,9 +144,26 @@ def assemble(source):
         tail = parts[1] if len(parts) > 1 else ''
         ops  = split_ops(tail) if tail else []
 
+        # --- pseudo-ops: emit raw words into the binary ---
+        if mn == '.word':
+            words.append(resolve(tail.strip(), symbols) & 0xFFFFFFFF)
+            pc += 4
+            continue
+        if mn == '.str':
+            for ch in str_chars(tail):
+                words.append(ch)
+                pc += 4
+            continue
+
         # --- zero-operand instructions: wfi, eai, dai, rti ---
         if mn in ZERO_OPERAND:
             words.append(encode(OPCODES[mn], 0, 0, 0))
+            pc += 4
+            continue
+
+        # --- rts: return from subroutine (mode 1 of rti opcode) ---
+        if mn == 'rts':
+            words.append(encode(15, 1, 0, 0))
             pc += 4
             continue
 
@@ -196,8 +237,8 @@ def assemble(source):
         # --- mov (five forms) ---
         if mn == 'mov':
             src, dst = ops[0], ops[1]
-            if src.startswith('#') or src.lstrip('-+').isdigit():  # mov #imm, Rdst
-                words.append(encode(0, 0, reg(dst), imm(src)))
+            if src.startswith('#') or src.lstrip('-+').isdigit():  # mov #imm/#label, Rdst
+                words.append(encode(0, 0, reg(dst), resolve(src, symbols)))
             elif src.startswith('['):                               # mov [Rsrc], Rdst
                 words.append(encode(0, 3, reg(src.strip('[]')), reg(dst)))
             elif dst.startswith('['):                               # mov Rsrc, [Rdst]

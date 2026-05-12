@@ -82,7 +82,7 @@ begin
         end if;
     end process;
 
-    interrupt_pending <= btn1_latch;
+    interrupt_pending <= btn1_latch or uart_rx_valid;
 
     -- irq_status reflects the live source levels so the handler can inspect
     -- which source(s) contributed even after the latch is cleared.

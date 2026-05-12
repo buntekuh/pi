@@ -543,10 +543,21 @@ begin
                     -- any pending interrupt will only be seen in the next EXEC,
                     -- by which point PC already points at the return address.
                     elsif d_is_rti = '1' then
-                        interrupts_enabled_reg <= '1';
-                        memory_address <= registers(13);
-                        memory_read_enable <= '1';
-                        state <= FETCH;
+                        if d_mode = "0000" then
+                            -- rti: re-enable interrupts and jump to R13
+                            interrupts_enabled_reg <= '1';
+                            memory_address <= registers(13);
+                            memory_read_enable <= '1';
+                            state <= FETCH;
+                        else
+                            -- rts: pop return address from stack and jump
+                            -- (interrupts_enabled unchanged — safe inside handlers)
+                            registers(14) <= std_logic_vector(unsigned(registers(14)) + 4);
+                            memory_address <= registers(14);  -- old SP = top of stack
+                            memory_read_enable <= '1';
+                            load_destination <= 15;
+                            state <= LOAD_WAIT;
+                        end if;
 
                     -- ── Unknown / unimplemented instruction ──────────────────
                     -- Quietly skip it and continue.
@@ -586,7 +597,13 @@ begin
                     else
                         registers(load_destination) <= memory_read_data;
                     end if;
-                    memory_address <= registers(15);
+                    -- Loading into R15 (PC): redirect fetch to the loaded address.
+                    -- Otherwise continue from the current PC.
+                    if load_destination = 15 then
+                        memory_address <= memory_read_data;
+                    else
+                        memory_address <= registers(15);
+                    end if;
                     memory_read_enable   <= '1';
                     state    <= FETCH;
 
