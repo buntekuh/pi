@@ -148,7 +148,7 @@ begin
             instruction => memory_read_data,
             opcode   => d_opcode,
             mode     => d_mode,
-            reg      => d_reg,
+            regn     => d_reg,
             imm19    => d_imm19,
             imm32    => d_imm32,
             is_mov   => d_is_mov,

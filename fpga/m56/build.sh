@@ -107,9 +107,9 @@ if [ "${MODE}" = "b" ] || [ "${MODE}" = "br" ]; then
         -e SOC > ${PROJECT}_ghdl.v
 
     # Step 3: yosys synthesises to Xilinx netlist
-    yosys -p "synth_xilinx -nowidelut -flatten -abc9 -arch xc7 -top SOC; \
-              delete t:\$scopeinfo; write_json ${PROJECT}.json" \
-          ${PROJECT}_ghdl.v
+    yosys -p "read_verilog -sv ${PROJECT}_ghdl.v; \
+              synth_xilinx -nowidelut -flatten -abc9 -arch xc7 -top SOC; \
+              delete t:\$scopeinfo; write_json ${PROJECT}.json"
 
     # Step 4: place & route
     nextpnr-xilinx \

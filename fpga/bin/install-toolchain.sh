@@ -39,8 +39,11 @@ fi
 
 pkgs=()
 command -v "$RISCV_CMD"  &>/dev/null || pkgs+=("$RISCV_PKG")
-command -v python3        &>/dev/null || pkgs+=(python3)
-command -v ghdl           &>/dev/null || pkgs+=(ghdl)
+command -v python3        &>/dev/null || pkgs+=(python3 python3-pip)
+python3 -m pip &>/dev/null 2>&1 || pkgs+=(python3-pip)
+# ghdl from Fedora repos is an fc43 package requiring libgnat-15.so which is absent on fc44+
+# (Fedora 44 ships GCC 16 / libgnat-16). Get ghdl from the Nix shell instead (see below).
+[ "$PKG_MANAGER" = "apt" ] && { command -v ghdl  &>/dev/null || pkgs+=(ghdl); }
 command -v yosys          &>/dev/null || pkgs+=(yosys)
 
 if [ ${#pkgs[@]} -gt 0 ]; then
@@ -49,7 +52,7 @@ if [ ${#pkgs[@]} -gt 0 ]; then
 fi
 
 # --- python packages --------------------------------------------------------
-pip3 install --user --quiet \
+python3 -m pip install --user --quiet \
     fasm \
     simplejson \
     intervaltree \
@@ -62,7 +65,7 @@ pip3 install --user --quiet \
 
 if ! command -v nix &>/dev/null; then
     echo "Nix not found — installing via the official multi-user installer..."
-    curl -L https://nixos.org/nix/install | sh -s -- --daemon
+    sh <(curl --proto '=https' --tlsv1.2 -L https://nixos.org/nix/install) --daemon
     # Source nix into the current session so we can continue without a new shell
     if [ -f /etc/profile.d/nix.sh ]; then
         # shellcheck source=/dev/null
@@ -86,7 +89,7 @@ mkdir -p "${BIN_DIR}"
 exec nix develop github:openxc7/toolchain-nix \
     --extra-experimental-features 'nix-command flakes' \
     --command bash -c "
-        for pair in nextpnr-xilinx:nextpnr-xilinx-bin bbasm:bbasm xc7frames2bit:xc7frames2bit python3.8:python3.8 openFPGALoader:openFPGALoader; do
+        for pair in nextpnr-xilinx:nextpnr-xilinx-bin bbasm:bbasm xc7frames2bit:xc7frames2bit python3.8:python3.8 openFPGALoader:openFPGALoader ghdl:ghdl; do
             src=\${pair%%:*}; dst=\${pair##*:}
             dest=\"${BIN_DIR}/\${dst}\"
             if [ ! -f \"\$dest\" ]; then

@@ -8,13 +8,13 @@
 --
 --   Bit  31..27   opcode  (5 bits) — which instruction is this?
 --   Bit  26..23   mode    (4 bits) — how are the operands addressed?
---   Bit  22..19   reg     (4 bits) — register number (0-15)
+--   Bit  22..19   regn    (4 bits) — register number (0-15)
 --   Bit  18..0    imm19  (19 bits) — immediate value, offset, or 2nd register
 --
 -- For jump instructions (jmp / jpr) the mode field is reused:
 --   Bit  26       jmp_sub — 1 means "save return address" (subroutine call)
 --   Bit  25..23   jmp_cond — which condition must be true to jump?
---   Bit  22..19   reg     — register to test against the condition
+--   Bit  22..19   regn    — register to test against the condition
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -28,7 +28,7 @@ entity M56_Decoder is
         -- Raw fields sliced straight out of the instruction
         opcode   : out std_logic_vector(4 downto 0);   -- bits 31..27
         mode     : out std_logic_vector(3 downto 0);   -- bits 26..23
-        reg      : out std_logic_vector(3 downto 0);   -- bits 22..19
+        regn     : out std_logic_vector(3 downto 0);   -- bits 22..19
         imm19    : out std_logic_vector(18 downto 0);  -- bits 18..0
         imm32    : out std_logic_vector(31 downto 0);  -- imm19 sign-extended to 32 bits
                                                        -- (negative numbers keep their sign)
@@ -65,7 +65,7 @@ begin
     op     <= instruction(31 downto 27);   -- top 5 bits = opcode
     opcode <= op;
     mode   <= instruction(26 downto 23);   -- next 4 bits = usually addressing mode
-    reg    <= instruction(22 downto 19);   -- next 4 bits = usually register number
+    regn   <= instruction(22 downto 19);   -- next 4 bits = usually register number
     imm19  <= instruction(18 downto 0);    -- bottom 19 bits = immediate / offset
 
     -- Sign-extend imm19 to 32 bits.
