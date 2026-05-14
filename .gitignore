@@ -222,14 +222,15 @@ info/ui/
 #fpga/info/cmod_a7_rm.pdf
 *.o
 
-# FPGA toolchain binaries and data (fetched from Nix store via fpga/femtorv32/bin/install-toolchain.sh)
-fpga/femtorv32/tools/bin/nextpnr-xilinx-bin
-fpga/femtorv32/tools/bin/bbasm
-fpga/femtorv32/tools/bin/xc7frames2bit
-fpga/femtorv32/tools/bin/python3.8
-fpga/femtorv32/tools/bin/openFPGALoader
-fpga/femtorv32/tools/prjxray-db/
-fpga/femtorv32/tools/prjxray-snap/
+# FPGA toolchain binaries and data (fetched from Nix store via fpga/bin/install-toolchain.sh)
+fpga/toolchain/bin/nextpnr-xilinx-bin
+fpga/toolchain/bin/bbasm
+fpga/toolchain/bin/xc7frames2bit
+fpga/toolchain/bin/python3.8
+fpga/toolchain/bin/openFPGALoader
+fpga/toolchain/prjxray-db/
+fpga/toolchain/prjxray-snap/
+fpga/toolchain/resources/
 
 # FPGA build artefacts
 *.elf

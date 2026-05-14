@@ -7,7 +7,7 @@
 #   - detects apt (Debian/Ubuntu) or dnf (Fedora/RHEL)
 #   - installs system packages (RISC-V toolchain, python3)
 #   - installs Nix if not present
-#   - copies nix-provided binaries into tools/bin/
+#   - copies nix-provided binaries into toolchain/bin/
 # Subsequent runs skip steps that are already done.
 
 set -e
@@ -79,7 +79,7 @@ fi
 # --- nix dev shell + binary copy --------------------------------------------
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-BIN_DIR="${SCRIPT_DIR}/tools/bin"
+BIN_DIR="${SCRIPT_DIR}/toolchain/bin"
 
 mkdir -p "${BIN_DIR}"
 
@@ -95,16 +95,16 @@ exec nix develop github:openxc7/toolchain-nix \
                     echo \"WARNING: \$src not found in Nix shell, skipping\"
                     continue
                 fi
-                echo \"Copying \$src -> tools/bin/\$dst\"
+                echo \"Copying \$src -> toolchain/bin/\$dst\"
                 cp \"\$src_path\" \"\$dest\" && chmod +x \"\$dest\"
             fi
         done
         # --- prjxray Python package ---------------------------------------------
-        PRJXRAY_DEST=\"${SCRIPT_DIR}/tools/prjxray-snap/opt/prjxray/prjxray\"
+        PRJXRAY_DEST=\"${SCRIPT_DIR}/toolchain/prjxray-snap/opt/prjxray/prjxray\"
         if [ ! -d \"\$PRJXRAY_DEST\" ]; then
             PRJXRAY_SRC=\$(python3 -c \"import prjxray, os; print(os.path.dirname(prjxray.__file__))\" 2>/dev/null || true)
             if [ -n \"\$PRJXRAY_SRC\" ]; then
-                echo \"Copying prjxray Python package -> tools/prjxray-snap/opt/prjxray/\"
+                echo \"Copying prjxray Python package -> toolchain/prjxray-snap/opt/prjxray/\"
                 cp -r \"\$PRJXRAY_SRC\" \"\$PRJXRAY_DEST\"
             else
                 echo \"WARNING: prjxray Python package not found in Nix shell\"
@@ -115,13 +115,13 @@ exec nix develop github:openxc7/toolchain-nix \
         # database is an older format incompatible with the prjxray Python package
         # from Nix; using the Nix db ensures the versions match.
         NIX_PRJXRAY_DB_ROOT=\$(find /nix/store -path \"*/share/nextpnr/external/prjxray-db\" -type d 2>/dev/null | head -1)
-        LOCAL_PRJXRAY_DB=\"${SCRIPT_DIR}/tools/prjxray-db\"
+        LOCAL_PRJXRAY_DB=\"${SCRIPT_DIR}/toolchain/prjxray-db\"
         if [ -n \"\$NIX_PRJXRAY_DB_ROOT\" ] && [ ! -d \"\$LOCAL_PRJXRAY_DB\" ]; then
             echo \"Copying prjxray-db from Nix store...\"
             cp -r \"\$NIX_PRJXRAY_DB_ROOT\" \"\$LOCAL_PRJXRAY_DB\"
         fi
         # --- chipdb -------------------------------------------------------------
-        RESOURCES_DIR=\"${SCRIPT_DIR}/resources\"
+        RESOURCES_DIR=\"${SCRIPT_DIR}/toolchain/resources\"
         mkdir -p \"\$RESOURCES_DIR\"
         BBAEXPORT=\$(find /nix/store -name \"bbaexport.py\" -path \"*/share/nextpnr/*\" 2>/dev/null | head -1)
         if [ -z \"\$BBAEXPORT\" ]; then
