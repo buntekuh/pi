@@ -4,17 +4,17 @@ The path from working M56 hardware to a self-hosted Titania-0 system.
 
 ## Phase 1 — Hardware complete
 
-- SRAM controller (VHDL) — map the 512 KB on-board SRAM into the CPU address space
-- Interrupt dispatch table in `io.s` — replace hardcoded handler with a
+1. SRAM controller (VHDL) — map the 512 KB on-board SRAM into the CPU address space
+2. Interrupt dispatch table in `io.s` — replace hardcoded handler with a
   writeable table of handler addresses (one per IRQ bit) at a known BRAM
   location; default entries point to a no-op; user programs install handlers
   by writing a function address into the appropriate slot; requires SRAM
   accessible so the table can live outside BRAM
-- Quad-SPI Flash controller (VHDL) — read-only boot path; writable later for
+3. Quad-SPI Flash controller (VHDL) — read-only boot path; writable later for
   storing assembled programs
-- SD card SPI driver (VHDL + assembly shim) — raw sector reads via PMOD
-- Software multiply and divide (`_mul`, `_div`) in assembly
-- Boot sequence in assembly — copy runtime image from Flash into SRAM, set up
+4. SD card SPI driver (VHDL + assembly shim) — raw sector reads via PMOD
+5. Software multiply and divide (`_mul`, `_div`) in assembly
+6. Boot sequence in assembly — copy runtime image from Flash into SRAM, set up
   stack, jump to entry point
 
 ## Phase 2 — Test suite

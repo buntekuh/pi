@@ -77,7 +77,11 @@ entity m56_cpu is
         -- Interrupt interface
         interrupt_request    : in  STD_LOGIC;                      -- '1' when a peripheral is requesting attention
         irq_status           : in  STD_LOGIC_VECTOR(31 downto 0); -- one bit per source; written to R13 on entry
-        interrupts_enabled   : out STD_LOGIC                       -- '1' when the CPU will accept interrupts
+        interrupts_enabled   : out STD_LOGIC;                      -- '1' when the CPU will accept interrupts
+
+        -- Stall: asserted by slow peripherals (e.g. SRAM controller) to hold
+        -- the CPU in LOAD_WAIT or STORE until the access completes.
+        memory_stall         : in  STD_LOGIC
     );
 end entity m56_cpu;
 
@@ -569,12 +573,13 @@ begin
 
                 -- ── LOAD_WAIT ───────────────────────────────────────────────
                 -- EXEC set memory_address to the data address and transitioned here.
-                -- At the clock edge ending EXEC, the BRAM saw the OLD address (still PC)
-                -- and captured the instruction word — not the data we want.
-                -- LOAD_WAIT holds for one extra cycle so the BRAM can see the correct
-                -- data address and capture the right word.  LOAD then reads it.
+                -- For BRAM: one extra cycle is enough for the synchronous read to settle.
+                -- For SRAM: the SRAM controller asserts memory_stall until all four
+                -- byte transfers complete; we stay here until stall deasserts.
                 when LOAD_WAIT =>
-                    state <= LOAD;
+                    if memory_stall = '0' then
+                        state <= LOAD;
+                    end if;
 
                 -- ── LOAD ────────────────────────────────────────────────────
                 -- Two cycles after EXEC issued a read request, block_ram_read_data
@@ -618,10 +623,12 @@ begin
                 -- the uart_wr signal in system.vhd is '1', which tells the UART
                 -- transmitter to load memory_write_data(7:0) and start sending.
                 when STORE =>
-                    memory_write_enable   <= '0';         -- done writing
-                    memory_address <= registers(15);    -- back to fetching instructions
-                    memory_read_enable   <= '1';
-                    state    <= FETCH;
+                    memory_write_enable <= '0';   -- clear immediately; SRAM latched data on entry
+                    if memory_stall = '0' then
+                        memory_address     <= registers(15);
+                        memory_read_enable <= '1';
+                        state              <= FETCH;
+                    end if;
 
                 -- ── CALL_STORE ───────────────────────────────────────────────
                 -- Completes the stack push started by jmp-s or jpr-s in EXEC,

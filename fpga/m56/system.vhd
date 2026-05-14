@@ -30,12 +30,13 @@
 --
 -- ─── Memory map ──────────────────────────────────────────────────────────────
 --
---   Address bit 22 = 0  →  Block RAM  (0x000000 – 0x3FFFFF)
---   Address bit 22 = 1  →  UART  (0x400000)
+--   0x000000 – 0x000FFF  Block RAM  (4 KB, address bits 18..12 all zero)
+--   0x001000 – 0x07FFFF  SRAM       (508 KB, bits 18..12 non-zero, bit 22 = 0)
+--   0x400000             UART       (bit 22 = 1)
 --
---   This is the simplest possible address decode: a single bit.
---   0x400000 in binary is 0100 0000 0000 0000 0000 0000 — bit 22 is set.
---   Any Block RAM address has bit 22 = 0.
+--   Block RAM and SRAM share the bit-22 = 0 region; bit-range 18..12 = 0
+--   selects Block RAM (first 4 KB), any other value selects SRAM.
+--   The stack pointer resets to 0x0007FFFC so the runtime stack lives in SRAM.
 --
 -- ─── UART register ───────────────────────────────────────────────────────────
 --
@@ -65,7 +66,14 @@ entity SOC is
         uart_rxd_in  : in  STD_LOGIC;                      -- serial data in  (from PC)
         uart_txd_out : out STD_LOGIC;                      -- serial data out (to PC)
         btn          : in  STD_LOGIC_VECTOR(1 downto 0);   -- btn(0) = reset
-        led          : out STD_LOGIC_VECTOR(1 downto 0)    -- led(0) = RX, led(1) = TX
+        led          : out STD_LOGIC_VECTOR(1 downto 0);   -- led(0) = RX, led(1) = TX
+
+        -- IS61WV5128BLL on-board SRAM (512 KB, 8-bit data bus)
+        sram_addr    : out STD_LOGIC_VECTOR(18 downto 0);
+        sram_data    : inout STD_LOGIC_VECTOR(7 downto 0);
+        sram_cen     : out STD_LOGIC;
+        sram_oen     : out STD_LOGIC;
+        sram_wen     : out STD_LOGIC
     );
 end entity SOC;
 
@@ -89,9 +97,12 @@ architecture rtl of SOC is
     signal memory_read_enable   : STD_LOGIC;                       -- '1' = read this cycle
 
     -- ── Address decode ────────────────────────────────────────────────────
-    -- uart_select is '1' when the CPU is accessing the UART (bit 22 of address set).
-    -- uart_select is '0' when the CPU is accessing Block RAM.
-    signal uart_select : STD_LOGIC;
+    signal uart_select : STD_LOGIC;   -- bit 22 = 1
+    signal bram_select : STD_LOGIC;   -- bit 22 = 0, bits 18..12 = 0  (first 4 KB)
+    signal sram_select : STD_LOGIC;   -- bit 22 = 0, bits 18..12 ≠ 0  (rest of 512 KB)
+
+    -- ── Stall ─────────────────────────────────────────────────────────────
+    signal memory_stall : STD_LOGIC;  -- asserted by SRAM controller during multi-byte access
 
     -- ── Program memory (Block RAM) ────────────────────────────────────────
     -- Every FPGA contains dedicated on-chip memory blocks separate from the
@@ -117,7 +128,8 @@ architecture rtl of SOC is
     -- which asm.py generates by assembling echo.s.
     -- This means the program is baked into the bitstream — no SD card or loader needed.
     signal block_ram      : bram_init_t := FIRMWARE;
-    signal block_ram_read_data : STD_LOGIC_VECTOR(31 downto 0);  -- data read out of Block RAM
+    signal block_ram_read_data : STD_LOGIC_VECTOR(31 downto 0);
+    signal sram_read_data      : STD_LOGIC_VECTOR(31 downto 0);
 
     -- ── UART signals ──────────────────────────────────────────────────────
     signal uart_valid   : STD_LOGIC;                    -- '1' when a received byte is waiting
@@ -138,8 +150,11 @@ begin
     -- BTN0 pressed → reset active.  BTN0 released → CPU runs.
     resetn <= not btn(0);
 
-    -- Address decode: is the CPU talking to the UART right now?
     uart_select <= memory_address(22);
+    bram_select <= '1' when memory_address(22) = '0'
+                        and unsigned(memory_address(18 downto 12)) = 0 else '0';
+    sram_select <= '1' when memory_address(22) = '0'
+                        and unsigned(memory_address(18 downto 12)) /= 0 else '0';
 
     -- uart_rd fires when the CPU reads from the UART address.
     -- This tells the UART "byte has been consumed, you can accept the next one."
@@ -160,8 +175,9 @@ begin
     --   bit 9       = uart_busy  (TX is sending)
     --   bit 8       = uart_valid (RX has a byte waiting)
     --   bits 7..0   = uart_rx_data (the byte itself)
-    memory_read_data <= block_ram_read_data when uart_select = '0' else
-                (31 downto 10 => '0') & uart_busy & uart_valid & uart_rx_data;
+    memory_read_data <= sram_read_data      when sram_select = '1' else
+                        block_ram_read_data when bram_select = '1' else
+                        (31 downto 10 => '0') & uart_busy & uart_valid & uart_rx_data;
 
     -- ── Block RAM ──────────────────────────────────────────────────────────────
     -- Synchronous (clocked) read and write.
@@ -171,15 +187,12 @@ begin
     process(clk)
     begin
         if rising_edge(clk) then
-            if uart_select = '0' then
+            if bram_select = '1' then
                 if memory_write_enable = '1' then
-                    -- Write: store memory_write_data at the addressed word.
-                    -- Word address = byte address / 4 = bits 16..2 of memory_address.
-                    block_ram(to_integer(unsigned(memory_address(16 downto 2)))) <= memory_write_data;
+                    block_ram(to_integer(unsigned(memory_address(11 downto 2)))) <= memory_write_data;
                 end if;
                 if memory_read_enable = '1' then
-                    -- Read: output the word at the addressed location.
-                    block_ram_read_data <= block_ram(to_integer(unsigned(memory_address(16 downto 2))));
+                    block_ram_read_data <= block_ram(to_integer(unsigned(memory_address(11 downto 2))));
                 end if;
             end if;
         end if;
@@ -221,6 +234,25 @@ begin
             rx_data => uart_rx_data     -- byte that was received
         );
 
+    -- ── SRAM controller ───────────────────────────────────────────────────
+    sram0: entity work.sram_controller
+        port map (
+            clk              => clk,
+            resetn           => resetn,
+            cpu_select       => sram_select,
+            cpu_address      => memory_address,
+            cpu_write_data   => memory_write_data,
+            cpu_read_enable  => memory_read_enable,
+            cpu_write_enable => memory_write_enable,
+            cpu_read_data    => sram_read_data,
+            stall            => memory_stall,
+            sram_addr        => sram_addr,
+            sram_data        => sram_data,
+            sram_cen         => sram_cen,
+            sram_oen         => sram_oen,
+            sram_wen         => sram_wen
+        );
+
     -- ── CPU ───────────────────────────────────────────────────────────────
     -- Wire the M56 CPU to the memory bus.
     -- Everything else (Block RAM, UART, address decode) is transparent to the CPU —
@@ -236,7 +268,8 @@ begin
             memory_read_enable   => memory_read_enable,
             interrupt_request    => interrupt_pending,
             irq_status           => irq_status,
-            interrupts_enabled   => interrupts_enabled
+            interrupts_enabled   => interrupts_enabled,
+            memory_stall         => memory_stall
         );
 
     -- ── LEDs ──────────────────────────────────────────────────────────────
