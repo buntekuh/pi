@@ -31,7 +31,7 @@ done
 PROJECT=titania
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TOOLS_DIR="${SCRIPT_DIR}/../femtorv32/tools"
-DB_DIR="${TOOLS_DIR}/prjxray-extract/opt/nextpnr-xilinx/external/prjxray-db"
+DB_DIR="${TOOLS_DIR}/prjxray-db"
 CHIPDB_DIR="${SCRIPT_DIR}/../femtorv32/resources"
 
 # Load board-specific constants (PART, CHIPDB, LOADER_PART_FLASH, LOADER_PART_SRAM)
@@ -39,6 +39,30 @@ source board/${BOARD}.sh
 
 export PATH="${TOOLS_DIR}/bin:${PATH}"
 export LD_LIBRARY_PATH="${TOOLS_DIR}/lib:${LD_LIBRARY_PATH}"
+
+# --- SELinux ----------------------------------------------------------------
+if command -v getenforce &>/dev/null && [ "$(getenforce)" = "Enforcing" ]; then
+    echo "SELinux is enforcing — setting to permissive for Nix compatibility..."
+    sudo setenforce 0
+fi
+
+# --- preflight checks -------------------------------------------------------
+required=(python3)
+case "${MODE}" in
+    b|br)   required+=(ghdl yosys nextpnr-xilinx fasm2frames xc7frames2bit) ;;
+    p|pr)   required+=(fasm2frames xc7frames2bit) ;;
+esac
+[[ "${MODE}" == *r* ]] && required+=(openFPGALoader)
+
+missing=()
+for cmd in "${required[@]}"; do
+    command -v "$cmd" &>/dev/null || missing+=("$cmd")
+done
+if [ ${#missing[@]} -gt 0 ]; then
+    echo "ERROR: missing required tools: ${missing[*]}" >&2
+    echo "Run ../femtorv32/bin/install-toolchain.sh to set up the toolchain." >&2
+    exit 1
+fi
 
 set -ex
 
