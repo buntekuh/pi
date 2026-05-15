@@ -7,14 +7,19 @@
 -- Every M56 instruction has the same bit layout:
 --
 --   Bit  31..27   opcode  (5 bits) — which instruction is this?
---   Bit  26..23   mode    (4 bits) — how are the operands addressed?
---   Bit  22..19   regn    (4 bits) — register number (0-15)
---   Bit  18..0    imm19  (19 bits) — immediate value, offset, or 2nd register
+--   Bit  26..24   mode    (3 bits) — addressing mode (modes 0-6 defined; 7 reserved)
+--   Bit  23..20   regn    (4 bits) — register number (0-15)
+--   Bit  19..0    imm20  (20 bits) — immediate value, offset, or 2nd register
 --
--- For jump instructions (jmp / jpr) the mode field is reused:
---   Bit  26       jmp_sub — 1 means "save return address" (subroutine call)
---   Bit  25..23   jmp_cond — which condition must be true to jump?
---   Bit  22..19   regn    — register to test against the condition
+-- For jump/branch instructions (jmp/jpr/bra/bar) the mode field carries
+-- the condition code:
+--   Bits 26..24: condition — 000=always 001=zero 010=nonzero 011=neg 100=non-neg
+--   Bits 23..20: Rcmp — register to test against the condition
+--
+-- Whether the instruction is a subroutine call (saves return address) is
+-- encoded in the opcode itself:
+--   jmp (10) / jpr (11) — goto, no return address saved
+--   bra (12) / bar (13) — call, pushes return address onto stack
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -27,30 +32,31 @@ entity M56_Decoder is
 
         -- Raw fields sliced straight out of the instruction
         opcode   : out std_logic_vector(4 downto 0);   -- bits 31..27
-        mode     : out std_logic_vector(3 downto 0);   -- bits 26..23
-        regn     : out std_logic_vector(3 downto 0);   -- bits 22..19
-        imm19    : out std_logic_vector(18 downto 0);  -- bits 18..0
-        imm32    : out std_logic_vector(31 downto 0);  -- imm19 sign-extended to 32 bits
-                                                       -- (negative numbers keep their sign)
+        mode     : out std_logic_vector(2 downto 0);   -- bits 26..24
+        regn     : out std_logic_vector(3 downto 0);   -- bits 23..20
+        imm20    : out std_logic_vector(19 downto 0);  -- bits 19..0
+        imm32    : out std_logic_vector(31 downto 0);  -- imm20 sign-extended to 32 bits
 
         -- One flag per instruction family.
         -- Exactly one of these is '1' at any time; the rest are '0'.
         -- The CPU checks these instead of comparing the raw opcode number.
         is_mov   : out std_logic;   -- opcode  0 : move / load / store
-        is_mvb   : out std_logic;   -- opcode  1 : move byte (not yet wired in CPU)
+        is_mvb   : out std_logic;   -- opcode  1 : move byte
         is_alu   : out std_logic;   -- opcode 2-6: add, sub, and, orr, xor
-        is_not   : out std_logic;   -- opcode  7 : bitwise NOT (not yet wired)
-        is_shf   : out std_logic;   -- opcode  8 : logical shift (not yet wired)
-        is_sar   : out std_logic;   -- opcode  9 : arithmetic shift right (not yet wired)
-        is_jmp   : out std_logic;   -- opcode 10 : absolute jump (not yet wired)
-        is_jpr   : out std_logic;   -- opcode 11 : relative jump — used by echo.s
-        is_wfi   : out std_logic;   -- opcode 12 : wait for interrupt
-        is_eai   : out std_logic;   -- opcode 13 : enable interrupts
-        is_dai   : out std_logic;   -- opcode 14 : disable interrupts
-        is_rti   : out std_logic;   -- opcode 15 : return from interrupt (enable interrupts, jump to R13)
+        is_not   : out std_logic;   -- opcode  7 : bitwise NOT
+        is_shf   : out std_logic;   -- opcode  8 : logical shift
+        is_sar   : out std_logic;   -- opcode  9 : arithmetic shift right
+        is_jmp   : out std_logic;   -- opcode 10 : absolute goto
+        is_jpr   : out std_logic;   -- opcode 11 : relative goto
+        is_bra   : out std_logic;   -- opcode 12 : absolute subroutine call
+        is_bar   : out std_logic;   -- opcode 13 : relative subroutine call
+        is_wfi   : out std_logic;   -- opcode 14 : wait for interrupt
+        is_eai   : out std_logic;   -- opcode 15 : enable interrupts
+        is_dai   : out std_logic;   -- opcode 16 : disable interrupts
+        is_rti   : out std_logic;   -- opcode 17 : return from interrupt
 
-        -- Jump-specific sub-fields (only meaningful when is_jmp or is_jpr is '1')
-        jmp_sub  : out std_logic;                      -- '1' = subroutine call (save return address)
+        -- Condition code for jump/branch instructions (only meaningful when
+        -- is_jmp, is_jpr, is_bra, or is_bar is '1').
         jmp_cond : out std_logic_vector(2 downto 0)    -- condition: 000=always 001=zero 010=nonzero
                                                        --            011=negative 100=non-negative
     );
@@ -64,38 +70,34 @@ begin
     -- In hardware this is literally just wires — no logic at all.
     op     <= instruction(31 downto 27);   -- top 5 bits = opcode
     opcode <= op;
-    mode   <= instruction(26 downto 23);   -- next 4 bits = usually addressing mode
-    regn   <= instruction(22 downto 19);   -- next 4 bits = usually register number
-    imm19  <= instruction(18 downto 0);    -- bottom 19 bits = immediate / offset
+    mode   <= instruction(26 downto 24);   -- next 3 bits = addressing mode
+    regn   <= instruction(23 downto 20);   -- next 4 bits = register number
+    imm20  <= instruction(19 downto 0);    -- bottom 20 bits = immediate / offset
 
-    -- Sign-extend imm19 to 32 bits.
-    -- If bit 18 (the MSB of imm19) is '1', the number is negative, so we fill
-    -- the upper 13 bits with '1' to preserve its value in 32-bit arithmetic.
-    -- If bit 18 is '0', we fill with '0' (positive number, no change).
-    -- Example: imm19 = 0x7FFD8 (= -40 in 19-bit two's complement)
-    --          imm32 = 0xFFFFFFD8 (= -40 in 32-bit two's complement)
-    imm32  <= (31 downto 19 => instruction(18)) & instruction(18 downto 0);
+    -- Sign-extend imm20 to 32 bits.
+    -- If bit 19 (the MSB of imm20) is '1', the number is negative, so we fill
+    -- the upper 12 bits with '1' to preserve its value in 32-bit arithmetic.
+    imm32  <= (31 downto 20 => instruction(19)) & instruction(19 downto 0);
 
     -- One-hot decode: compare the opcode to each known value.
-    -- Produces a single '1' flag for whichever instruction family matches.
-    is_mov <= '1' when op = "00000" else '0';   -- opcode 0
-    is_mvb <= '1' when op = "00001" else '0';   -- opcode 1
+    is_mov <= '1' when op = "00000" else '0';   -- opcode  0
+    is_mvb <= '1' when op = "00001" else '0';   -- opcode  1
     is_alu <= '1' when unsigned(op) >= 2        -- opcodes 2,3,4,5,6
                    and unsigned(op) <= 6 else '0';
-    is_not <= '1' when op = "00111" else '0';   -- opcode 7
-    is_shf <= '1' when op = "01000" else '0';   -- opcode 8
-    is_sar <= '1' when op = "01001" else '0';   -- opcode 9
+    is_not <= '1' when op = "00111" else '0';   -- opcode  7
+    is_shf <= '1' when op = "01000" else '0';   -- opcode  8
+    is_sar <= '1' when op = "01001" else '0';   -- opcode  9
     is_jmp <= '1' when op = "01010" else '0';   -- opcode 10
     is_jpr <= '1' when op = "01011" else '0';   -- opcode 11
-    is_wfi <= '1' when op = "01100" else '0';   -- opcode 12
-    is_eai <= '1' when op = "01101" else '0';   -- opcode 13
-    is_dai <= '1' when op = "01110" else '0';   -- opcode 14
-    is_rti <= '1' when op = "01111" else '0';   -- opcode 15
+    is_bra <= '1' when op = "01100" else '0';   -- opcode 12
+    is_bar <= '1' when op = "01101" else '0';   -- opcode 13
+    is_wfi <= '1' when op = "01110" else '0';   -- opcode 14
+    is_eai <= '1' when op = "01111" else '0';   -- opcode 15
+    is_dai <= '1' when op = "10000" else '0';   -- opcode 16
+    is_rti <= '1' when op = "10001" else '0';   -- opcode 17
 
-    -- For jumps, slice the condition code out of the mode field.
-    -- Bit 26 is the "subroutine" flag (call vs plain jump).
-    -- Bits 25..23 are the condition (always / zero / nonzero / negative / non-negative).
-    jmp_sub  <= instruction(26);
-    jmp_cond <= instruction(25 downto 23);
+    -- The condition code is the 3-bit mode field — same field, always wired.
+    -- The CPU only uses this when is_jmp/is_jpr/is_bra/is_bar is asserted.
+    jmp_cond <= instruction(26 downto 24);
 
 end architecture rtl;

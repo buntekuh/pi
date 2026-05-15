@@ -2,12 +2,15 @@
 """
 asm.py — two-pass assembler for the M56 CPU.
 
-Handles the subset required for firmware/echo.s.
-To be replaced by a self-hosted M56 assembler once the runtime exists.
+Instruction format (32 bits):
+    bits 31..27  opcode   (5 bits)
+    bits 26..24  mode     (3 bits)
+    bits 23..20  register (4 bits)
+    bits 19..0   imm20   (20 bits)
 
 Usage:
-    python3 asm.py echo.s           — print address + word to stdout
-    python3 asm.py echo.s echo.hex  — also write hex file (one word per line)
+    python3 asm.py firmware.s           — print address + word to stdout
+    python3 asm.py firmware.s out.hex   — also write hex + VHDL package
 """
 
 import sys
@@ -15,7 +18,8 @@ import sys
 OPCODES = {
     'mov': 0, 'mvb': 1, 'add': 2, 'sub': 3, 'and': 4,
     'orr': 5, 'xor': 6, 'not': 7, 'shf': 8, 'sar': 9,
-    'jmp': 10, 'jpr': 11, 'wfi': 12, 'eai': 13, 'dai': 14, 'rti': 15,
+    'jmp': 10, 'jpr': 11, 'bra': 12, 'bar': 13,
+    'wfi': 14, 'eai': 15, 'dai': 16, 'rti': 17,
 }
 
 # Instructions that take no operands — encoded with all fields zero.
@@ -48,8 +52,8 @@ def resolve(s, symbols):
         raise ValueError(f"undefined symbol: {s!r}")
 
 
-def encode(opcode, mode, r, imm19):
-    return (opcode << 27) | (mode << 23) | (r << 19) | (imm19 & 0x7FFFF)
+def encode(opcode, mode, r, imm20):
+    return (opcode << 27) | (mode << 24) | (r << 20) | (imm20 & 0xFFFFF)
 
 
 def clean(line):
@@ -61,12 +65,7 @@ def split_ops(tail):
 
 
 def expand_macros(lines):
-    """Expand assembler macros into real instructions.
-
-    Multi-instruction macros (psh, pop, ret) produce multiple output lines.
-    All other macros produce exactly one line.
-    Labels and blank lines pass through unchanged.
-    """
+    """Expand assembler macros into real instructions."""
     out = []
     for line in lines:
         if not line or line.endswith(':'):
@@ -94,7 +93,7 @@ def expand_macros(lines):
         elif mn == 'ret':
             out.append('rts')
         elif mn == 'cal':
-            out.append(f'jmp-s {tail}')
+            out.append(f'bra {tail}')
         elif mn == 'shl':
             out.append(f'shf {tail}')
         elif mn == 'shr':
@@ -144,7 +143,7 @@ def assemble(source):
         tail = parts[1] if len(parts) > 1 else ''
         ops  = split_ops(tail) if tail else []
 
-        # --- pseudo-ops: emit raw words into the binary ---
+        # --- pseudo-ops ---
         if mn == '.word':
             words.append(resolve(tail.strip(), symbols) & 0xFFFFFFFF)
             pc += 4
@@ -155,50 +154,69 @@ def assemble(source):
                 pc += 4
             continue
 
-        # --- zero-operand instructions: wfi, eai, dai, rti ---
+        # --- zero-operand: wfi, eai, dai, rti ---
         if mn in ZERO_OPERAND:
             words.append(encode(OPCODES[mn], 0, 0, 0))
             pc += 4
             continue
 
-        # --- rts: return from subroutine (mode 1 of rti opcode) ---
+        # --- rts: return from subroutine (rti opcode, mode 1) ---
         if mn == 'rts':
-            words.append(encode(15, 1, 0, 0))
+            words.append(encode(17, 1, 0, 0))
             pc += 4
             continue
 
-        # --- jpr[.cond] and jpr-s[.cond] ---
+        # --- jpr[.cond] — relative goto ---
         if mn.startswith('jpr'):
-            sub   = 1 if '-s' in mn else 0
-            parts = mn.replace('-s', '').split('.')
-            cond_name = parts[1] if len(parts) > 1 else 'al'
+            cond_name = mn.split('.')[1] if '.' in mn else 'al'
             cond  = COND[cond_name]
-            mode  = (sub << 3) | cond        # bit 3 = subroutine flag
             if cond == 0:
-                rcmp  = 0
-                label = ops[0]
+                rcmp, label = 0, ops[0]
             else:
-                rcmp  = reg(ops[0])
-                label = ops[1]
+                rcmp, label = reg(ops[0]), ops[1]
             offset = symbols[label] - (pc + 4)
-            words.append(encode(11, mode, rcmp, offset))
+            words.append(encode(11, cond, rcmp, offset))
             pc += 4
             continue
 
-        # --- jmp[.cond] and jmp-s[.cond] ---
-        if mn.startswith('jmp'):
-            sub   = 1 if '-s' in mn else 0
-            parts = mn.replace('-s', '').split('.')
-            cond_name = parts[1] if len(parts) > 1 else 'al'
+        # --- bar[.cond] — relative call ---
+        if mn.startswith('bar'):
+            cond_name = mn.split('.')[1] if '.' in mn else 'al'
             cond  = COND[cond_name]
-            mode  = (sub << 3) | cond
+            if cond == 0:
+                rcmp, label = 0, ops[0]
+            else:
+                rcmp, label = reg(ops[0]), ops[1]
+            offset = symbols[label] - (pc + 4)
+            words.append(encode(13, cond, rcmp, offset))
+            pc += 4
+            continue
+
+        # --- jmp[.cond] — absolute goto ---
+        if mn.startswith('jmp'):
+            cond_name = mn.split('.')[1] if '.' in mn else 'al'
+            cond  = COND[cond_name]
             if cond == 0:
                 rcmp  = 0
                 target = imm(ops[0]) if ops[0].startswith('#') else symbols[ops[0]]
             else:
                 rcmp  = reg(ops[0])
                 target = imm(ops[1]) if ops[1].startswith('#') else symbols[ops[1]]
-            words.append(encode(10, mode, rcmp, target))
+            words.append(encode(10, cond, rcmp, target))
+            pc += 4
+            continue
+
+        # --- bra[.cond] — absolute call ---
+        if mn.startswith('bra'):
+            cond_name = mn.split('.')[1] if '.' in mn else 'al'
+            cond  = COND[cond_name]
+            if cond == 0:
+                rcmp  = 0
+                target = imm(ops[0]) if ops[0].startswith('#') else symbols[ops[0]]
+            else:
+                rcmp  = reg(ops[0])
+                target = imm(ops[1]) if ops[1].startswith('#') else symbols[ops[1]]
+            words.append(encode(12, cond, rcmp, target))
             pc += 4
             continue
 
@@ -228,7 +246,7 @@ def assemble(source):
             pc += 4
             continue
 
-        # --- mov-h #imm, Rdst ---
+        # --- mov-h #imm20, Rdst — load into bits 31..12 ---
         if mn == 'mov-h':
             words.append(encode(0, 1, reg(ops[1]), imm(ops[0])))
             pc += 4
@@ -237,13 +255,13 @@ def assemble(source):
         # --- mov (five forms) ---
         if mn == 'mov':
             src, dst = ops[0], ops[1]
-            if src.startswith('#') or src.lstrip('-+').isdigit():  # mov #imm/#label, Rdst
+            if src.startswith('#') or src.lstrip('-+').isdigit():
                 words.append(encode(0, 0, reg(dst), resolve(src, symbols)))
-            elif src.startswith('['):                               # mov [Rsrc], Rdst
+            elif src.startswith('['):
                 words.append(encode(0, 3, reg(src.strip('[]')), reg(dst)))
-            elif dst.startswith('['):                               # mov Rsrc, [Rdst]
+            elif dst.startswith('['):
                 words.append(encode(0, 4, reg(src), reg(dst.strip('[]'))))
-            else:                                                   # mov Rsrc, Rdst
+            else:
                 words.append(encode(0, 2, reg(src), reg(dst)))
             pc += 4
             continue
@@ -251,18 +269,18 @@ def assemble(source):
         # --- mvb (byte move) ---
         if mn == 'mvb':
             src, dst = ops[0], ops[1]
-            if src.startswith('['):                                 # mvb [Rsrc], Rdst
+            if src.startswith('['):
                 words.append(encode(1, 3, reg(src.strip('[]')), reg(dst)))
-            elif src.startswith('#') and dst.startswith('['):      # mvb #imm, [Rdst]
+            elif src.startswith('#') and dst.startswith('['):
                 words.append(encode(1, 5, reg(dst.strip('[]')), imm(src)))
-            elif dst.startswith('['):                               # mvb Rsrc, [Rdst]
+            elif dst.startswith('['):
                 words.append(encode(1, 4, reg(src), reg(dst.strip('[]'))))
             else:
                 raise ValueError(f"mvb requires indirect operand: {line!r}")
             pc += 4
             continue
 
-        # --- ALU: add sub and orr xor (mode 0 = immediate, mode 2 = register) ---
+        # --- ALU: add sub and orr xor (mode 0=immediate, mode 2=register) ---
         if mn in OPCODES:
             opc = OPCODES[mn]
             dst, src = ops[0], ops[1]
@@ -278,7 +296,7 @@ def assemble(source):
     return words
 
 
-def vhdl_pkg(words, mem_words=1024):
+def vhdl_pkg(words, mem_words=57600):
     """VHDL package with sparse firmware initialisation for GHDL synth."""
     lines = [
         '-- firmware_pkg.vhd — generated by asm.py, do not edit',

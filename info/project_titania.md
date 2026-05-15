@@ -90,21 +90,6 @@ Each step is built using only the layer below it. A student can follow the
 entire chain from VHDL flip-flops to a Grue adventure running on hardware,
 with no magic transitions and no black boxes.
 
-## CPU: RISC-V RV32I on FemtoRV32
-
-The CPU chapter is not about a fantasy ISA — it is about RISC-V, the same
-instruction set the industry is converging on. RV32I has 47 instructions with
-a uniform 32-bit encoding. The base integer ISA fits on one page.
-
-The implementation is FemtoRV32 by Bruno Levy: ~400 lines of documented
-Verilog, designed explicitly for teaching processor design. It fits on the
-Cmod A7-35T with thousands of LUTs to spare. A reader who finishes chapter 3
-understands the same ISA that is in their phone, their router, and
-increasingly their laptop.
-
-The book pitch: *"From RISC-V flip-flops to a working adventure game —
-every layer visible, nothing a black box."*
-
 ## Hardware
 
 - Board: Digilent Cmod A7-35T (Artix-7 FPGA, 33K LUTs)

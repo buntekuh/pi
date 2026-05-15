@@ -51,7 +51,7 @@ handler:
         jpr.z   R0, irq_btn1
 
         ; Read byte from UART — also clears uart_rx_valid
-        mov-h   #0x200, R1          ; R1 = 0x400000
+        mov-h   #0x400, R1          ; R1 = 0x400000
         mov     [R1], R0            ; R0 = status word (bits 7:0 = byte)
         and     R0, #0xFF
 
@@ -88,7 +88,7 @@ putc_wait:
 ; Transmit null-terminated string. R0 = base address (one char per word).
 ; Clobbers R0–R2.
 puts:
-        mov-h   #0x200, R1
+        mov-h   #0x400, R1
 puts_loop:
         mov     [R1], R2            ; wait for TX ready
         and     R2, #0x200

@@ -4,18 +4,29 @@ The path from working M56 hardware to a self-hosted Titania-0 system.
 
 ## Phase 1 — Hardware complete
 
-1. SRAM controller (VHDL) — map the 512 KB on-board SRAM into the CPU address space
-2. Interrupt dispatch table in `io.s` — replace hardcoded handler with a
-  writeable table of handler addresses (one per IRQ bit) at a known BRAM
-  location; default entries point to a no-op; user programs install handlers
-  by writing a function address into the appropriate slot; requires SRAM
-  accessible so the table can live outside BRAM
-3. Quad-SPI Flash controller (VHDL) — read-only boot path; writable later for
-  storing assembled programs
-4. SD card SPI driver (VHDL + assembly shim) — raw sector reads via PMOD
-5. Software multiply and divide (`_mul`, `_div`) in assembly
-6. Boot sequence in assembly — copy runtime image from Flash into SRAM, set up
-  stack, jump to entry point
+Memory map (finalised):
+- `0x000000–0x03FFFF` BRAM 225 KB (bit 18=0) — system: kernel, runtime, filesystem
+- `0x040000–0x0BFFFF` SRAM 512 KB (bit 18=1) — user: heap, stack
+- `0x400000` UART (bit 22=1, above imm20 range, needs two instructions)
+
+ISA (finalised):
+- 32-bit instructions: `opcode(5) | mode(3) | register(4) | imm20(20)`
+- 18 opcodes: mov mvb add sub and orr xor not shf sar jmp jpr bra bar wfi eai dai rti
+- jmp/jpr = goto (no return); bra/bar = subroutine call (pushes return address)
+- Full 737 KB (BRAM + SRAM) directly addressable with imm20
+
+Remaining steps:
+1. ~~SRAM controller (VHDL)~~ — done
+2. **Interrupt dispatch table in `io.s`** — writeable table of handler addresses
+   at a known BRAM location; default entries point to a no-op
+3. **Software multiply and divide (`_mul`, `_div`)** in assembly
+4. **SD card SPI driver (VHDL + assembly shim)** — raw sector reads via PMOD
+
+## Phase 1.5 — Refactor (after test suite)
+
+- **`cpu.vhd` refactor** — split into `cpu/` subfolder with VHDL procedure
+  packages (`types`, `mov`, `logic`, `arith`, `shift`, `branch`, `interrupt`);
+  refactor only after the test suite exists so correctness can be verified.
 
 ## Phase 2 — Test suite
 

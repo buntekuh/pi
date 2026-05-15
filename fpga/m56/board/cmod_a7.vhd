@@ -25,8 +25,9 @@ package board_pkg is
     constant BAUD_RATE : integer := 115_200;
 
     -- Program memory size in 32-bit words.
-    -- 1024 words = 4 KB. Large enough for firmware, small enough to fit
-    -- comfortably in the block RAM of the Artix-7 35T.
-    constant BLOCK_RAM_WORDS : integer := 1024;
+    -- 57600 words = 225 KB, using all available Block RAM on the Artix-7 35T.
+    -- The Block RAM window covers 0x000000–0x03FFFF (bit 18 = 0); addresses
+    -- above the firmware size read as zero.
+    constant BLOCK_RAM_WORDS : integer := 57600;
 
 end package board_pkg;

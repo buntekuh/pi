@@ -30,13 +30,15 @@
 --
 -- ─── Memory map ──────────────────────────────────────────────────────────────
 --
---   0x000000 – 0x000FFF  Block RAM  (4 KB, address bits 18..12 all zero)
---   0x001000 – 0x07FFFF  SRAM       (508 KB, bits 18..12 non-zero, bit 22 = 0)
+--   0x000000 – 0x03FFFF  Block RAM  (256 KB window, bit 18 = 0; 225 KB used)
+--   0x040000 – 0x0BFFFF  SRAM       (512 KB, bit 18 = 1, bit 22 = 0)
 --   0x400000             UART       (bit 22 = 1)
 --
---   Block RAM and SRAM share the bit-22 = 0 region; bit-range 18..12 = 0
---   selects Block RAM (first 4 KB), any other value selects SRAM.
---   The stack pointer resets to 0x0007FFFC so the runtime stack lives in SRAM.
+--   Block RAM and SRAM are distinguished by a single bit (bit 18):
+--     bit 18 = 0 → Block RAM  (system: kernel, runtime, filesystem)
+--     bit 18 = 1 → SRAM       (user: heap, stack)
+--   The stack pointer resets to 0x0BFFFC so the stack lives at the top of SRAM.
+--   256 KB of address space (0x0C0000–0x0FFFFF) sits above SRAM and is unused.
 --
 -- ─── UART register ───────────────────────────────────────────────────────────
 --
@@ -98,8 +100,8 @@ architecture rtl of SOC is
 
     -- ── Address decode ────────────────────────────────────────────────────
     signal uart_select : STD_LOGIC;   -- bit 22 = 1
-    signal bram_select : STD_LOGIC;   -- bit 22 = 0, bits 18..12 = 0  (first 4 KB)
-    signal sram_select : STD_LOGIC;   -- bit 22 = 0, bits 18..12 ≠ 0  (rest of 512 KB)
+    signal bram_select : STD_LOGIC;   -- bit 22 = 0, bit 18 = 0  (system: 0x000000–0x03FFFF)
+    signal sram_select : STD_LOGIC;   -- bit 22 = 0, bit 18 = 1  (user:   0x040000–0x0BFFFF)
 
     -- ── Stall ─────────────────────────────────────────────────────────────
     signal memory_stall : STD_LOGIC;  -- asserted by SRAM controller during multi-byte access
@@ -152,9 +154,9 @@ begin
 
     uart_select <= memory_address(22);
     bram_select <= '1' when memory_address(22) = '0'
-                        and unsigned(memory_address(18 downto 12)) = 0 else '0';
+                        and memory_address(18) = '0' else '0';
     sram_select <= '1' when memory_address(22) = '0'
-                        and unsigned(memory_address(18 downto 12)) /= 0 else '0';
+                        and memory_address(18) = '1' else '0';
 
     -- uart_rd fires when the CPU reads from the UART address.
     -- This tells the UART "byte has been consumed, you can accept the next one."
@@ -189,10 +191,10 @@ begin
         if rising_edge(clk) then
             if bram_select = '1' then
                 if memory_write_enable = '1' then
-                    block_ram(to_integer(unsigned(memory_address(11 downto 2)))) <= memory_write_data;
+                    block_ram(to_integer(unsigned(memory_address(17 downto 2)))) <= memory_write_data;
                 end if;
                 if memory_read_enable = '1' then
-                    block_ram_read_data <= block_ram(to_integer(unsigned(memory_address(11 downto 2))));
+                    block_ram_read_data <= block_ram(to_integer(unsigned(memory_address(17 downto 2))));
                 end if;
             end if;
         end if;
