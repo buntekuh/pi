@@ -1,19 +1,24 @@
 # Titania-0
 
-Titania-0 is the first compiled language in the Titania stack. It is typeless —
-everything is a 32-bit word — and compiles directly to M56 assembly. Its
-compiler is written in M56 assembly and is simple enough to be understood in
-one sitting.
+Titania-0 is the low-level language of the Titania stack. It compiles to
+T-code — Titania's intermediate representation, the equivalent of Pascal's
+P-code. T-code backends then translate that token stream to native machine code
+for each hardware target. One backend per target; every language in the stack
+is immediately portable.
 
-The language is designed for execution speed. Every construct maps almost
-one-to-one to a specific M56 instruction — there is no hidden overhead, no
-runtime, no garbage collector. This is the same philosophy that drove BCPL and
-Dennis Ritchie's original C for the PDP-7: design the language around what the
-hardware does naturally, and the compiler becomes trivial while the output
-becomes fast.
+```
+Titania-0 source ──┐
+Titania-1 source ──┼──► T-code token stream ──► M56 backend   ──► M56
+Titania-2 source ──┘                        ├──► rv32i backend ──► rv32i
+                                             └──► ARM backend   ──► ARM
+```
 
-The language looks like C. Anyone who has written C, JavaScript, or Arduino
-sketches will feel at home immediately.
+Titania-0 is the human-readable face of T-code. Its syntax is defined by what
+T-code can express — so Titania-0 cannot be fully specified until the T-code
+instruction set is defined. The sections below are a working draft; they will
+be revised once T-code is settled.
+
+---
 
 ---
 
