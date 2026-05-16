@@ -228,8 +228,6 @@ Write Rsrc to (Rdst + off).
 opcode | mode=6 | Rsrc | (Rdst[19:16], offset[15:0])
 ```
 
-Mode 7 is reserved for future use.
-
 MoveB uses the same mode encoding as Move. Modes 3 and 5 read a byte
 (zero-extended). Modes 4 and 6 write the low byte of the register.
 
