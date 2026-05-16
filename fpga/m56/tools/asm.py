@@ -18,7 +18,7 @@ import sys
 OPCODES = {
     'mov': 0, 'mvb': 1, 'add': 2, 'sub': 3, 'and': 4,
     'orr': 5, 'xor': 6, 'not': 7, 'shf': 8, 'sar': 9,
-    'jmp': 10, 'jpr': 11, 'bra': 12, 'bar': 13,
+    'bra': 10, 'bar': 11, 'cal': 12, 'car': 13,
     'wfi': 14, 'eai': 15, 'dai': 16, 'rti': 17,
 }
 
@@ -92,8 +92,6 @@ def expand_macros(lines):
             out.append('add R14, #4')
         elif mn == 'ret':
             out.append('rts')
-        elif mn == 'cal':
-            out.append(f'bra {tail}')
         elif mn == 'shl':
             out.append(f'shf {tail}')
         elif mn == 'shr':
@@ -166,8 +164,8 @@ def assemble(source):
             pc += 4
             continue
 
-        # --- jpr[.cond] — relative goto ---
-        if mn.startswith('jpr'):
+        # --- bar[.cond] — relative goto ---
+        if mn.startswith('bar'):
             cond_name = mn.split('.')[1] if '.' in mn else 'al'
             cond  = COND[cond_name]
             if cond == 0:
@@ -179,8 +177,8 @@ def assemble(source):
             pc += 4
             continue
 
-        # --- bar[.cond] — relative call ---
-        if mn.startswith('bar'):
+        # --- car[.cond] — relative call ---
+        if mn.startswith('car'):
             cond_name = mn.split('.')[1] if '.' in mn else 'al'
             cond  = COND[cond_name]
             if cond == 0:
@@ -192,8 +190,8 @@ def assemble(source):
             pc += 4
             continue
 
-        # --- jmp[.cond] — absolute goto ---
-        if mn.startswith('jmp'):
+        # --- bra[.cond] — absolute goto ---
+        if mn.startswith('bra'):
             cond_name = mn.split('.')[1] if '.' in mn else 'al'
             cond  = COND[cond_name]
             if cond == 0:
@@ -206,8 +204,8 @@ def assemble(source):
             pc += 4
             continue
 
-        # --- bra[.cond] — absolute call ---
-        if mn.startswith('bra'):
+        # --- cal[.cond] — absolute call ---
+        if mn.startswith('cal'):
             cond_name = mn.split('.')[1] if '.' in mn else 'al'
             cond  = COND[cond_name]
             if cond == 0:

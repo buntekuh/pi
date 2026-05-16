@@ -11,7 +11,7 @@
 ;
 ; ─── Memory layout ───────────────────────────────────────────────────────────
 ;
-;   0x000000   reset vector   jpr main
+;   0x000000   reset vector   bar main
 ;   0x000010   handler        interrupt vector
 ;   (handler, putc, puts, getc, main follow in order)
 ;   (rxbuf_wptr, rxbuf_rptr, rxbuf[64], greeting at end of binary)
@@ -33,7 +33,7 @@
 ;   R15     PC (program counter)
 
 ; ── Reset vector (0x000000) ─────────────────────────────────────────────────
-        jpr     main
+        bar     main
         nop
         nop
         nop
@@ -48,7 +48,7 @@ handler:
         ; UART RX? (irq_status bit 0)
         mov     R13, R0
         and     R0, #1
-        jpr.z   R0, irq_btn1
+        bar.z   R0, irq_btn1
 
         ; Read byte from UART — also clears uart_rx_valid
         mov-h   #0x400, R1          ; R1 = 0x400000
@@ -76,11 +76,11 @@ irq_done:
 ; Transmit byte in R0. Blocks until UART TX is ready.
 ; Clobbers R0–R2.
 putc:
-        mov-h   #0x200, R1          ; R1 = UART (0x400000)
+        mov-h   #0x400, R1          ; R1 = 0x400000 (UART)
 putc_wait:
         mov     [R1], R2
         and     R2, #0x200          ; bit 9: TX busy
-        jpr.nz  R2, putc_wait
+        bar.nz  R2, putc_wait
         mvb     R0, [R1]
         ret
 
@@ -92,12 +92,12 @@ puts:
 puts_loop:
         mov     [R1], R2            ; wait for TX ready
         and     R2, #0x200
-        jpr.nz  R2, puts_loop
+        bar.nz  R2, puts_loop
         mvb     [R0], R2            ; read next char
-        jpr.z   R2, puts_done       ; null terminator
+        bar.z   R2, puts_done       ; null terminator
         mvb     R2, [R1]            ; transmit
         add     R0, #4
-        jpr     puts_loop
+        bar     puts_loop
 puts_done:
         ret
 
@@ -111,9 +111,9 @@ getc_wait:
         mov     #rxbuf_wptr, R1
         mov     [R1], R1            ; R1 = write pointer
         sub     R1, R0              ; R1 = wptr - rptr (0 if empty)
-        jpr.nz  R1, getc_data
+        bar.nz  R1, getc_data
         wfi                         ; sleep until next interrupt adds to buffer
-        jpr     getc_wait
+        bar     getc_wait
 getc_data:
         mvb     [R0], R1            ; R1 = byte at read pointer
         add     R0, #4
@@ -138,7 +138,7 @@ main:
 echo_loop:
         cal     getc                ; R0 = received byte
         cal     putc                ; echo it back
-        jpr     echo_loop
+        bar     echo_loop
 
 ; ── Data ─────────────────────────────────────────────────────────────────────
 rxbuf_wptr:
