@@ -47,6 +47,23 @@ All of BRAM and SRAM is within the 20-bit immediate range and is directly
 addressable with a single `mov` instruction. Peripherals sit above 0x0FFFFF
 and always require two instructions to reach.
 
+### Byte access
+
+| Region      | Word read (`mov`) | Word write (`mov`) | Byte read (`mvb`) | Byte write (`mvb`) |
+|-------------|:-----------------:|:------------------:|:-----------------:|:------------------:|
+| BRAM        | ✓                 | ✓                  | ✗ (hardware bug)  | ✗ (hardware bug)   |
+| SRAM        | ✓                 | ✓                  | ✓                 | ✓                  |
+| Peripherals | ✓                 | ✓                  | —                 | ✓                  |
+
+`mvb` byte reads from BRAM are broken in synthesized hardware — the BRAM returns
+a full word and the byte lane extraction does not work correctly after place and
+route. Workaround: use word reads and mask with `and R, #0xFF`.
+
+Byte reads and writes to SRAM work correctly. The SRAM controller performs a
+single-byte transfer when `cpu_is_byte` is set, and the CPU extracts the result
+from bits 7:0 of the read data. Packed byte strings therefore belong in SRAM,
+not BRAM.
+
 ### Kernel Call Table
 
 The BRAM exposes a stable jump table at a known address. Programs call these

@@ -104,6 +104,27 @@ puts_done:
         pop     R3
         ret
 
+; ── puts_sram ────────────────────────────────────────────────────────────────
+; Transmit null-terminated packed byte string from SRAM.
+; R0 = byte address in SRAM. Reads one byte at a time via mvb.
+; Clobbers R0–R2. Preserves R3.
+puts_sram:
+        psh     R3
+        mov-h   #0x400, R3          ; R3 = 0x400000 (UART)
+puts_sram_loop:
+        mvb     [R0], R2            ; byte read from SRAM
+        bar.z   R2, puts_sram_done  ; null terminator
+puts_sram_txwait:
+        mov     [R3], R1
+        and     R1, #0x200          ; bit 9 = TX busy
+        bar.nz  R1, puts_sram_txwait
+        mvb     R2, [R3]            ; transmit byte
+        add     R0, #1              ; next byte
+        bar     puts_sram_loop
+puts_sram_done:
+        pop     R3
+        ret
+
 ; ── getc ─────────────────────────────────────────────────────────────────────
 ; Block until RX buffer has a byte. Returns byte in R0.
 ; Clobbers R0–R2.
@@ -149,6 +170,51 @@ sram_ok:
         mov     #'S', R0
         cal     putc
 sram_done:
+
+        ; Packed-byte SRAM test: write "Sram ready.\r\n" byte-by-byte, read back via mvb
+        mov-h   #0x040, R1          ; R1 = 0x040100 (byte string area, past word test)
+        add     R1, #0x100
+        mov     R1, R2              ; R2 = write pointer
+        mov     #'r', R0
+        mvb     R0, [R2]
+        add     R2, #1
+        mov     #'a', R0
+        mvb     R0, [R2]
+        add     R2, #1
+        mov     #'m', R0
+        mvb     R0, [R2]
+        add     R2, #1
+        mov     #' ', R0
+        mvb     R0, [R2]
+        add     R2, #1
+        mov     #'r', R0
+        mvb     R0, [R2]
+        add     R2, #1
+        mov     #'e', R0
+        mvb     R0, [R2]
+        add     R2, #1
+        mov     #'a', R0
+        mvb     R0, [R2]
+        add     R2, #1
+        mov     #'d', R0
+        mvb     R0, [R2]
+        add     R2, #1
+        mov     #'y', R0
+        mvb     R0, [R2]
+        add     R2, #1
+        mov     #'.', R0
+        mvb     R0, [R2]
+        add     R2, #1
+        mov     #13, R0
+        mvb     R0, [R2]
+        add     R2, #1
+        mov     #10, R0
+        mvb     R0, [R2]
+        add     R2, #1
+        mov     #0, R0
+        mvb     R0, [R2]
+        mov     R1, R0              ; R0 = base of packed string
+        cal     puts_sram
 
         mov     #greeting, R0
         cal     puts
@@ -231,4 +297,4 @@ rxbuf:
 rxbuf_end:
 
 greeting:
-        .str    "Titania M56 tiny Tots.\r\n"
+        .str    "Titania M56 pilfering Papa.\r\n"
