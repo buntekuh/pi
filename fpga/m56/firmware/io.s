@@ -125,6 +125,39 @@ puts_sram_done:
         pop     R3
         ret
 
+; ── print_hex_byte ───────────────────────────────────────────────────────────
+; Print byte in R0 as two uppercase hex digits.
+; Clobbers R0–R2. Uses R3, R4 internally (saves and restores them).
+print_hex_byte:
+        psh     R3
+        psh     R4
+        mov     R0, R4              ; R4 = original byte
+        mov     R4, R3
+        shr     R3, #4
+        and     R3, #0xF            ; R3 = high nibble
+        cal     print_nibble
+        mov     R4, R3
+        and     R3, #0xF            ; R3 = low nibble
+        cal     print_nibble
+        pop     R4
+        pop     R3
+        ret
+
+; print_nibble — print nibble (0–15) in R3 as one hex char. Clobbers R0–R2.
+print_nibble:
+        mov     R3, R0
+        sub     R0, #10
+        bar.n   R0, pn_digit        ; nibble < 10 → '0'–'9'
+        mov     R3, R0
+        add     R0, #55             ; nibble ≥ 10: 'A'-'F'
+        cal     putc
+        ret
+pn_digit:
+        mov     R3, R0
+        add     R0, #48             ; '0' + nibble
+        cal     putc
+        ret
+
 ; ── getc ─────────────────────────────────────────────────────────────────────
 ; Block until RX buffer has a byte. Returns byte in R0.
 ; Clobbers R0–R2.
@@ -218,6 +251,40 @@ sram_done:
 
         mov     #greeting, R0
         cal     puts
+
+        ; SD card test: init, read sector 0, hexdump first 16 bytes
+        cal     sd_init
+        bar.nz  R0, sd_fail
+        mov     #'I', R0            ; init ok
+        cal     putc
+        mov     #0, R0              ; sector 0
+        mov-h   #0x042, R1          ; destination: SRAM 0x042000
+        cal     sd_read_sector
+        bar.nz  R0, sd_fail
+        ; hexdump 16 bytes
+        psh     R3
+        psh     R4
+        mov-h   #0x042, R3          ; R3 = byte pointer into buffer
+        mov     #16, R4
+sd_hex_loop:
+        mvb     [R3], R0
+        cal     print_hex_byte
+        mov     #' ', R0
+        cal     putc
+        add     R3, #1
+        dec     R4
+        bar.nz  R4, sd_hex_loop
+        pop     R4
+        pop     R3
+        mov     #13, R0
+        cal     putc
+        mov     #10, R0
+        cal     putc
+        bar     sd_done
+sd_fail:
+        mov     #'E', R0
+        cal     putc
+sd_done:
 
 echo_loop:
         cal     getc                ; R0 = received byte
