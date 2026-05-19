@@ -19,14 +19,14 @@
 --
 -- ─── Byte order (endianness) ───────────────────────────────────────────────
 --
--- The M56 is big-endian: the most significant byte of a multi-byte value
--- is stored at the lowest memory address.
+-- The M56 is little-endian (compatible with ARM and RISC-V): the least
+-- significant byte of a multi-byte value is stored at the lowest address.
 --
 -- In practice: a 32-bit value 0x12345678 stored at address N occupies:
---   N+0 = 0x12  (most significant byte)
---   N+1 = 0x34
---   N+2 = 0x56
---   N+3 = 0x78  (least significant byte)
+--   N+0 = 0x78  (least significant byte)
+--   N+1 = 0x56
+--   N+2 = 0x34
+--   N+3 = 0x12  (most significant byte)
 --
 -- ─── Four-state execution cycle ────────────────────────────────────────────
 --
@@ -57,7 +57,10 @@ entity m56_cpu is
         interrupts_enabled   : out STD_LOGIC;
 
         -- Stall: asserted by slow peripherals (e.g. SRAM controller)
-        memory_stall         : in  STD_LOGIC
+        memory_stall         : in  STD_LOGIC;
+
+        -- '1' for one cycle when the current transfer is a single byte (not a word)
+        cpu_is_byte          : out STD_LOGIC
     );
 end entity m56_cpu;
 
@@ -78,6 +81,9 @@ architecture rtl of m56_cpu is
     signal state            : state_type := FETCH;
     signal load_destination : integer range 0 to 15;
     signal load_is_byte     : std_logic := '0';
+    signal store_is_byte    : std_logic := '0';
+    signal load_byte_sel    : std_logic_vector(1 downto 0) := "00";
+    signal load_is_sram     : std_logic := '0';
     signal call_target      : std_logic_vector(31 downto 0);
 
     -- Decoder output signals — wired from the decoder module below.
@@ -110,6 +116,7 @@ architecture rtl of m56_cpu is
 begin
 
     interrupts_enabled <= interrupts_enabled_reg;
+    cpu_is_byte        <= load_is_byte or store_is_byte;
 
     -- ── Decoder ─────────────────────────────────────────────────────────────
     dec: entity work.M56_Decoder
@@ -160,6 +167,8 @@ begin
             memory_read_enable  <= '1';
             interrupts_enabled_reg <= '0';
             load_is_byte        <= '0';
+            store_is_byte       <= '0';
+            load_is_sram        <= '0';
 
         elsif rising_edge(clk) then
 
@@ -250,20 +259,24 @@ begin
                                 memory_read_enable <= '1';
                                 load_destination   <= destination_register;
                                 load_is_byte       <= '1';
+                                load_byte_sel      <= registers(register_index)(1 downto 0);
+                                load_is_sram       <= registers(register_index)(18);
                                 if registers(register_index)(22) = '1' then
                                     state <= LOAD;
                                 else
                                     state <= LOAD_WAIT;
                                 end if;
-                            when "100" =>   -- mvb Rsrc, [Rdst] — byte write
+                            when "100" =>   -- mvb Rsrc, [Rdst] — byte write (byte in bits 7:0)
                                 memory_address      <= registers(destination_register);
                                 memory_write_data   <= (31 downto 8 => '0') & registers(register_index)(7 downto 0);
                                 memory_write_enable <= '1';
+                                store_is_byte       <= '1';
                                 state <= STORE;
-                            when "101" =>   -- mvb #imm, [Rdst] — immediate byte write
+                            when "101" =>   -- mvb #imm, [Rdst] — immediate byte write (byte in bits 7:0)
                                 memory_address      <= registers(register_index);
                                 memory_write_data   <= (31 downto 8 => '0') & d_imm20(7 downto 0);
                                 memory_write_enable <= '1';
+                                store_is_byte       <= '1';
                                 state <= STORE;
                             when others =>
                                 memory_address     <= registers(15);
@@ -458,8 +471,20 @@ begin
                 -- Capture data into the destination register.
                 when LOAD =>
                     if load_is_byte = '1' then
-                        registers(load_destination) <= (31 downto 8 => '0') & memory_read_data(7 downto 0);
+                        if load_is_sram = '1' then
+                            -- SRAM: controller read one byte and placed it in bits 7:0
+                            registers(load_destination) <= (31 downto 8 => '0') & memory_read_data(7 downto 0);
+                        else
+                            -- BRAM: full word returned; extract byte by address offset (little-endian)
+                            case load_byte_sel is
+                                when "00"   => registers(load_destination) <= (31 downto 8 => '0') & memory_read_data(7 downto 0);
+                                when "01"   => registers(load_destination) <= (31 downto 8 => '0') & memory_read_data(15 downto 8);
+                                when "10"   => registers(load_destination) <= (31 downto 8 => '0') & memory_read_data(23 downto 16);
+                                when others => registers(load_destination) <= (31 downto 8 => '0') & memory_read_data(31 downto 24);
+                            end case;
+                        end if;
                         load_is_byte <= '0';
+                        load_is_sram <= '0';
                     else
                         registers(load_destination) <= memory_read_data;
                     end if;
@@ -476,6 +501,7 @@ begin
                 -- Wait for stall to clear before fetching next instruction.
                 when STORE =>
                     memory_write_enable <= '0';
+                    store_is_byte       <= '0';
                     if memory_stall = '0' then
                         memory_address     <= registers(15);
                         memory_read_enable <= '1';

@@ -5,20 +5,20 @@
 -- consecutive byte transfers.  This controller performs those transfers and
 -- presents a 32-bit interface to the memory bus.
 --
--- ─── Byte order (big-endian) ─────────────────────────────────────────────────
--- The M56 is big-endian.  For a 32-bit word at byte address A:
---   SRAM[A]   = bits 31..24  (most significant byte, transferred first)
---   SRAM[A+1] = bits 23..16
---   SRAM[A+2] = bits 15..8
---   SRAM[A+3] = bits 7..0   (least significant byte)
+-- ─── Byte order (little-endian, ARM/RISC-V compatible) ──────────────────────
+-- The M56 is little-endian.  For a 32-bit word at byte address A:
+--   SRAM[A]   = bits  7..0   (least significant byte, transferred first)
+--   SRAM[A+1] = bits 15..8
+--   SRAM[A+2] = bits 23..16
+--   SRAM[A+3] = bits 31..24  (most significant byte)
 --
 -- ─── Timing (IS61WV5128BLL-10 at 12 MHz) ─────────────────────────────────────
 -- The SRAM has a 10 ns read/write cycle time.  One clock period at 12 MHz is
 -- 83.33 ns — 8× the minimum — so one byte transfer per clock is safe with
 -- ample margin.
 --
--- Reads:  5 cycles (IDLE + 4 READ states, one byte per state).
--- Writes: 9 cycles (IDLE detects + 4 PREP/EXEC pairs, one byte per pair).
+-- Reads:  5 cycles word (IDLE + 4 READ states); 2 cycles byte (IDLE + READ_B0).
+-- Writes: 9 cycles word (IDLE + 4 PREP/EXEC pairs); 3 cycles byte (IDLE + PREP + EXEC).
 -- The stall signal is combinatorial: it goes high the same cycle the CPU
 -- presents a request, so the CPU never sees a false "ready."
 --
@@ -43,6 +43,7 @@ entity sram_controller is
         cpu_read_enable  : in  STD_LOGIC;
         cpu_write_enable : in  STD_LOGIC;
         cpu_read_data    : out STD_LOGIC_VECTOR(31 downto 0);
+        cpu_is_byte      : in  STD_LOGIC;
         stall            : out STD_LOGIC;
 
         -- Physical SRAM pins (IS61WV5128BLL)
@@ -66,7 +67,8 @@ architecture rtl of sram_controller is
     );
     signal state : state_type := IDLE;
 
-    signal base_addr   : STD_LOGIC_VECTOR(18 downto 0);  -- byte address of word[31:24]
+    signal byte_mode   : std_logic := '0';                -- '1' for single-byte transfers
+    signal base_addr   : STD_LOGIC_VECTOR(18 downto 0);  -- byte address of LSB (word[7:0])
     signal write_word  : STD_LOGIC_VECTOR(31 downto 0);  -- write data latched in IDLE
     signal assembled   : STD_LOGIC_VECTOR(31 downto 0);  -- read result, built byte by byte
 
@@ -104,8 +106,8 @@ begin
                 -- ── IDLE ────────────────────────────────────────────────────
                 when IDLE =>
                     if cpu_select = '1' and cpu_read_enable = '1' then
-                        -- Latch address, assert chip/output enable, start read.
-                        -- Byte 0 (MSB) will be stable on DQ by the end of READ_B0.
+                        -- Latch address; LSB (bits 7:0) will be on DQ at end of READ_B0.
+                        byte_mode <= cpu_is_byte;
                         base_addr <= cpu_address(18 downto 0);
                         sram_addr <= cpu_address(18 downto 0);
                         sram_cen  <= '0';
@@ -115,12 +117,12 @@ begin
                         state     <= READ_B0;
 
                     elsif cpu_select = '1' and cpu_write_enable = '1' then
-                        -- Latch address and data.  Drive first byte address with WEn
-                        -- still high — one cycle of address setup before the write pulse.
+                        -- Latch address and data.  Drive LSB first (little-endian).
+                        byte_mode  <= cpu_is_byte;
                         base_addr  <= cpu_address(18 downto 0);
                         write_word <= cpu_write_data;
                         sram_addr  <= cpu_address(18 downto 0);
-                        data_out   <= cpu_write_data(31 downto 24);
+                        data_out   <= cpu_write_data(7 downto 0);   -- LSB first
                         driving    <= '1';
                         sram_cen   <= '0';
                         sram_wen   <= '1';
@@ -128,42 +130,52 @@ begin
                         state      <= WRITE_B0_PREP;
                     end if;
 
-                -- ── Read sequence ────────────────────────────────────────────
-                -- Address was presented during the previous state; sram_data now
-                -- holds the byte that was at that address.  Latch it, advance address.
+                -- ── Read sequence (little-endian: LSB at base address) ──────
                 when READ_B0 =>
-                    assembled(31 downto 24) <= sram_data;
-                    sram_addr <= std_logic_vector(unsigned(base_addr) + 1);
-                    state     <= READ_B1;
+                    if byte_mode = '1' then
+                        assembled <= (31 downto 8 => '0') & sram_data;
+                        sram_cen  <= '1';
+                        sram_oen  <= '1';
+                        state     <= IDLE;
+                    else
+                        assembled(7 downto 0) <= sram_data;
+                        sram_addr <= std_logic_vector(unsigned(base_addr) + 1);
+                        state     <= READ_B1;
+                    end if;
 
                 when READ_B1 =>
-                    assembled(23 downto 16) <= sram_data;
+                    assembled(15 downto 8) <= sram_data;
                     sram_addr <= std_logic_vector(unsigned(base_addr) + 2);
                     state     <= READ_B2;
 
                 when READ_B2 =>
-                    assembled(15 downto 8) <= sram_data;
+                    assembled(23 downto 16) <= sram_data;
                     sram_addr <= std_logic_vector(unsigned(base_addr) + 3);
                     state     <= READ_B3;
 
                 when READ_B3 =>
-                    assembled(7 downto 0) <= sram_data;
+                    assembled(31 downto 24) <= sram_data;
                     sram_cen <= '1';
                     sram_oen <= '1';
                     state    <= IDLE;
 
-                -- ── Write sequence ───────────────────────────────────────────
-                -- Each byte uses two states: PREP (WEn=1, address stable) then
-                -- EXEC (WEn=0, write pulse).  This guarantees tAW timing.
+                -- ── Write sequence (little-endian: LSB at base address) ─────
+                -- Each byte: PREP (WEn=1, address setup) then EXEC (WEn=0, pulse).
                 when WRITE_B0_PREP =>
                     sram_wen <= '0';
                     state    <= WRITE_B0_EXEC;
 
                 when WRITE_B0_EXEC =>
-                    sram_wen  <= '1';
-                    sram_addr <= std_logic_vector(unsigned(base_addr) + 1);
-                    data_out  <= write_word(23 downto 16);
-                    state     <= WRITE_B1_PREP;
+                    sram_wen <= '1';
+                    if byte_mode = '1' then
+                        sram_cen <= '1';
+                        driving  <= '0';
+                        state    <= IDLE;
+                    else
+                        sram_addr <= std_logic_vector(unsigned(base_addr) + 1);
+                        data_out  <= write_word(15 downto 8);
+                        state     <= WRITE_B1_PREP;
+                    end if;
 
                 when WRITE_B1_PREP =>
                     sram_wen <= '0';
@@ -172,7 +184,7 @@ begin
                 when WRITE_B1_EXEC =>
                     sram_wen  <= '1';
                     sram_addr <= std_logic_vector(unsigned(base_addr) + 2);
-                    data_out  <= write_word(15 downto 8);
+                    data_out  <= write_word(23 downto 16);
                     state     <= WRITE_B2_PREP;
 
                 when WRITE_B2_PREP =>
@@ -182,7 +194,7 @@ begin
                 when WRITE_B2_EXEC =>
                     sram_wen  <= '1';
                     sram_addr <= std_logic_vector(unsigned(base_addr) + 3);
-                    data_out  <= write_word(7 downto 0);
+                    data_out  <= write_word(31 downto 24);
                     state     <= WRITE_B3_PREP;
 
                 when WRITE_B3_PREP =>

@@ -50,11 +50,30 @@
 --   Writing  0x400000 sends a byte:
 --     bits 7..0 = byte to transmit
 --
+-- ─── SPI / SD card register ──────────────────────────────────────────────────
+--
+--   All three registers sit at 0x800000 (bit 23 = 1).
+--
+--   0x800000 — DATA
+--     Write: load byte into SPI shift register and begin transfer.
+--     Read:  bit 8 = busy (1 while transfer in progress)
+--            bits 7..0 = last received byte (stable once busy = 0)
+--
+--   0x800004 — CS#
+--     Write bit 0: 0 = assert CS# (select card), 1 = deassert CS# (idle).
+--     Resets to 1 (deasserted).
+--
+--   0x800008 — DIV
+--     Write bits 7..0: clock divider N.  SCK = clk / (2×(N+1)).
+--     At 12 MHz: N=14 → 400 kHz (init), N=0 → 6 MHz (data).
+--     Resets to 14 (safe initialisation speed).
+--
 -- ─── Physical pins ───────────────────────────────────────────────────────────
 --
 --   BTN0 (nearest USB) = reset   — hold to reset CPU, release to run
 --   LED0               = RX valid (briefly lights when a byte arrives)
 --   LED1               = TX busy  (lights while the UART is sending)
+--   JA1–JA4            = SD card SPI (CS#, MOSI, MISO, SCK)
 
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
@@ -75,7 +94,13 @@ entity SOC is
         sram_data    : inout STD_LOGIC_VECTOR(7 downto 0);
         sram_cen     : out STD_LOGIC;
         sram_oen     : out STD_LOGIC;
-        sram_wen     : out STD_LOGIC
+        sram_wen     : out STD_LOGIC;
+
+        -- Pmod SD card (SPI mode, Pmod JA)
+        sd_sck       : out STD_LOGIC;
+        sd_mosi      : out STD_LOGIC;
+        sd_miso      : in  STD_LOGIC;
+        sd_cs_n      : out STD_LOGIC
     );
 end entity SOC;
 
@@ -99,9 +124,10 @@ architecture rtl of SOC is
     signal memory_read_enable   : STD_LOGIC;                       -- '1' = read this cycle
 
     -- ── Address decode ────────────────────────────────────────────────────
-    signal uart_select : STD_LOGIC;   -- bit 22 = 1
-    signal bram_select : STD_LOGIC;   -- bit 22 = 0, bit 18 = 0  (system: 0x000000–0x03FFFF)
-    signal sram_select : STD_LOGIC;   -- bit 22 = 0, bit 18 = 1  (user:   0x040000–0x0BFFFF)
+    signal uart_select : STD_LOGIC;   -- bit 22 = 1, bit 23 = 0  → 0x400000
+    signal bram_select : STD_LOGIC;   -- bit 23 = 0, bit 22 = 0, bit 18 = 0  → 0x000000–0x03FFFF
+    signal sram_select : STD_LOGIC;   -- bit 23 = 0, bit 22 = 0, bit 18 = 1  → 0x040000–0x0BFFFF
+    signal spi_select  : STD_LOGIC;   -- bit 23 = 1, bit 22 = 0              → 0x800000
 
     -- ── Stall ─────────────────────────────────────────────────────────────
     signal memory_stall : STD_LOGIC;  -- asserted by SRAM controller during multi-byte access
@@ -133,12 +159,22 @@ architecture rtl of SOC is
     signal block_ram_read_data : STD_LOGIC_VECTOR(31 downto 0);
     signal sram_read_data      : STD_LOGIC_VECTOR(31 downto 0);
 
+    -- ── SPI signals ───────────────────────────────────────────────────────
+    signal spi_start    : STD_LOGIC;
+    signal spi_busy     : STD_LOGIC;
+    signal spi_rx_data  : STD_LOGIC_VECTOR(7 downto 0);
+    signal spi_cs_n_reg : STD_LOGIC                    := '1';
+    signal spi_clk_div  : UNSIGNED(7 downto 0)         := to_unsigned(14, 8);
+
     -- ── UART signals ──────────────────────────────────────────────────────
     signal uart_valid   : STD_LOGIC;                    -- '1' when a received byte is waiting
     signal uart_busy    : STD_LOGIC;                    -- '1' while transmitter is running
     signal uart_rx_data : STD_LOGIC_VECTOR(7 downto 0); -- the most recently received byte
     signal uart_rd      : STD_LOGIC;   -- pulse to acknowledge / clear the received byte
     signal uart_wr      : STD_LOGIC;   -- pulse to start transmitting a byte
+
+    -- ── Byte-access mode ─────────────────────────────────────────────────
+    signal cpu_is_byte        : STD_LOGIC;                      -- '1' when CPU is doing a byte transfer
 
     -- ── Interrupt signals ────────────────────────────────────────────────
     signal interrupt_pending  : STD_LOGIC;                      -- '1' when any source is requesting
@@ -152,11 +188,39 @@ begin
     -- BTN0 pressed → reset active.  BTN0 released → CPU runs.
     resetn <= not btn(0);
 
-    uart_select <= memory_address(22);
-    bram_select <= '1' when memory_address(22) = '0'
+    uart_select <= memory_address(22) and not memory_address(23);
+    spi_select  <= memory_address(23) and not memory_address(22);
+    bram_select <= '1' when memory_address(23) = '0'
+                        and memory_address(22) = '0'
                         and memory_address(18) = '0' else '0';
-    sram_select <= '1' when memory_address(22) = '0'
+    sram_select <= '1' when memory_address(23) = '0'
+                        and memory_address(22) = '0'
                         and memory_address(18) = '1' else '0';
+
+    -- SPI DATA write: one-cycle pulse when CPU writes to 0x800000 (offset 0)
+    spi_start <= memory_write_enable and spi_select
+                 and not memory_address(3) and not memory_address(2);
+
+    sd_cs_n <= spi_cs_n_reg;
+
+    -- SPI CS# and DIV registers (written by CPU)
+    process(clk)
+    begin
+        if rising_edge(clk) then
+            if resetn = '0' then
+                spi_cs_n_reg <= '1';
+                spi_clk_div  <= to_unsigned(14, 8);
+            elsif memory_write_enable = '1' and spi_select = '1' then
+                -- offset 4 (address bit 2 = 1): CS# register
+                if memory_address(3) = '0' and memory_address(2) = '1' then
+                    spi_cs_n_reg <= memory_write_data(0);
+                -- offset 8 (address bit 3 = 1): DIV register
+                elsif memory_address(3) = '1' and memory_address(2) = '0' then
+                    spi_clk_div <= unsigned(memory_write_data(7 downto 0));
+                end if;
+            end if;
+        end if;
+    end process;
 
     -- uart_rd fires when the CPU reads from the UART address.
     -- This tells the UART "byte has been consumed, you can accept the next one."
@@ -179,6 +243,7 @@ begin
     --   bits 7..0   = uart_rx_data (the byte itself)
     memory_read_data <= sram_read_data      when sram_select = '1' else
                         block_ram_read_data when bram_select = '1' else
+                        (31 downto 9 => '0') & spi_busy & spi_rx_data when spi_select = '1' else
                         (31 downto 10 => '0') & uart_busy & uart_valid & uart_rx_data;
 
     -- ── Block RAM ──────────────────────────────────────────────────────────────
@@ -247,12 +312,28 @@ begin
             cpu_read_enable  => memory_read_enable,
             cpu_write_enable => memory_write_enable,
             cpu_read_data    => sram_read_data,
+            cpu_is_byte      => cpu_is_byte,
             stall            => memory_stall,
             sram_addr        => sram_addr,
             sram_data        => sram_data,
             sram_cen         => sram_cen,
             sram_oen         => sram_oen,
             sram_wen         => sram_wen
+        );
+
+    -- ── SPI master ────────────────────────────────────────────────────────
+    spi0: entity work.spi_master
+        port map (
+            clk     => clk,
+            resetn  => resetn,
+            tx_data => memory_write_data(7 downto 0),
+            rx_data => spi_rx_data,
+            clk_div => spi_clk_div,
+            start   => spi_start,
+            busy    => spi_busy,
+            sck     => sd_sck,
+            mosi    => sd_mosi,
+            miso    => sd_miso
         );
 
     -- ── CPU ───────────────────────────────────────────────────────────────
@@ -271,7 +352,8 @@ begin
             interrupt_request    => interrupt_pending,
             irq_status           => irq_status,
             interrupts_enabled   => interrupts_enabled,
-            memory_stall         => memory_stall
+            memory_stall         => memory_stall,
+            cpu_is_byte          => cpu_is_byte
         );
 
     -- ── LEDs ──────────────────────────────────────────────────────────────

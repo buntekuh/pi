@@ -84,3 +84,13 @@ set_property IOSTANDARD LVCMOS33 [get_ports {sram_data[7]}]
 set_property IOSTANDARD LVCMOS33 [get_ports sram_oen]
 set_property IOSTANDARD LVCMOS33 [get_ports sram_wen]
 set_property IOSTANDARD LVCMOS33 [get_ports sram_cen]
+
+# SD card via Pmod JA
+set_property PACKAGE_PIN G17 [get_ports sd_cs_n]
+set_property PACKAGE_PIN G19 [get_ports sd_mosi]
+set_property PACKAGE_PIN N18 [get_ports sd_miso]
+set_property PACKAGE_PIN L18 [get_ports sd_sck]
+set_property IOSTANDARD LVCMOS33 [get_ports sd_cs_n]
+set_property IOSTANDARD LVCMOS33 [get_ports sd_mosi]
+set_property IOSTANDARD LVCMOS33 [get_ports sd_miso]
+set_property IOSTANDARD LVCMOS33 [get_ports sd_sck]

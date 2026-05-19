@@ -106,6 +106,7 @@ if [ "${MODE}" = "b" ] || [ "${MODE}" = "br" ]; then
         uart.vhd \
         interrupt.vhd \
         sram.vhd \
+        spi.vhd \
         cpu.vhd \
         system.vhd \
         -e SOC > ${PROJECT}_ghdl.v
