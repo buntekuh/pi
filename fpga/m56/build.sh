@@ -29,16 +29,16 @@ for arg in "$@"; do
 done
 
 PROJECT=titania
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-TOOLS_DIR="${SCRIPT_DIR}/../toolchain"
+D="$(cd "$(dirname "$0")" && pwd)"   # absolute path to this script's directory
+TOOLS_DIR="${D}/../toolchain"
 DB_DIR="${TOOLS_DIR}/prjxray-db"
 CHIPDB_DIR="${TOOLS_DIR}/resources"
 
 # Load board-specific constants (PART, CHIPDB, LOADER_PART_FLASH, LOADER_PART_SRAM)
-source board/${BOARD}.sh
+source "${D}/board/${BOARD}.sh"
 
 # Read BLOCK_RAM_WORDS from the board VHDL package so firmware_pkg.vhd matches exactly
-MEM_WORDS=$(grep -oP 'BLOCK_RAM_WORDS\s*:\s*integer\s*:=\s*\K[0-9]+' board/${BOARD}.vhd)
+MEM_WORDS=$(grep -oP 'BLOCK_RAM_WORDS\s*:\s*integer\s*:=\s*\K[0-9]+' "${D}/board/${BOARD}.vhd")
 
 export PATH="${TOOLS_DIR}/bin:${PATH}"
 export LD_LIBRARY_PATH="${TOOLS_DIR}/lib:${LD_LIBRARY_PATH}"
@@ -74,21 +74,22 @@ set -ex
 # then regenerate frames + bitstream.  Skips synthesis and place-and-route.
 # Requires a titania.fasm from a prior full build.
 if [ "${MODE}" = "p" ] || [ "${MODE}" = "pr" ]; then
-    python3 tools/asm.py --mem-words ${MEM_WORDS} firmware/io.s firmware/sd.s firmware/firmware.hex
-    python3 tools/patch_fasm.py ${PROJECT}.fasm firmware/firmware.hex
-    fasm2frames --part ${PART} --db-root "${DB_DIR}/artix7" ${PROJECT}.fasm > ${PROJECT}.frames
+    python3 "${D}/tools/asm.py" --mem-words ${MEM_WORDS} \
+        "${D}/firmware/io.s" "${D}/firmware/sd.s" "${D}/firmware/firmware.hex"
+    python3 "${D}/tools/patch_fasm.py" "${D}/${PROJECT}.fasm" "${D}/firmware/firmware.hex"
+    fasm2frames --part ${PART} --db-root "${DB_DIR}/artix7" "${D}/${PROJECT}.fasm" > "${D}/${PROJECT}.frames"
     xc7frames2bit \
         --part_file "${DB_DIR}/artix7/${PART}/part.yaml" \
         --part_name ${PART} \
-        --frm_file ${PROJECT}.frames \
-        --output_file ${PROJECT}.bit
+        --frm_file "${D}/${PROJECT}.frames" \
+        --output_file "${D}/${PROJECT}.bit"
 fi
 
 if [ "${MODE}" = "pr" ]; then
     if [ "${FLASH}" = "flash" ]; then
-        openFPGALoader --freq 30e6 -c digilent --fpga-part ${LOADER_PART_FLASH} -f ${PROJECT}.bit
+        openFPGALoader --freq 30e6 -c digilent --fpga-part ${LOADER_PART_FLASH} -f "${D}/${PROJECT}.bit"
     else
-        openFPGALoader --freq 30e6 -c digilent --fpga-part ${LOADER_PART_SRAM} ${PROJECT}.bit
+        openFPGALoader --freq 30e6 -c digilent --fpga-part ${LOADER_PART_SRAM} "${D}/${PROJECT}.bit"
     fi
 fi
 
@@ -96,41 +97,42 @@ fi
 if [ "${MODE}" = "b" ] || [ "${MODE}" = "br" ]; then
 
     # Step 1: assemble firmware → hex + VHDL init package
-    python3 tools/asm.py --mem-words ${MEM_WORDS} firmware/io.s firmware/sd.s firmware/firmware.hex
+    python3 "${D}/tools/asm.py" --mem-words ${MEM_WORDS} \
+        "${D}/firmware/io.s" "${D}/firmware/sd.s" "${D}/firmware/firmware.hex"
 
     # Step 2: GHDL synthesises VHDL → Verilog
     ghdl synth --std=08 --out=verilog \
-        board/${BOARD}.vhd \
-        firmware/firmware_pkg.vhd \
-        decoder.vhd \
-        uart.vhd \
-        interrupt.vhd \
-        sram.vhd \
-        spi.vhd \
-        cpu.vhd \
-        system.vhd \
-        -e SOC > ${PROJECT}_ghdl.v
+        "${D}/board/${BOARD}.vhd" \
+        "${D}/firmware/firmware_pkg.vhd" \
+        "${D}/decoder.vhd" \
+        "${D}/uart.vhd" \
+        "${D}/interrupt.vhd" \
+        "${D}/sram.vhd" \
+        "${D}/spi.vhd" \
+        "${D}/cpu.vhd" \
+        "${D}/system.vhd" \
+        -e SOC > "${D}/${PROJECT}_ghdl.v"
 
     # Step 3: yosys synthesises to Xilinx netlist
-    yosys -p "read_verilog -sv ${PROJECT}_ghdl.v; \
+    yosys -p "read_verilog -sv ${D}/${PROJECT}_ghdl.v; \
               synth_xilinx -nowidelut -flatten -abc9 -arch xc7 -top SOC; \
-              delete t:\$scopeinfo; write_json ${PROJECT}.json"
+              delete t:\$scopeinfo; write_json ${D}/${PROJECT}.json"
 
     # Step 4: place & route
     nextpnr-xilinx \
         --chipdb ${CHIPDB_DIR}/${CHIPDB} \
-        --xdc board/${BOARD}.xdc \
-        --json ${PROJECT}.json \
-        --write ${PROJECT}_routed.json \
-        --fasm ${PROJECT}.fasm
+        --xdc "${D}/board/${BOARD}.xdc" \
+        --json "${D}/${PROJECT}.json" \
+        --write "${D}/${PROJECT}_routed.json" \
+        --fasm "${D}/${PROJECT}.fasm"
 
     # Step 5: bitstream
-    fasm2frames --part ${PART} --db-root "${DB_DIR}/artix7" ${PROJECT}.fasm > ${PROJECT}.frames
+    fasm2frames --part ${PART} --db-root "${DB_DIR}/artix7" "${D}/${PROJECT}.fasm" > "${D}/${PROJECT}.frames"
     xc7frames2bit \
         --part_file "${DB_DIR}/artix7/${PART}/part.yaml" \
         --part_name ${PART} \
-        --frm_file ${PROJECT}.frames \
-        --output_file ${PROJECT}.bit
+        --frm_file "${D}/${PROJECT}.frames" \
+        --output_file "${D}/${PROJECT}.bit"
 
 fi
 
@@ -139,10 +141,10 @@ if [ "${MODE}" = "r" ] || [ "${MODE}" = "br" ]; then
     # Step 6: load to board
     if [ "${FLASH}" = "flash" ]; then
         # Write to flash — bitstream survives power cycle
-        openFPGALoader --freq 30e6 -c digilent --fpga-part ${LOADER_PART_FLASH} -f ${PROJECT}.bit
+        openFPGALoader --freq 30e6 -c digilent --fpga-part ${LOADER_PART_FLASH} -f "${D}/${PROJECT}.bit"
     else
         # Load to SRAM — fast, but lost on power cycle
-        openFPGALoader --freq 30e6 -c digilent --fpga-part ${LOADER_PART_SRAM} ${PROJECT}.bit
+        openFPGALoader --freq 30e6 -c digilent --fpga-part ${LOADER_PART_SRAM} "${D}/${PROJECT}.bit"
     fi
 
 fi
