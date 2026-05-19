@@ -80,19 +80,23 @@ def words_to_inits(words, tile_names):
     Returns dict { (tile_name, half, init_idx): hex_string_64_chars }.
     Y0 holds bits[15:0], Y1 holds bits[31:16] of each word.
     Words are packed LSB-first within each 256-bit INIT register.
+
+    nextpnr-xilinx lays INIT registers in reverse address order:
+    INIT_3F holds words 0-15, INIT_00 holds words 1008-1023.
     """
     result = {}
     for tile_idx, tile_name in enumerate(tile_names):
         base = tile_idx * WORDS_PER_TILE
         tile_words = list(words[base : base + WORDS_PER_TILE])
         tile_words += [0] * (WORDS_PER_TILE - len(tile_words))
-        for init_idx in range(64):
+        for word_block in range(64):
+            fasm_idx = 63 - word_block  # INIT_3F = words 0-15, INIT_00 = words 1008-1023
             for half, shift in (('RAMB18_Y0', 0), ('RAMB18_Y1', 16)):
                 val = 0
                 for word_in_block in range(15, -1, -1):
-                    bits = (tile_words[init_idx * 16 + word_in_block] >> shift) & 0xFFFF
+                    bits = (tile_words[word_block * 16 + word_in_block] >> shift) & 0xFFFF
                     val = (val << 16) | bits
-                result[(tile_name, half, init_idx)] = f'{val:064X}'
+                result[(tile_name, half, fasm_idx)] = f'{val:064X}'
     return result
 
 
@@ -101,12 +105,14 @@ def inits_to_words(tiles):
     Reconstruct 32-bit words from a parsed tile list.
 
     tiles: list of (tile_name, y0_dict, y1_dict) in address order.
+    nextpnr-xilinx stores INIT registers in reverse: INIT_3F = words 0-15.
     """
     words = []
     for _, y0, y1 in tiles:
-        for init_idx in range(64):
-            h0 = int(y0.get(init_idx, '0' * 64), 16)
-            h1 = int(y1.get(init_idx, '0' * 64), 16)
+        for word_block in range(64):
+            fasm_idx = 63 - word_block  # INIT_3F = words 0-15
+            h0 = int(y0.get(fasm_idx, '0' * 64), 16)
+            h1 = int(y1.get(fasm_idx, '0' * 64), 16)
             for word_in_block in range(16):
                 shift = word_in_block * 16
                 lo = (h0 >> shift) & 0xFFFF
