@@ -86,19 +86,24 @@ putc_wait:
 
 ; ── puts ─────────────────────────────────────────────────────────────────────
 ; Transmit null-terminated string. R0 = base address (one char per word).
-; Clobbers R0–R2.
+; Word reads avoid the mvb BRAM byte-read hardware bug.
+; Clobbers R0–R2. Preserves R3.
 puts:
-        mov-h   #0x400, R1
+        psh     R3
+        mov-h   #0x400, R3          ; R3 = 0x400000 (UART)
 puts_loop:
-        mov     [R1], R2            ; wait for TX ready
-        and     R2, #0x200
-        bar.nz  R2, puts_loop
-        mvb     [R0], R2            ; read next char
+        mov     [R0], R2            ; word-read next char from BRAM
+        and     R2, #0xFF
         bar.z   R2, puts_done       ; null terminator
-        mvb     R2, [R1]            ; transmit
+puts_txwait:
+        mov     [R3], R1
+        and     R1, #0x200          ; bit 9 = TX busy
+        bar.nz  R1, puts_txwait
+        mvb     R2, [R3]            ; transmit byte (UART write, not BRAM read)
         add     R0, #4
         bar     puts_loop
 puts_done:
+        pop     R3
         ret
 
 ; ── getc ─────────────────────────────────────────────────────────────────────
@@ -131,6 +136,9 @@ main:
         mov     R0, [R1]
 
         eai                         ; enable interrupts
+
+        mov     #'!', R0            ; diagnostic: '!' confirms CPU reaches here
+        cal     putc
 
         mov     #greeting, R0
         cal     puts
@@ -213,4 +221,4 @@ rxbuf:
 rxbuf_end:
 
 greeting:
-        .str    "Titania M56\r\n"
+        .str    "Titania M56 durchscheinen.\r\n"
