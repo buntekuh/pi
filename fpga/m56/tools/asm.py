@@ -318,22 +318,35 @@ def vhdl_pkg(words, mem_words=57600):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) < 2:
-        sys.exit(f'usage: {sys.argv[0]} input.s [output.hex]')
+    import argparse
+    ap = argparse.ArgumentParser(description='M56 assembler')
+    ap.add_argument('--mem-words', type=int, default=57600,
+                    help='firmware_pkg.vhd array size (must match BLOCK_RAM_WORDS)')
+    # Convention: last positional is the .hex output; all others are .s inputs
+    ap.add_argument('files', nargs='+', help='input.s [input2.s ...] output.hex')
+    args = ap.parse_args()
 
-    with open(sys.argv[1]) as f:
-        words = assemble(f.read())
+    if len(args.files) < 2:
+        ap.error('provide at least one .s input and one .hex output')
+
+    input_paths = args.files[:-1]
+    output_path = args.files[-1]
+
+    src = ''
+    for path in input_paths:
+        with open(path) as f:
+            src += f.read() + '\n'
+    words = assemble(src)
 
     hex_lines = [f'{w:08X}' for w in words]
 
-    if len(sys.argv) >= 3:
-        base = sys.argv[2].removesuffix('.hex')
-        with open(sys.argv[2], 'w') as f:
-            f.write('\n'.join(hex_lines) + '\n')
-        pkg_path = base + '_pkg.vhd'
-        with open(pkg_path, 'w') as f:
-            f.write(vhdl_pkg(words))
-        print(f'wrote {len(words)} words → {sys.argv[2]}  and  {pkg_path}')
+    base = output_path.removesuffix('.hex')
+    with open(output_path, 'w') as f:
+        f.write('\n'.join(hex_lines) + '\n')
+    pkg_path = base + '_pkg.vhd'
+    with open(pkg_path, 'w') as f:
+        f.write(vhdl_pkg(words, mem_words=args.mem_words))
+    print(f'wrote {len(words)} words → {output_path}  and  {pkg_path}')
 
     for i, (w, h) in enumerate(zip(words, hex_lines)):
         print(f'0x{i*4:04X}  {h}')
