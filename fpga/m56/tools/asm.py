@@ -114,7 +114,7 @@ def assemble(source):
         s = s.replace('\\r', '\r').replace('\\n', '\n').replace('\\t', '\t').replace('\\0', '\0')
         return [ord(c) for c in s] + [0]
 
-    # Pass 1 — assign an address to every label
+    # Pass 1 — assign an address to every label; resolve .equ constants
     symbols = {}
     pc = 0
     for line in lines:
@@ -123,7 +123,16 @@ def assemble(source):
         if line.endswith(':'):
             symbols[line[:-1]] = pc
             continue
+        if '=' in line and not line.startswith('.'):
+            name, _, val = line.partition('=')
+            symbols[name.strip()] = int(val.strip(), 0)
+            continue
         mn1 = line.split()[0].lower()
+        if mn1 == '.equ':
+            _, rest = line.split(None, 1)
+            name, _, val = rest.partition(',')
+            symbols[name.strip()] = int(val.strip(), 0)
+            continue
         if mn1 == '.str':
             pc += len(str_chars(line.split(None, 1)[1])) * 4
         else:
@@ -134,6 +143,10 @@ def assemble(source):
     pc = 0
     for line in lines:
         if not line or line.endswith(':'):
+            continue
+        if '=' in line and not line.startswith('.'):
+            continue
+        if line.split()[0].lower() == '.equ':
             continue
 
         parts = line.split(None, 1)
@@ -245,8 +258,13 @@ def assemble(source):
             continue
 
         # --- mov-h #imm20, Rdst — load into bits 31..12 ---
+        # Accepts either the pre-shifted value (#0x400) or a full address
+        # (uart_reg = 0x400000): values > 20 bits are right-shifted by 12.
         if mn == 'mov-h':
-            words.append(encode(0, 1, reg(ops[1]), imm(ops[0])))
+            val = resolve(ops[0], symbols)
+            if val > 0xFFFFF:
+                val >>= 12
+            words.append(encode(0, 1, reg(ops[1]), val))
             pc += 4
             continue
 

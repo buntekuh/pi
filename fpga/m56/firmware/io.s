@@ -49,7 +49,7 @@ handler:
         bar.z   R0, irq_btn1
 
         ; Read byte from UART — also clears uart_rx_valid
-        mov-h   #0x400, R1          ; R1 = 0x400000
+        mov-h   uart_reg, R1        ; R1 = 0x400000
         mov     [R1], R0            ; R0 = status word (bits 7:0 = byte)
         and     R0, #0xFF
 
@@ -297,4 +297,4 @@ rxbuf:
 rxbuf_end:
 
 greeting:
-        .str    "Titania M56 pilfering Papa.\r\n"
+        .str    "Titania M56 tasty Toad.\r\n"
