@@ -18,11 +18,9 @@
 ;
 ; ─── Stack ───────────────────────────────────────────────────────────────────
 ;
-;   R14 (SP) is initialised to the top of BRAM by the CPU at reset.
-;   The stack grows downward; code and data grow upward from 0x000000.
-;   They meet in the middle as both expand — there is no hardware guard and
-;   no overflow detection.  A stack that grows into data or code corrupts
-;   silently.
+;   R14 (SP) is initialised to 0x0BFFFC (top of SRAM) by the CPU at reset.
+;   The stack lives in SRAM and grows downward.  Code and data live in BRAM
+;   growing upward from 0x000000.  There is no hardware guard between them.
 ;
 ; ─── Calling convention ──────────────────────────────────────────────────────
 ;
@@ -137,8 +135,20 @@ main:
 
         eai                         ; enable interrupts
 
-        mov     #'!', R0            ; diagnostic: '!' confirms CPU reaches here
+        ; SRAM test: write 0xABCD to 0x040000, read back, print S or F
+        mov     #0xABCD, R0
+        mov-h   #0x040, R1          ; R1 = 0x040000 (SRAM base)
+        mov     R0, [R1]            ; write to SRAM
+        mov     [R1], R2            ; read back
+        sub     R2, R0
+        bar.z   R2, sram_ok
+        mov     #'F', R0
         cal     putc
+        bar     sram_done
+sram_ok:
+        mov     #'S', R0
+        cal     putc
+sram_done:
 
         mov     #greeting, R0
         cal     puts
@@ -221,4 +231,4 @@ rxbuf:
 rxbuf_end:
 
 greeting:
-        .str    "Titania M56 durchscheinen.\r\n"
+        .str    "Titania M56 tiny Tots.\r\n"

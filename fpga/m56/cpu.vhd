@@ -462,7 +462,11 @@ begin
                 -- ── LOAD_WAIT ───────────────────────────────────────────────
                 -- Wait for BRAM or SRAM read to settle.
                 -- SRAM controller asserts memory_stall until all byte transfers complete.
+                -- Read enable must be deasserted here: the SRAM stall is combinatorial
+                -- and goes '1' the instant its state returns to IDLE with read_enable
+                -- still high, immediately launching a second transfer and looping forever.
                 when LOAD_WAIT =>
+                    memory_read_enable <= '0';
                     if memory_stall = '0' then
                         state <= LOAD;
                     end if;

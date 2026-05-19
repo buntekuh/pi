@@ -74,7 +74,7 @@ set -ex
 # then regenerate frames + bitstream.  Skips synthesis and place-and-route.
 # Requires a titania.fasm from a prior full build.
 if [ "${MODE}" = "p" ] || [ "${MODE}" = "pr" ]; then
-    python3 tools/asm.py --mem-words ${MEM_WORDS} firmware/io.s firmware/firmware.hex
+    python3 tools/asm.py --mem-words ${MEM_WORDS} firmware/io.s firmware/sd.s firmware/firmware.hex
     python3 tools/patch_fasm.py ${PROJECT}.fasm firmware/firmware.hex
     fasm2frames --part ${PART} --db-root "${DB_DIR}/artix7" ${PROJECT}.fasm > ${PROJECT}.frames
     xc7frames2bit \
@@ -96,7 +96,7 @@ fi
 if [ "${MODE}" = "b" ] || [ "${MODE}" = "br" ]; then
 
     # Step 1: assemble firmware → hex + VHDL init package
-    python3 tools/asm.py --mem-words ${MEM_WORDS} firmware/io.s firmware/firmware.hex
+    python3 tools/asm.py --mem-words ${MEM_WORDS} firmware/io.s firmware/sd.s firmware/firmware.hex
 
     # Step 2: GHDL synthesises VHDL → Verilog
     ghdl synth --std=08 --out=verilog \
