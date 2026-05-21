@@ -100,15 +100,15 @@ architecture rtl of m56_cpu is
     signal d_is_not   : std_logic;
     signal d_is_shf   : std_logic;
     signal d_is_sar   : std_logic;
-    signal d_is_jmp   : std_logic;
-    signal d_is_jpr   : std_logic;
     signal d_is_bra   : std_logic;
     signal d_is_bar   : std_logic;
+    signal d_is_cal   : std_logic;
+    signal d_is_car   : std_logic;
     signal d_is_wfi   : std_logic;
     signal d_is_eai   : std_logic;
     signal d_is_dai   : std_logic;
     signal d_is_rti   : std_logic;
-    signal d_jmp_cond : std_logic_vector(2 downto 0);
+    signal d_bra_cond : std_logic_vector(2 downto 0);
 
     -- Interrupt enable flag.  Starts disabled at reset.
     signal interrupts_enabled_reg : std_logic := '0';
@@ -133,15 +133,15 @@ begin
             is_not   => d_is_not,
             is_shf   => d_is_shf,
             is_sar   => d_is_sar,
-            is_jmp   => d_is_jmp,
-            is_jpr   => d_is_jpr,
             is_bra   => d_is_bra,
             is_bar   => d_is_bar,
+            is_cal   => d_is_cal,
+            is_car   => d_is_car,
             is_wfi   => d_is_wfi,
             is_eai   => d_is_eai,
             is_dai   => d_is_dai,
             is_rti   => d_is_rti,
-            jmp_cond => d_jmp_cond
+            bra_cond => d_bra_cond
         );
 
     -- ── Main clocked process ─────────────────────────────────────────────────
@@ -348,12 +348,12 @@ begin
                         memory_read_enable <= '1';
                         state <= FETCH;
 
-                    -- ── jmp / bra — absolute jump or call ────────────────────
-                    -- jmp (d_is_jmp): goto, no return address saved.
-                    -- bra (d_is_bra): call, pushes return address before jumping.
-                    elsif d_is_jmp = '1' or d_is_bra = '1' then
+                    -- ── bra / cal — absolute goto or call ───────────────────
+                    -- bra (d_is_bra): goto, no return address saved.
+                    -- cal (d_is_cal): call, pushes return address before jumping.
+                    elsif d_is_bra = '1' or d_is_cal = '1' then
                         take_branch := false;
-                        case d_jmp_cond is
+                        case d_bra_cond is
                             when "000" => take_branch := true;
                             when "001" => take_branch := (registers(register_index) = x"00000000");
                             when "010" => take_branch := (registers(register_index) /= x"00000000");
@@ -363,7 +363,7 @@ begin
                         end case;
                         if take_branch then
                             next_pc := (31 downto 20 => '0') & d_imm20;
-                            if d_is_bra = '1' then
+                            if d_is_cal = '1' then
                                 registers(14) <= std_logic_vector(unsigned(registers(14)) - 4);
                                 memory_address    <= std_logic_vector(unsigned(registers(14)) - 4);
                                 memory_write_data <= registers(15);
@@ -381,13 +381,13 @@ begin
                             state <= FETCH;
                         end if;
 
-                    -- ── jpr / bar — relative jump or call ────────────────────
-                    -- jpr (d_is_jpr): goto PC+offset, no return address saved.
-                    -- bar (d_is_bar): call PC+offset, pushes return address.
+                    -- ── bar / car — relative goto or call ───────────────────
+                    -- bar (d_is_bar): goto PC+offset, no return address saved.
+                    -- car (d_is_car): call PC+offset, pushes return address.
                     -- PC here is registers(15) = instruction address + 4 (set in FETCH).
-                    elsif d_is_jpr = '1' or d_is_bar = '1' then
+                    elsif d_is_bar = '1' or d_is_car = '1' then
                         take_branch := false;
-                        case d_jmp_cond is
+                        case d_bra_cond is
                             when "000" => take_branch := true;
                             when "001" => take_branch := (registers(register_index) = x"00000000");
                             when "010" => take_branch := (registers(register_index) /= x"00000000");
@@ -397,7 +397,7 @@ begin
                         end case;
                         if take_branch then
                             next_pc := std_logic_vector(unsigned(registers(15)) + unsigned(d_imm32));
-                            if d_is_bar = '1' then
+                            if d_is_car = '1' then
                                 registers(14) <= std_logic_vector(unsigned(registers(14)) - 4);
                                 memory_address    <= std_logic_vector(unsigned(registers(14)) - 4);
                                 memory_write_data <= registers(15);

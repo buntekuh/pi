@@ -12,7 +12,7 @@ Memory map (finalised):
 ISA (finalised):
 - 32-bit instructions: `opcode(5) | mode(3) | register(4) | imm20(20)`
 - 18 opcodes: mov mvb add sub and orr xor not shf sar bra bar cal car wfi eai dai rti
-- jmp/jpr = goto (no return); bra/bar = subroutine call (pushes return address)
+- bra/bar = goto (no return); cal/car = subroutine call (pushes return address)
 - Full 737 KB (BRAM + SRAM) directly addressable with imm20
 
 Remaining steps:
@@ -22,8 +22,8 @@ Remaining steps:
    *Note: consider moving dispatch into hardware (interrupt controller in VHDL
    that fetches the handler address and jumps directly, bypassing the software
    table). Decision deferred until SD card IRQ pattern is known.*
-3. **Software multiply and divide (`_mul`, `_div`)** in assembly — these are the
-   M56 backend's implementation of the T-code `MUL` and `DIV` opcodes. The M56
+3. **Software multiply and divide (`mul`, `div`, `mod`)** in assembly — these are the
+   M56 backend's implementation of the T-code pseudo-opcodes. The M56
    runtime library is linked into every M56 binary automatically; the T-code
    emitter never needs to know they are subroutines rather than single
    instructions.

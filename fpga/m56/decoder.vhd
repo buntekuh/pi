@@ -11,15 +11,15 @@
 --   Bit  23..20   regn    (4 bits) — register number (0-15)
 --   Bit  19..0    imm20  (20 bits) — immediate value, offset, or 2nd register
 --
--- For jump/branch instructions (jmp/jpr/bra/bar) the mode field carries
+-- For branch/call instructions (bra/bar/cal/car) the mode field carries
 -- the condition code:
 --   Bits 26..24: condition — 000=always 001=zero 010=nonzero 011=neg 100=non-neg
 --   Bits 23..20: Rcmp — register to test against the condition
 --
 -- Whether the instruction is a subroutine call (saves return address) is
 -- encoded in the opcode itself:
---   jmp (10) / jpr (11) — goto, no return address saved
---   bra (12) / bar (13) — call, pushes return address onto stack
+--   bra (10) / bar (11) — goto, no return address saved
+--   cal (12) / car (13) — call, pushes return address onto stack
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -46,18 +46,18 @@ entity M56_Decoder is
         is_not   : out std_logic;   -- opcode  7 : bitwise NOT
         is_shf   : out std_logic;   -- opcode  8 : logical shift
         is_sar   : out std_logic;   -- opcode  9 : arithmetic shift right
-        is_jmp   : out std_logic;   -- opcode 10 : absolute goto
-        is_jpr   : out std_logic;   -- opcode 11 : relative goto
-        is_bra   : out std_logic;   -- opcode 12 : absolute subroutine call
-        is_bar   : out std_logic;   -- opcode 13 : relative subroutine call
+        is_bra   : out std_logic;   -- opcode 10 : absolute goto
+        is_bar   : out std_logic;   -- opcode 11 : relative goto
+        is_cal   : out std_logic;   -- opcode 12 : absolute subroutine call
+        is_car   : out std_logic;   -- opcode 13 : relative subroutine call
         is_wfi   : out std_logic;   -- opcode 14 : wait for interrupt
         is_eai   : out std_logic;   -- opcode 15 : enable interrupts
         is_dai   : out std_logic;   -- opcode 16 : disable interrupts
         is_rti   : out std_logic;   -- opcode 17 : return from interrupt
 
-        -- Condition code for jump/branch instructions (only meaningful when
-        -- is_jmp, is_jpr, is_bra, or is_bar is '1').
-        jmp_cond : out std_logic_vector(2 downto 0)    -- condition: 000=always 001=zero 010=nonzero
+        -- Condition code for branch/call instructions (only meaningful when
+        -- is_bra, is_bar, is_cal, or is_car is '1').
+        bra_cond : out std_logic_vector(2 downto 0)    -- condition: 000=always 001=zero 010=nonzero
                                                        --            011=negative 100=non-negative
     );
 end entity M56_Decoder;
@@ -87,17 +87,17 @@ begin
     is_not <= '1' when op = "00111" else '0';   -- opcode  7
     is_shf <= '1' when op = "01000" else '0';   -- opcode  8
     is_sar <= '1' when op = "01001" else '0';   -- opcode  9
-    is_jmp <= '1' when op = "01010" else '0';   -- opcode 10
-    is_jpr <= '1' when op = "01011" else '0';   -- opcode 11
-    is_bra <= '1' when op = "01100" else '0';   -- opcode 12
-    is_bar <= '1' when op = "01101" else '0';   -- opcode 13
+    is_bra <= '1' when op = "01010" else '0';   -- opcode 10
+    is_bar <= '1' when op = "01011" else '0';   -- opcode 11
+    is_cal <= '1' when op = "01100" else '0';   -- opcode 12
+    is_car <= '1' when op = "01101" else '0';   -- opcode 13
     is_wfi <= '1' when op = "01110" else '0';   -- opcode 14
     is_eai <= '1' when op = "01111" else '0';   -- opcode 15
     is_dai <= '1' when op = "10000" else '0';   -- opcode 16
     is_rti <= '1' when op = "10001" else '0';   -- opcode 17
 
     -- The condition code is the 3-bit mode field — same field, always wired.
-    -- The CPU only uses this when is_jmp/is_jpr/is_bra/is_bar is asserted.
-    jmp_cond <= instruction(26 downto 24);
+    -- The CPU only uses this when is_bra/is_bar/is_cal/is_car is asserted.
+    bra_cond <= instruction(26 downto 24);
 
 end architecture rtl;

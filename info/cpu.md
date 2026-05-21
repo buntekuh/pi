@@ -71,11 +71,11 @@ fixed addresses — the implementation behind them may change, but the addresses
 never move.
 
 ```
-0x001000   _mul      jmp  mul_impl    ; software multiply
-0x001004   _div      jmp  div_impl    ; software divide
-0x001008   _mod      jmp  mod_impl    ; software modulo
-0x00100C   _print    jmp  print_impl  ; print null-terminated string — Rsrc = pointer
-0x001010   _printnum jmp  printnum_impl ; print integer to UART — Rsrc = value
+0x001000   mul       bra  mul_impl    ; software multiply
+0x001004   div       bra  div_impl    ; software divide
+0x001008   mod       bra  mod_impl    ; software modulo
+0x00100C   _print    bra  print_impl  ; print null-terminated string — Rsrc = pointer
+0x001010   _printnum bra  printnum_impl ; print integer to UART — Rsrc = value
 ...
 ```
 
@@ -114,10 +114,10 @@ field carries exactly what each mode needs. It is never split arbitrarily.
 | 7    | not      | Bitwise NOT (unary, in place) |
 | 8    | shf      | Logical shift — signed count, positive=left, negative=right |
 | 9    | sar      | Arithmetic shift right — sign bit replicated |
-| 10   | jmp      | Conditional absolute jump — goto, no return address saved |
-| 11   | jpr      | Conditional relative jump — goto, PC-relative offset |
-| 12   | bra      | Conditional absolute branch — subroutine call, saves return address |
-| 13   | bar      | Conditional relative branch — subroutine call, PC-relative |
+| 10   | bra      | Conditional absolute branch — goto, no return address saved |
+| 11   | bar      | Conditional relative branch — goto, PC-relative offset |
+| 12   | cal      | Conditional absolute call — subroutine call, saves return address |
+| 13   | car      | Conditional relative call — subroutine call, PC-relative |
 | 14   | wfi      | Wait for interrupt — suspends execution until an interrupt fires |
 | 15   | eai      | Enable interrupts |
 | 16   | dai      | Disable interrupts |
@@ -125,8 +125,8 @@ field carries exactly what each mode needs. It is never split arbitrarily.
 
 Opcodes 18–31 are reserved for future use.
 
-**jump** (`jmp`, `jpr`) transfers control without saving anything — a goto.
-**branch** (`bra`, `bar`) saves the return address on the stack before jumping —
+**branch** (`bra`, `bar`) transfers control without saving anything — a goto.
+**call** (`cal`, `car`) saves the return address on the stack before jumping —
 a subroutine call. The difference is in the opcode, not a mode bit.
 
 ### Assembler Macros
@@ -134,20 +134,19 @@ a subroutine call. The difference is in the opcode, not a mode bit.
 Conveniences that expand to real instructions. Not in hardware.
 
 ```
-jmp    label          →  jmp.al  label
-jpr    label          →  jpr.al  label
 bra    label          →  bra.al  label
 bar    label          →  bar.al  label
+cal    label          →  cal.al  label
+car    label          →  car.al  label
 psh Rsrc              →  sub SP, #4 ; mov Rsrc, [SP]
 pop Rdst              →  mov [SP], Rdst ; add SP, #4
-cal label             →  bra label
 ret                   →  rts
 nop                   →  add R0, #0
 clr Rdst              →  xor Rdst, Rdst
 inc Rdst              →  add Rdst, #1
 dec Rdst              →  sub Rdst, #1
-mul Rsrc, Rdst        →  bra _mul
-div Rsrc, Rdst        →  bra _div
+mul Rsrc, Rdst        →  cal mul
+div Rsrc, Rdst        →  cal div
 shl Rsrc, #n          →  shf Rsrc, #n
 shr Rsrc, #n          →  shf Rsrc, #-n
 ```
@@ -157,9 +156,9 @@ shr Rsrc, #n          →  shf Rsrc, #-n
 Complex operations implemented once in ROM, called by convention:
 
 ```
-_mul      software multiply    — shift-and-add
-_div      software divide      — shift-and-subtract
-_mod      software modulo
+mul       software multiply    — shift-and-add
+div       software divide      — shift-and-subtract
+mod       software modulo
 _print    print null-terminated string to UART — Rsrc = string pointer
 _printnum print integer as decimal to UART    — Rsrc = value
 ```
@@ -317,10 +316,10 @@ Four opcodes for control flow transfer:
 
 | Opcode | Mnemonic | Addressing | Return address |
 |--------|----------|------------|----------------|
-| 10 | `jmp` | absolute (imm20) | not saved — goto |
-| 11 | `jpr` | relative (PC + imm20) | not saved — goto |
-| 12 | `bra` | absolute (imm20) | pushed on stack — call |
-| 13 | `bar` | relative (PC + imm20) | pushed on stack — call |
+| 10 | `bra` | absolute (imm20) | not saved — goto |
+| 11 | `bar` | relative (PC + imm20) | not saved — goto |
+| 12 | `cal` | absolute (imm20) | pushed on stack — call |
+| 13 | `car` | relative (PC + imm20) | pushed on stack — call |
 
 Encoding: `opcode(5) | cond(3) | Rcmp(4) | address/offset(20)`
 
@@ -340,20 +339,20 @@ The 3-bit mode field carries the condition code:
 Rcmp is a register operand. When condition is `.al`, Rcmp is unused; the assembler writes zeros.
 
 ```asm
-jmp      label           ; absolute goto, unconditional
-jmp.z    Rcmp, label     ; absolute goto if Rcmp == 0
-jmp.nz   Rcmp, label     ; absolute goto if Rcmp != 0
-jmp.n    Rcmp, label     ; absolute goto if Rcmp < 0
-jmp.nn   Rcmp, label     ; absolute goto if Rcmp >= 0
+bra      label           ; absolute goto, unconditional
+bra.z    Rcmp, label     ; absolute goto if Rcmp == 0
+bra.nz   Rcmp, label     ; absolute goto if Rcmp != 0
+bra.n    Rcmp, label     ; absolute goto if Rcmp < 0
+bra.nn   Rcmp, label     ; absolute goto if Rcmp >= 0
 
-jpr      label           ; relative goto, unconditional
-jpr.z    Rcmp, label     ; relative goto if Rcmp == 0
+bar      label           ; relative goto, unconditional
+bar.z    Rcmp, label     ; relative goto if Rcmp == 0
 
-bra      label           ; absolute call, unconditional
-bra.nz   Rcmp, label     ; absolute call if Rcmp != 0
+cal      label           ; absolute call, unconditional
+cal.nz   Rcmp, label     ; absolute call if Rcmp != 0
 
-bar      label           ; relative call, unconditional
-bar.z    Rcmp, label     ; relative call if Rcmp == 0
+car      label           ; relative call, unconditional
+car.z    Rcmp, label     ; relative call if Rcmp == 0
 ```
 
 For computed jumps (function pointers, dispatch tables), write directly to R15:
