@@ -1,7 +1,7 @@
 # M56 CPU
 
 The M56 is a 32-bit RISC CPU. Instructions are 32 bits wide. All registers are
-32-bit. The physical address space covers 1 MB (imm20 range), mapped as follows:
+32-bit. The physica address space covers 1 MB (imm20 range), mapped as follows:
 
 ---
 
@@ -14,7 +14,7 @@ The M56 is a 32-bit RISC CPU. Instructions are 32 bits wide. All registers are
 | R0–R2  |       | Scratch registers                                |
 | R3     |       | Leaf return address (by convention)              |
 | R4–R12 |       | General purpose                                  |
-| R13    | LR    | Interrupt link register — hardware saves PC here on interrupt entry |
+| R13    |       | Written with irq_status word by hardware on interrupt entry; read by `rti` as return address after handler restores it from the stack |
 | R14    | SP    | Stack pointer. Stack grows downward.             |
 | R15    | PC    | Program counter. Advances by 4 after each fetch. |
 
@@ -86,7 +86,7 @@ never move.
 Every instruction is exactly **32 bits**, 4-byte aligned in memory.
 
 ```
-Bit  31..27   opcode    (5 bits)   — 32 possible opcodes, 18 defined
+Bit  31..27   opcode    (5 bits)   — 32 possible opcodes, 20 defined
 Bit  26..24   mode      (3 bits)   — addressing mode (modes 0–6 used; 7 reserved)
 Bit  23..20   register  (4 bits)   — one explicit register
 Bit  19..0    imm20    (20 bits)   — immediate, offset, or second register
@@ -100,7 +100,7 @@ field carries exactly what each mode needs. It is never split arbitrarily.
 
 ## Opcodes
 
-18 real opcodes. Everything else is an assembler macro or a ROM subroutine.
+20 hardware opcodes. Above them: T-code pseudo-opcodes (portable across all Titania targets) and M56-only assembler macros.
 
 | Code | Mnemonic | Description |
 |------|----------|-------------|
@@ -112,7 +112,7 @@ field carries exactly what each mode needs. It is never split arbitrarily.
 | 5    | orr      | Bitwise OR |
 | 6    | xor      | Bitwise XOR |
 | 7    | not      | Bitwise NOT (unary, in place) |
-| 8    | shf      | Logical shift — signed count, positive=left, negative=right |
+| 8    | shf      | Logica shift — signed count, positive=left, negative=right |
 | 9    | sar      | Arithmetic shift right — sign bit replicated |
 | 10   | bra      | Conditional absolute branch — goto, no return address saved |
 | 11   | bar      | Conditional relative branch — goto, PC-relative offset |
@@ -122,45 +122,66 @@ field carries exactly what each mode needs. It is never split arbitrarily.
 | 15   | eai      | Enable interrupts |
 | 16   | dai      | Disable interrupts |
 | 17   | rti      | Return from interrupt — enable interrupts and jump to R13 |
+| 18   | iba     | Conditional indirect goto — jump to address in register |
+| 19   | ica     | Conditional indirect call — push return address, jump to register |
 
-Opcodes 18–31 are reserved for future use.
+Opcodes 20–31 are reserved for future use.
 
 **branch** (`bra`, `bar`) transfers control without saving anything — a goto.
 **call** (`cal`, `car`) saves the return address on the stack before jumping —
 a subroutine call. The difference is in the opcode, not a mode bit.
+**indirect** (`iba`, `ica`) — same semantics as bra/cal but the target address comes from a register rather than an immediate. Used for function pointers and virtual dispatch.
 
-### Assembler Macros
+### T-code Pseudo-Opcodes
 
-Conveniences that expand to real instructions. Not in hardware.
+T-code is Titania's portable instruction set. M56 machine code forms its base;
+the pseudo-opcodes below extend it with operations that exist on every target
+but have different low-level realisations. On M56 the assembler expands them
+to the appropriate sequence; a RISC-V or ARM backend emits native equivalents.
+
+| Mnemonic | Encoding                          | Description |
+|----------|-----------------------------------|-------------|
+| `mul`    | mul \| mode \| Rdst \| imm20      | Multiply |
+| `div`    | div \| mode \| Rdst \| imm20      | Divide |
+| `mod`    | mod \| mode \| Rdst \| imm20      | Modulo |
+| `shf`    | shf \| mode \| Rdst \| imm20      | Shift (mode 0: logica, mode 1: arithmetic right) |
+| `stk`    | stk \| mode \| Rreg \| 0          | Stack (mode 0: push, mode 1: pop) |
+| `ret`    | ret \| mode \| 0 \| 0             | Return (mode 0: from subroutine, mode 1: from interrupt) |
+| `hal`    | hal \| mode \| Rdst \| id(6)+imm(12) | Hardware abstraction call |
+
+**mul/div/mod mode field** — bit 1: operand type (0=immediate, 1=register); bit 0: signedness (0=signed, 1=unsigned).
+
+**shf** subsumes `sar` and the `shl`/`shr` macros. On M56: mode 0 → `shf`, mode 1 → `sar`.
+
+**hal** — top 6 bits of imm20 are the hardware function ID (0–63); low 12 bits are an inline immediate. Arguments pass in R0–R2 per the calling convention.
+
+**On M56**: mul/div/mod → `cal` to ROM subroutine; stk → push/pop sequence; ret mode 0 → `rts`, ret mode 1 → `rti`.
+
+### M56 Assembler Macros
+
+Expand to real M56 instructions. No T-code presence.
 
 ```
 bra    label          →  bra.al  label
 bar    label          →  bar.al  label
 cal    label          →  cal.al  label
 car    label          →  car.al  label
-psh Rsrc              →  sub SP, #4 ; mov Rsrc, [SP]
-pop Rdst              →  mov [SP], Rdst ; add SP, #4
-ret                   →  rts
 nop                   →  add R0, #0
 clr Rdst              →  xor Rdst, Rdst
 inc Rdst              →  add Rdst, #1
 dec Rdst              →  sub Rdst, #1
-mul Rsrc, Rdst        →  cal mul
-div Rsrc, Rdst        →  cal div
 shl Rsrc, #n          →  shf Rsrc, #n
 shr Rsrc, #n          →  shf Rsrc, #-n
 ```
 
 ### ROM Subroutines
 
-Complex operations implemented once in ROM, called by convention:
+Called by the M56 T-code backend for pseudo-opcodes that have no single hardware instruction:
 
 ```
 mul       software multiply    — shift-and-add
 div       software divide      — shift-and-subtract
 mod       software modulo
-_print    print null-terminated string to UART — Rsrc = string pointer
-_printnum print integer as decimal to UART    — Rsrc = value
 ```
 
 ---
@@ -270,8 +291,8 @@ add  Rdst, Rsrc        →  Rdst = Rdst + Rsrc
 
 (sub, and, orr, xor follow the same pattern.)
 
-Multiply and divide are ROM subroutines, not hardware opcodes. The assembler
-macros `mul` and `div` expand to `bra _mul` and `bra _div`.
+Multiply, divide, and modulo are T-code pseudo-opcodes. On M56 they expand to
+`cal` to a ROM subroutine.
 
 ---
 
@@ -287,7 +308,7 @@ opcode | 000 | Rsrc | 0...0
 ```
 Non-destructive NOT: `mov Rsrc, Rdst` then `not Rdst`.
 
-### shf — Logical Shift
+### shf — Logica Shift
 ```
 shf Rsrc, #count       ; mode 0 — immediate signed count
 shf Rsrc, Rcounter     ; mode 2 — register signed count
@@ -312,7 +333,7 @@ opcode | mode | Rsrc | (#count or Rcounter)
 
 ## Jump and Branch
 
-Four opcodes for control flow transfer:
+Six opcodes for control flow transfer:
 
 | Opcode | Mnemonic | Addressing | Return address |
 |--------|----------|------------|----------------|
@@ -320,8 +341,12 @@ Four opcodes for control flow transfer:
 | 11 | `bar` | relative (PC + imm20) | not saved — goto |
 | 12 | `cal` | absolute (imm20) | pushed on stack — call |
 | 13 | `car` | relative (PC + imm20) | pushed on stack — call |
+| 18 | `iba` | register (Rtarget) | not saved — indirect goto |
+| 19 | `ica` | register (Rtarget) | pushed on stack — indirect call |
 
-Encoding: `opcode(5) | cond(3) | Rcmp(4) | address/offset(20)`
+Direct encoding: `opcode(5) | cond(3) | Rcmp(4) | address/offset(20)`
+
+Indirect encoding: `opcode(5) | cond(3) | Rcmp(4) | Rtarget(4) | 0(16)`
 
 The 3-bit mode field carries the condition code:
 
@@ -355,9 +380,12 @@ car      label           ; relative call, unconditional
 car.z    Rcmp, label     ; relative call if Rcmp == 0
 ```
 
-For computed jumps (function pointers, dispatch tables), write directly to R15:
 ```asm
-mov  Rsrc, R15           ; jump to address in Rsrc
+iba      Rtarget         ; indirect goto, unconditional
+iba.z    Rcmp, Rtarget   ; indirect goto if Rcmp == 0
+
+ica      Rtarget         ; indirect call, unconditional
+ica.nz   Rcmp, Rtarget   ; indirect call if Rcmp != 0
 ```
 
 ---
@@ -381,7 +409,7 @@ When an interrupt fires and interrupts are enabled:
 1. The current instruction is abandoned (not executed)
 2. PC (the return address) is pushed onto the stack
 3. R13 is written with the interrupt status word (one bit per source)
-4. Interrupts are disabled automatically
+4. Interrupts are disabled automaticaly
 5. PC jumps to the interrupt vector at `0x000010`
 
 `rti` must be a single hardware instruction. If it were two instructions
@@ -398,7 +426,8 @@ rti             ; enable interrupts and jump to R13
 
 `rts` (return from subroutine) is encoded as `rti` with mode=1. It pops the
 return address from the stack into R15 without touching the interrupt enable flag.
-The `ret` macro expands to `rts`.
+The T-code `ret` pseudo-opcode (mode 0) expands to `rts` on M56; `ret` mode 1
+(return from interrupt) expands to `rti`.
 
 ---
 
