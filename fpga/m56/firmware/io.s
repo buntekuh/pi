@@ -257,7 +257,12 @@ sram_done:
         bar.nz  R0, sd_fail
         mov     #'I', R0            ; init ok
         cal     putc
-        mov     #0, R0              ; sector 0
+        ; sd_init switches to 6 MHz; drop back to 400 kHz for Pmod signal integrity
+        mov-h   #0x800, R1
+        add     R1, #8              ; SPI DIV register
+        mov     #14, R2
+        mov     R2, [R1]
+        mov     #135, R0            ; sector 135 = FAT16 VBR (partition start)
         mov-h   #0x042, R1          ; destination: SRAM 0x042000
         cal     sd_read_sector
         bar.nz  R0, sd_fail
@@ -364,4 +369,4 @@ rxbuf:
 rxbuf_end:
 
 greeting:
-        .str    "Titania M56 tasty Toad.\r\n"
+        .str    "Titania M56 beastly buffalo.\r\n"
