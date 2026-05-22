@@ -54,11 +54,14 @@ entity M56_Decoder is
         is_eai   : out std_logic;   -- opcode 15 : enable interrupts
         is_dai   : out std_logic;   -- opcode 16 : disable interrupts
         is_rti   : out std_logic;   -- opcode 17 : return from interrupt
+        is_iba   : out std_logic;   -- opcode 18 : conditional indirect goto (target in register)
+        is_ica   : out std_logic;   -- opcode 19 : conditional indirect call (target in register)
 
         -- Condition code for branch/call instructions (only meaningful when
-        -- is_bra, is_bar, is_cal, or is_car is '1').
+        -- is_bra, is_bar, is_cal, is_car, is_iba, or is_ica is '1').
         bra_cond : out std_logic_vector(2 downto 0)    -- condition: 000=always 001=zero 010=nonzero
                                                        --            011=negative 100=non-negative
+                                                       --            101=carry    110=no-carry
     );
 end entity M56_Decoder;
 
@@ -95,9 +98,11 @@ begin
     is_eai <= '1' when op = "01111" else '0';   -- opcode 15
     is_dai <= '1' when op = "10000" else '0';   -- opcode 16
     is_rti <= '1' when op = "10001" else '0';   -- opcode 17
+    is_iba <= '1' when op = "10010" else '0';   -- opcode 18
+    is_ica <= '1' when op = "10011" else '0';   -- opcode 19
 
     -- The condition code is the 3-bit mode field — same field, always wired.
-    -- The CPU only uses this when is_bra/is_bar/is_cal/is_car is asserted.
+    -- The CPU only uses this when is_bra/is_bar/is_cal/is_car/is_iba/is_ica is asserted.
     bra_cond <= instruction(26 downto 24);
 
 end architecture rtl;

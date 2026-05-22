@@ -66,10 +66,12 @@ end entity m56_cpu;
 
 architecture rtl of m56_cpu is
 
-    -- 16 × 32-bit register file.
+    -- 16 × 32-bit register file plus one carry flag bit per register.
     -- R14 = stack pointer (top of SRAM), R15 = program counter.
+    -- carry_flags(n): set by add (unsigned overflow) or sub (unsigned borrow);
+    --                 cleared by all mov forms; tested by .c / .nc branch conditions.
     type register_file_type is array(0 to 15) of std_logic_vector(31 downto 0);
-    signal registers : register_file_type := (
+    signal registers   : register_file_type := (
         14 => x"000BFFFC",   -- SP starts at top of SRAM
         15 => x"00000000",   -- PC starts at address 0
         others => (others => '0')
@@ -108,7 +110,10 @@ architecture rtl of m56_cpu is
     signal d_is_eai   : std_logic;
     signal d_is_dai   : std_logic;
     signal d_is_rti   : std_logic;
+    signal d_is_iba   : std_logic;
+    signal d_is_ica   : std_logic;
     signal d_bra_cond : std_logic_vector(2 downto 0);
+    signal carry_flags : std_logic_vector(15 downto 0) := (others => '0');
 
     -- Interrupt enable flag.  Starts disabled at reset.
     signal interrupts_enabled_reg : std_logic := '0';
@@ -141,6 +146,8 @@ begin
             is_eai   => d_is_eai,
             is_dai   => d_is_dai,
             is_rti   => d_is_rti,
+            is_iba   => d_is_iba,
+            is_ica   => d_is_ica,
             bra_cond => d_bra_cond
         );
 
@@ -151,6 +158,7 @@ begin
         variable take_branch          : boolean;
         variable next_pc              : std_logic_vector(31 downto 0);
         variable alu_src              : std_logic_vector(31 downto 0);
+        variable result33             : std_logic_vector(32 downto 0);
         variable shift_count          : integer range 0 to 31;
     begin
 
@@ -166,6 +174,7 @@ begin
             memory_write_enable <= '0';
             memory_read_enable  <= '1';
             interrupts_enabled_reg <= '0';
+            carry_flags         <= (others => '0');
             load_is_byte        <= '0';
             store_is_byte       <= '0';
             load_is_sram        <= '0';
@@ -206,21 +215,24 @@ begin
 
                             -- mov #imm20, Rdst  (mode 0) — sign-extended immediate
                             when "000" =>
-                                registers(register_index) <= d_imm32;
+                                registers(register_index)   <= d_imm32;
+                                carry_flags(register_index) <= '0';
                                 memory_address     <= registers(15);
                                 memory_read_enable <= '1';
                                 state <= FETCH;
 
                             -- mov-h #imm20, Rdst  (mode 1) — load into bits 31..12
                             when "001" =>
-                                registers(register_index) <= d_imm20 & "000000000000";
+                                registers(register_index)   <= d_imm20 & "000000000000";
+                                carry_flags(register_index) <= '0';
                                 memory_address     <= registers(15);
                                 memory_read_enable <= '1';
                                 state <= FETCH;
 
                             -- mov Rsrc, Rdst  (mode 2) — register copy
                             when "010" =>
-                                registers(destination_register) <= registers(register_index);
+                                registers(destination_register)   <= registers(register_index);
+                                carry_flags(destination_register) <= '0';
                                 memory_address     <= registers(15);
                                 memory_read_enable <= '1';
                                 state <= FETCH;
@@ -241,6 +253,32 @@ begin
                             -- mov Rsrc, [Rdst]  (mode 4) — indirect write
                             when "100" =>
                                 memory_address      <= registers(destination_register);
+                                memory_write_data   <= registers(register_index);
+                                memory_write_enable <= '1';
+                                state <= STORE;
+
+                            -- mov [Rsrc+off], Rdst  (mode 5) — indexed read
+                            -- Rdst = imm20[19:16], offset = sext(imm20[15:0])
+                            when "101" =>
+                                next_pc := std_logic_vector(
+                                    unsigned(registers(register_index)) +
+                                    unsigned((31 downto 16 => d_imm20(15)) & d_imm20(15 downto 0)));
+                                memory_address     <= next_pc;
+                                memory_read_enable <= '1';
+                                load_destination   <= to_integer(unsigned(d_imm20(19 downto 16)));
+                                if next_pc(22) = '1' then
+                                    state <= LOAD;
+                                else
+                                    state <= LOAD_WAIT;
+                                end if;
+
+                            -- mov Rsrc, [Rdst+off]  (mode 6) — indexed write
+                            -- Rdst = imm20[19:16], offset = sext(imm20[15:0])
+                            when "110" =>
+                                next_pc := std_logic_vector(
+                                    unsigned(registers(to_integer(unsigned(d_imm20(19 downto 16))))) +
+                                    unsigned((31 downto 16 => d_imm20(15)) & d_imm20(15 downto 0)));
+                                memory_address      <= next_pc;
                                 memory_write_data   <= registers(register_index);
                                 memory_write_enable <= '1';
                                 state <= STORE;
@@ -295,8 +333,14 @@ begin
                             alu_src := d_imm32;
                         end if;
                         case d_opcode is
-                            when "00010" => registers(register_index) <= std_logic_vector(unsigned(registers(register_index)) + unsigned(alu_src));
-                            when "00011" => registers(register_index) <= std_logic_vector(unsigned(registers(register_index)) - unsigned(alu_src));
+                            when "00010" =>
+                                result33 := std_logic_vector(('0' & unsigned(registers(register_index))) + ('0' & unsigned(alu_src)));
+                                registers(register_index)    <= result33(31 downto 0);
+                                carry_flags(register_index)  <= result33(32);
+                            when "00011" =>
+                                result33 := std_logic_vector(('0' & unsigned(registers(register_index))) - ('0' & unsigned(alu_src)));
+                                registers(register_index)    <= result33(31 downto 0);
+                                carry_flags(register_index)  <= result33(32);
                             when "00100" => registers(register_index) <= registers(register_index) and alu_src;
                             when "00101" => registers(register_index) <= registers(register_index) or  alu_src;
                             when "00110" => registers(register_index) <= registers(register_index) xor alu_src;
@@ -359,6 +403,8 @@ begin
                             when "010" => take_branch := (registers(register_index) /= x"00000000");
                             when "011" => take_branch := (registers(register_index)(31) = '1');
                             when "100" => take_branch := (registers(register_index)(31) = '0');
+                            when "101" => take_branch := (carry_flags(register_index) = '1');
+                            when "110" => take_branch := (carry_flags(register_index) = '0');
                             when others => null;
                         end case;
                         if take_branch then
@@ -393,6 +439,8 @@ begin
                             when "010" => take_branch := (registers(register_index) /= x"00000000");
                             when "011" => take_branch := (registers(register_index)(31) = '1');
                             when "100" => take_branch := (registers(register_index)(31) = '0');
+                            when "101" => take_branch := (carry_flags(register_index) = '1');
+                            when "110" => take_branch := (carry_flags(register_index) = '0');
                             when others => null;
                         end case;
                         if take_branch then
@@ -401,6 +449,42 @@ begin
                                 registers(14) <= std_logic_vector(unsigned(registers(14)) - 4);
                                 memory_address    <= std_logic_vector(unsigned(registers(14)) - 4);
                                 memory_write_data <= registers(15);
+                                memory_write_enable <= '1';
+                                call_target <= next_pc;
+                                state <= CALL_STORE;
+                            else
+                                memory_address     <= next_pc;
+                                memory_read_enable <= '1';
+                                state <= FETCH;
+                            end if;
+                        else
+                            memory_address     <= registers(15);
+                            memory_read_enable <= '1';
+                            state <= FETCH;
+                        end if;
+
+                    -- ── iba / ica — indirect goto or call via register ──────
+                    -- iba (d_is_iba): goto register, no return address saved.
+                    -- ica (d_is_ica): call register, pushes return address.
+                    -- Rcmp = d_reg (register_index); Rtarget = imm20[19:16].
+                    elsif d_is_iba = '1' or d_is_ica = '1' then
+                        take_branch := false;
+                        case d_bra_cond is
+                            when "000" => take_branch := true;
+                            when "001" => take_branch := (registers(register_index) = x"00000000");
+                            when "010" => take_branch := (registers(register_index) /= x"00000000");
+                            when "011" => take_branch := (registers(register_index)(31) = '1');
+                            when "100" => take_branch := (registers(register_index)(31) = '0');
+                            when "101" => take_branch := (carry_flags(register_index) = '1');
+                            when "110" => take_branch := (carry_flags(register_index) = '0');
+                            when others => null;
+                        end case;
+                        if take_branch then
+                            next_pc := registers(to_integer(unsigned(d_imm20(19 downto 16))));
+                            if d_is_ica = '1' then
+                                registers(14) <= std_logic_vector(unsigned(registers(14)) - 4);
+                                memory_address      <= std_logic_vector(unsigned(registers(14)) - 4);
+                                memory_write_data   <= registers(15);
                                 memory_write_enable <= '1';
                                 call_target <= next_pc;
                                 state <= CALL_STORE;
@@ -492,6 +576,7 @@ begin
                     else
                         registers(load_destination) <= memory_read_data;
                     end if;
+                    carry_flags(load_destination) <= '0';
                     if load_destination = 15 then
                         memory_address <= memory_read_data;
                     else
