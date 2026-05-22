@@ -7,7 +7,9 @@ The M56 is a 32-bit RISC CPU. Instructions are 32 bits wide. All registers are
 
 ## Registers
 
-16 general-purpose registers, all 32-bit. Two have a fixed role by hardware; the rest are convention:
+16 general-purpose registers, all 32-bit. Each register carries a hidden 1-bit carry flag alongside its value. `add` sets the carry flag on unsigned overflow; `sub` sets it on unsigned underflow (borrow); all `mov` forms clear it; all other instructions leave it unchanged. Arithmetic is always 32-bit — the carry flag is purely a side-effect for use by `.c` / `.nc` branch conditions.
+
+Two registers have a fixed role by hardware; the rest are convention:
 
 | Name   | Alias | Notes |
 |--------|-------|-------|
@@ -112,7 +114,7 @@ field carries exactly what each mode needs. It is never split arbitrarily.
 | 5    | orr      | Bitwise OR |
 | 6    | xor      | Bitwise XOR |
 | 7    | not      | Bitwise NOT (unary, in place) |
-| 8    | shf      | Logica shift — signed count, positive=left, negative=right |
+| 8    | shf      | Logical shift — signed count, positive=left, negative=right |
 | 9    | sar      | Arithmetic shift right — sign bit replicated |
 | 10   | bra      | Conditional absolute branch — goto, no return address saved |
 | 11   | bar      | Conditional relative branch — goto, PC-relative offset |
@@ -125,7 +127,7 @@ field carries exactly what each mode needs. It is never split arbitrarily.
 | 18   | iba     | Conditional indirect goto — jump to address in register |
 | 19   | ica     | Conditional indirect call — push return address, jump to register |
 
-Opcodes 20–31 are reserved for future use.
+Opcodes 20–25 are reserved for future M56 expansion. Opcodes 26–31 are T-code virtual (see below).
 
 **branch** (`bra`, `bar`) transfers control without saving anything — a goto.
 **call** (`cal`, `car`) saves the return address on the stack before jumping —
@@ -139,23 +141,20 @@ the pseudo-opcodes below extend it with operations that exist on every target
 but have different low-level realisations. On M56 the assembler expands them
 to the appropriate sequence; a RISC-V or ARM backend emits native equivalents.
 
-| Mnemonic | Encoding                          | Description |
-|----------|-----------------------------------|-------------|
-| `mul`    | mul \| mode \| Rdst \| imm20      | Multiply |
-| `div`    | div \| mode \| Rdst \| imm20      | Divide |
-| `mod`    | mod \| mode \| Rdst \| imm20      | Modulo |
-| `shf`    | shf \| mode \| Rdst \| imm20      | Shift (mode 0: logica, mode 1: arithmetic right) |
-| `stk`    | stk \| mode \| Rreg \| 0          | Stack (mode 0: push, mode 1: pop) |
-| `ret`    | ret \| mode \| 0 \| 0             | Return (mode 0: from subroutine, mode 1: from interrupt) |
-| `hal`    | hal \| mode \| Rdst \| id(6)+imm(12) | Hardware abstraction call |
+| Code | Mnemonic | Encoding                             | Description |
+|------|----------|--------------------------------------|-------------|
+| 26   | `mul`    | mul \| mode \| Rdst \| imm20         | Multiply |
+| 27   | `div`    | div \| mode \| Rdst \| imm20         | Divide |
+| 28   | `mod`    | mod \| mode \| Rdst \| imm20         | Modulo |
+| 29   | `stk`    | stk \| mode \| Rreg \| 0             | Stack (mode 0: push, mode 1: pop) |
+| 30   | `ret`    | ret \| mode \| 0 \| 0                | Return (mode 0: from subroutine, mode 1: from interrupt) |
+| 31   | `hal`    | hal \| mode \| Rdst \| id(6)+imm(12) | Hardware abstraction call |
 
 **mul/div/mod mode field** — bit 1: operand type (0=immediate, 1=register); bit 0: signedness (0=signed, 1=unsigned).
 
-**shf** subsumes `sar` and the `shl`/`shr` macros. On M56: mode 0 → `shf`, mode 1 → `sar`.
-
 **hal** — top 6 bits of imm20 are the hardware function ID (0–63); low 12 bits are an inline immediate. Arguments pass in R0–R2 per the calling convention.
 
-**On M56**: mul/div/mod → `cal` to ROM subroutine; stk → push/pop sequence; ret mode 0 → `rts`, ret mode 1 → `rti`.
+**On M56**: mul/div/mod → `cal` to ROM subroutine; stk → push/pop sequence; ret mode 0 → `rts`, ret mode 1 → `rti`. Use `shf` and `sar` directly from the M56 ISA — no T-code wrapper needed.
 
 ### M56 Assembler Macros
 
@@ -308,7 +307,7 @@ opcode | 000 | Rsrc | 0...0
 ```
 Non-destructive NOT: `mov Rsrc, Rdst` then `not Rdst`.
 
-### shf — Logica Shift
+### shf — Logical Shift
 ```
 shf Rsrc, #count       ; mode 0 — immediate signed count
 shf Rsrc, Rcounter     ; mode 2 — register signed count
@@ -357,9 +356,11 @@ The 3-bit mode field carries the condition code:
 | 0         | .al    | Always (unconditional) |
 | 1         | .z     | Rcmp equals zero |
 | 2         | .nz    | Rcmp not equal to zero |
-| 3         | .n     | Rcmp bit 31 set (negative) |
-| 4         | .nn    | Rcmp bit 31 clear (non-negative) |
-| 5–7       | —      | Reserved |
+| 3         | .n     | Rcmp bit 31 set (signed negative) |
+| 4         | .nn    | Rcmp bit 31 clear (signed non-negative) |
+| 5         | .c     | Rcmp carry flag set (unsigned overflow / borrow) |
+| 6         | .nc    | Rcmp carry flag clear (no overflow / no borrow) |
+| 7         | —      | Reserved |
 
 Rcmp is a register operand. When condition is `.al`, Rcmp is unused; the assembler writes zeros.
 
@@ -367,8 +368,10 @@ Rcmp is a register operand. When condition is `.al`, Rcmp is unused; the assembl
 bra      label           ; absolute goto, unconditional
 bra.z    Rcmp, label     ; absolute goto if Rcmp == 0
 bra.nz   Rcmp, label     ; absolute goto if Rcmp != 0
-bra.n    Rcmp, label     ; absolute goto if Rcmp < 0
-bra.nn   Rcmp, label     ; absolute goto if Rcmp >= 0
+bra.n    Rcmp, label     ; absolute goto if Rcmp < 0  (signed)
+bra.nn   Rcmp, label     ; absolute goto if Rcmp >= 0 (signed)
+bra.c    Rcmp, label     ; absolute goto if carry set  (unsigned overflow or borrow after sub)
+bra.nc   Rcmp, label     ; absolute goto if carry clear
 
 bar      label           ; relative goto, unconditional
 bar.z    Rcmp, label     ; relative goto if Rcmp == 0
