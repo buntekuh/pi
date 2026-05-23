@@ -19,12 +19,12 @@ OPCODES = {
     'mov': 0, 'mvb': 1, 'add': 2, 'sub': 3, 'and': 4,
     'orr': 5, 'xor': 6, 'not': 7, 'shf': 8, 'sar': 9,
     'bra': 10, 'bar': 11, 'cal': 12, 'car': 13,
-    'wfi': 14, 'eai': 15, 'dai': 16, 'rti': 17,
-    'iba': 18, 'ica': 19,
+    'wfi': 14, 'eai': 15, 'dai': 16,
+    'iba': 18, 'ica': 19, 'stk': 20,
 }
 
 # Instructions that take no operands — encoded with all fields zero.
-ZERO_OPERAND = {'wfi', 'eai', 'dai', 'rti'}
+ZERO_OPERAND = {'wfi', 'eai', 'dai'}
 
 COND = {'al': 0, 'z': 1, 'nz': 2, 'n': 3, 'nn': 4, 'c': 5, 'nc': 6}
 
@@ -86,13 +86,11 @@ def expand_macros(lines):
         elif mn == 'dec':
             out.append(f'sub {ops[0]}, #1')
         elif mn == 'psh':
-            out.append('sub R14, #4')
-            out.append(f'mov {ops[0]}, [R14]')
+            out.append(f'stk.u {ops[0]}')
         elif mn == 'pop':
-            out.append(f'mov [R14], {ops[0]}')
-            out.append('add R14, #4')
+            out.append(f'stk.o {ops[0]}')
         elif mn == 'ret':
-            out.append('rts')
+            out.append('ret.s')
         elif mn == 'shl':
             out.append(f'shf {tail}')
         elif mn == 'shr':
@@ -172,9 +170,23 @@ def assemble(source):
             pc += 4
             continue
 
-        # --- rts: return from subroutine (rti opcode, mode 1) ---
-        if mn == 'rts':
-            words.append(encode(17, 1, 0, 0))
+        # --- ret.s / ret.i — return from subroutine or interrupt ---
+        if mn.startswith('ret'):
+            suffix = mn.split('.')[1] if '.' in mn else 's'
+            mode = 0 if suffix == 'i' else 1
+            words.append(encode(17, mode, 0, 0))
+            pc += 4
+            continue
+
+        # --- stk.u / stk.o — stack push / pop ---
+        if mn.startswith('stk'):
+            suffix = mn.split('.')[1] if '.' in mn else None
+            if suffix == 'u':
+                words.append(encode(20, 0, reg(ops[0]), 0))
+            elif suffix == 'o':
+                words.append(encode(20, 1, reg(ops[0]), 0))
+            else:
+                raise ValueError(f"stk requires .u or .o suffix: {line!r}")
             pc += 4
             continue
 

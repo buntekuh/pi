@@ -53,9 +53,10 @@ entity M56_Decoder is
         is_wfi   : out std_logic;   -- opcode 14 : wait for interrupt
         is_eai   : out std_logic;   -- opcode 15 : enable interrupts
         is_dai   : out std_logic;   -- opcode 16 : disable interrupts
-        is_rti   : out std_logic;   -- opcode 17 : return from interrupt
+        is_ret   : out std_logic;   -- opcode 17 : return (mode 0=ret.i, mode 1=ret.s)
         is_iba   : out std_logic;   -- opcode 18 : conditional indirect goto (target in register)
         is_ica   : out std_logic;   -- opcode 19 : conditional indirect call (target in register)
+        is_stk   : out std_logic;   -- opcode 20 : stack (mode 0=stk.u push, mode 1=stk.o pop)
 
         -- Condition code for branch/call instructions (only meaningful when
         -- is_bra, is_bar, is_cal, is_car, is_iba, or is_ica is '1').
@@ -97,9 +98,10 @@ begin
     is_wfi <= '1' when op = "01110" else '0';   -- opcode 14
     is_eai <= '1' when op = "01111" else '0';   -- opcode 15
     is_dai <= '1' when op = "10000" else '0';   -- opcode 16
-    is_rti <= '1' when op = "10001" else '0';   -- opcode 17
+    is_ret <= '1' when op = "10001" else '0';   -- opcode 17
     is_iba <= '1' when op = "10010" else '0';   -- opcode 18
     is_ica <= '1' when op = "10011" else '0';   -- opcode 19
+    is_stk <= '1' when op = "10100" else '0';   -- opcode 20
 
     -- The condition code is the 3-bit mode field — same field, always wired.
     -- The CPU only uses this when is_bra/is_bar/is_cal/is_car/is_iba/is_ica is asserted.

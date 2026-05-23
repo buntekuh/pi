@@ -16,7 +16,7 @@ Two registers have a fixed role by hardware; the rest are convention:
 | R0–R2  |       | Scratch registers                                |
 | R3     |       | Leaf return address (by convention)              |
 | R4–R12 |       | General purpose                                  |
-| R13    |       | Written with irq_status word by hardware on interrupt entry; read by `rti` as return address after handler restores it from the stack |
+| R13    |       | Written with irq_status word by hardware on interrupt entry; read by `ret.i` as return address after handler restores it from the stack |
 | R14    | SP    | Stack pointer. Stack grows downward.             |
 | R15    | PC    | Program counter. Advances by 4 after each fetch. |
 
@@ -88,7 +88,7 @@ never move.
 Every instruction is exactly **32 bits**, 4-byte aligned in memory.
 
 ```
-Bit  31..27   opcode    (5 bits)   — 32 possible opcodes, 20 defined
+Bit  31..27   opcode    (5 bits)   — 32 possible opcodes, 21 defined
 Bit  26..24   mode      (3 bits)   — addressing mode (modes 0–6 used; 7 reserved)
 Bit  23..20   register  (4 bits)   — one explicit register
 Bit  19..0    imm20    (20 bits)   — immediate, offset, or second register
@@ -102,7 +102,7 @@ field carries exactly what each mode needs. It is never split arbitrarily.
 
 ## Opcodes
 
-20 hardware opcodes. Above them: T-code pseudo-opcodes (portable across all Titania targets) and M56-only assembler macros.
+21 hardware opcodes. Above them: T-code pseudo-opcodes (portable across all Titania targets) and M56-only assembler macros.
 
 | Code | Mnemonic | Description |
 |------|----------|-------------|
@@ -123,11 +123,12 @@ field carries exactly what each mode needs. It is never split arbitrarily.
 | 14   | wfi      | Wait for interrupt — suspends execution until an interrupt fires |
 | 15   | eai      | Enable interrupts |
 | 16   | dai      | Disable interrupts |
-| 17   | rti      | Return from interrupt — enable interrupts and jump to R13 |
-| 18   | iba     | Conditional indirect goto — jump to address in register |
-| 19   | ica     | Conditional indirect call — push return address, jump to register |
+| 17   | ret      | Return — `ret.s` (mode 0): pop PC from stack; `ret.i` (mode 1): jump to R13 and re-enable interrupts |
+| 18   | iba      | Conditional indirect goto — jump to address in register |
+| 19   | ica      | Conditional indirect call — push return address, jump to register |
+| 20   | stk      | Stack — `stk.u Rx` (mode 0): push Rx; `stk.o Rx` (mode 1): pop into Rx |
 
-Opcodes 20–25 are reserved for future M56 expansion. Opcodes 26–31 are T-code virtual (see below).
+Opcodes 21–25 are reserved for future M56 expansion. Opcodes 26–31 are T-code virtual (see below).
 
 **branch** (`bra`, `bar`) transfers control without saving anything — a goto.
 **call** (`cal`, `car`) saves the return address on the stack before jumping —
@@ -146,15 +147,15 @@ to the appropriate sequence; a RISC-V or ARM backend emits native equivalents.
 | 26   | `mul`    | mul \| mode \| Rdst \| imm20         | Multiply |
 | 27   | `div`    | div \| mode \| Rdst \| imm20         | Divide |
 | 28   | `mod`    | mod \| mode \| Rdst \| imm20         | Modulo |
-| 29   | `stk`    | stk \| mode \| Rreg \| 0             | Stack (mode 0: push, mode 1: pop) |
-| 30   | `ret`    | ret \| mode \| 0 \| 0                | Return (mode 0: from subroutine, mode 1: from interrupt) |
+| 29   | —        | —                                     | Reserved |
+| 30   | —        | —                                     | Reserved |
 | 31   | `hal`    | hal \| mode \| Rdst \| id(6)+imm(12) | Hardware abstraction call |
 
 **mul/div/mod mode field** — bit 1: operand type (0=immediate, 1=register); bit 0: signedness (0=signed, 1=unsigned).
 
 **hal** — top 6 bits of imm20 are the hardware function ID (0–63); low 12 bits are an inline immediate. Arguments pass in R0–R2 per the calling convention.
 
-**On M56**: mul/div/mod → `cal` to ROM subroutine; stk → push/pop sequence; ret mode 0 → `rts`, ret mode 1 → `rti`. Use `shf` and `sar` directly from the M56 ISA — no T-code wrapper needed.
+**On M56**: mul/div/mod → `cal` to ROM subroutine. `ret` and `stk` are real M56 hardware instructions (opcodes 17 and 20). Use `shf` and `sar` directly from the M56 ISA — no T-code wrapper needed.
 
 ### M56 Assembler Macros
 
@@ -171,6 +172,8 @@ inc Rdst              →  add Rdst, #1
 dec Rdst              →  sub Rdst, #1
 shl Rsrc, #n          →  shf Rsrc, #n
 shr Rsrc, #n          →  shf Rsrc, #-n
+psh Rx                →  stk.u Rx
+pop Rx                →  stk.o Rx
 ```
 
 ### ROM Subroutines
@@ -415,22 +418,22 @@ When an interrupt fires and interrupts are enabled:
 4. Interrupts are disabled automaticaly
 5. PC jumps to the interrupt vector at `0x000010`
 
-`rti` must be a single hardware instruction. If it were two instructions
+`ret.i` must be a single hardware instruction. If it were two instructions
 (`eai` then `mov R13, R15`), a new interrupt arriving between them would
 overwrite R13 before the jump happened — the return address would be lost.
-As a single instruction, `rti` sets `interrupts_enabled` and `PC` in the
+As a single instruction, `ret.i` sets `interrupts_enabled` and `PC` in the
 same clock cycle.
 
 ```asm
 ; handler exit sequence
 pop  R13        ; R13 = return address (was pushed by CPU on entry)
-rti             ; enable interrupts and jump to R13
+ret.i           ; enable interrupts and jump to R13
 ```
 
-`rts` (return from subroutine) is encoded as `rti` with mode=1. It pops the
-return address from the stack into R15 without touching the interrupt enable flag.
-The T-code `ret` pseudo-opcode (mode 0) expands to `rts` on M56; `ret` mode 1
-(return from interrupt) expands to `rti`.
+`ret.s` (return from subroutine) is opcode 17 mode 0. It pops the return
+address from the stack into R15 without touching the interrupt enable flag.
+`ret.i` (return from interrupt) is opcode 17 mode 1. It jumps to R13 and
+re-enables interrupts in a single cycle.
 
 ---
 

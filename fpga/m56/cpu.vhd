@@ -109,9 +109,10 @@ architecture rtl of m56_cpu is
     signal d_is_wfi   : std_logic;
     signal d_is_eai   : std_logic;
     signal d_is_dai   : std_logic;
-    signal d_is_rti   : std_logic;
+    signal d_is_ret   : std_logic;
     signal d_is_iba   : std_logic;
     signal d_is_ica   : std_logic;
+    signal d_is_stk   : std_logic;
     signal d_bra_cond : std_logic_vector(2 downto 0);
     signal carry_flags : std_logic_vector(15 downto 0) := (others => '0');
 
@@ -145,9 +146,10 @@ begin
             is_wfi   => d_is_wfi,
             is_eai   => d_is_eai,
             is_dai   => d_is_dai,
-            is_rti   => d_is_rti,
+            is_ret   => d_is_ret,
             is_iba   => d_is_iba,
             is_ica   => d_is_ica,
+            is_stk   => d_is_stk,
             bra_cond => d_bra_cond
         );
 
@@ -519,10 +521,10 @@ begin
                         memory_read_enable <= '1';
                         state <= FETCH;
 
-                    -- ── rti — return from interrupt ───────────────────────────
-                    -- mode=000: rti — re-enable interrupts and jump to R13.
-                    -- mode=001: rts — pop return address from stack into R15.
-                    elsif d_is_rti = '1' then
+                    -- ── ret — return (opcode 17) ──────────────────────────────
+                    -- mode=000: ret.i — re-enable interrupts and jump to R13.
+                    -- mode=001: ret.s — pop return address from stack into R15.
+                    elsif d_is_ret = '1' then
                         if d_mode = "000" then
                             interrupts_enabled_reg <= '1';
                             memory_address     <= registers(13);
@@ -533,6 +535,24 @@ begin
                             memory_address     <= registers(14);
                             memory_read_enable <= '1';
                             load_destination   <= 15;
+                            state <= LOAD_WAIT;
+                        end if;
+
+                    -- ── stk — stack push/pop (opcode 20) ─────────────────────
+                    -- mode=000: stk.u — push: SP -= 4, write register to [SP].
+                    -- mode=001: stk.o — pop: load [SP] into register, SP += 4.
+                    elsif d_is_stk = '1' then
+                        if d_mode = "000" then
+                            registers(14) <= std_logic_vector(unsigned(registers(14)) - 4);
+                            memory_address      <= std_logic_vector(unsigned(registers(14)) - 4);
+                            memory_write_data   <= registers(register_index);
+                            memory_write_enable <= '1';
+                            state <= STORE;
+                        else
+                            registers(14) <= std_logic_vector(unsigned(registers(14)) + 4);
+                            memory_address     <= registers(14);
+                            memory_read_enable <= '1';
+                            load_destination   <= register_index;
                             state <= LOAD_WAIT;
                         end if;
 

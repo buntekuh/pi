@@ -69,7 +69,7 @@ irq_done:
         pop     R1
         pop     R0
         pop     R13                 ; return PC (pushed by CPU on interrupt entry)
-        rti
+        ret.i
 
 ; ── irq_nop — default no-op handler ─────────────────────────────────────────
 irq_nop:
@@ -83,7 +83,7 @@ irq_uart_rx:
         and     R0, #0xFF
         mov     #rxbuf_wptr, R1
         mov     [R1], R2            ; R2 = write pointer
-        mvb     R0, [R2]            ; write byte to buffer
+        mov     R0, [R2]            ; write byte to buffer (word write: byte in bits 7:0, upper bits zero)
         add     R2, #4
         mov     R2, [R1]            ; save updated write pointer
         ret
@@ -207,7 +207,8 @@ getc_wait:
         wfi                         ; sleep until next interrupt adds to buffer
         bar     getc_wait
 getc_data:
-        mvb     [R0], R1            ; R1 = byte at read pointer
+        mov     [R0], R1            ; R1 = word at read pointer (byte in bits 7:0)
+        and     R1, #0xFF           ; mask to byte
         add     R0, #4
         mov     R0, [R2]            ; save updated read pointer
         mov     R1, R0              ; return byte in R0
@@ -404,4 +405,4 @@ rxbuf:
 rxbuf_end:
 
 greeting:
-        .str    "Titania M56 delapidated Donkey.\r\n"
+        .str    "Titania M56 Daniel Duesentrieb.\r\n"
