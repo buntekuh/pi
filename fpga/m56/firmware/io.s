@@ -327,6 +327,21 @@ sd_fail:
         cal     putc
 sd_done:
 
+        ; Math test: 300 * 400 / 500 % 7 = 2 (left-to-right evaluation)
+        mov     #300, R0
+        mov     #400, R1
+        mul     R0, R1          ; R0 = 120000
+        mov     #500, R1
+        div     R0, R1          ; R0 = 240
+        mov     #7, R1
+        mod     R0, R1          ; R0 = 2
+        add     R0, #'0'        ; ASCII digit
+        cal     putc
+        mov     #13, R0
+        cal     putc
+        mov     #10, R0
+        cal     putc
+
 echo_loop:
         cal     getc                ; R0 = received byte
         cal     putc                ; echo it back
@@ -405,4 +420,4 @@ rxbuf:
 rxbuf_end:
 
 greeting:
-        .str    "Titania M56 Daniel Duesentrieb.\r\n"
+        .str    "Titania M56 Peter Panther.\r\n"

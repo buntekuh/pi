@@ -75,7 +75,7 @@ set -ex
 # Requires a titania.fasm from a prior full build.
 if [ "${MODE}" = "p" ] || [ "${MODE}" = "pr" ]; then
     python3 "${D}/tools/asm.py" --mem-words ${MEM_WORDS} \
-        "${D}/firmware/const.s" "${D}/firmware/io.s" "${D}/firmware/sd.s" "${D}/firmware/firmware.hex"
+        "${D}/firmware/const.s" "${D}/firmware/io.s" "${D}/firmware/sd.s" "${D}/firmware/math.s" "${D}/firmware/firmware.hex"
     python3 "${D}/tools/patch_fasm.py" "${D}/${PROJECT}.fasm" "${D}/firmware/firmware.hex"
     fasm2frames --part ${PART} --db-root "${DB_DIR}/artix7" "${D}/${PROJECT}.fasm" > "${D}/${PROJECT}.frames"
     xc7frames2bit \
@@ -98,7 +98,7 @@ if [ "${MODE}" = "b" ] || [ "${MODE}" = "br" ]; then
 
     # Step 1: assemble firmware → hex + VHDL init package
     python3 "${D}/tools/asm.py" --mem-words ${MEM_WORDS} \
-        "${D}/firmware/const.s" "${D}/firmware/io.s" "${D}/firmware/sd.s" "${D}/firmware/firmware.hex"
+        "${D}/firmware/const.s" "${D}/firmware/io.s" "${D}/firmware/sd.s" "${D}/firmware/math.s" "${D}/firmware/firmware.hex"
 
     # Step 2: GHDL synthesises VHDL → Verilog
     ghdl synth --std=08 --out=verilog \

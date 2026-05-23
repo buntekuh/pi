@@ -96,6 +96,39 @@ def expand_macros(lines):
         elif mn == 'shr':
             count = ops[1].lstrip('#')
             out.append(f'shf {ops[0]}, #-{count}')
+        elif mn in ('mul', 'div', 'mod'):
+            # T-code pseudo-ops: expand to argument setup + cal _<op>.
+            # Calling convention: R0 = first arg / result, R1 = second arg.
+            # Supports: Rdst, Rsrc  or  Rdst, #imm
+            fn   = '_' + mn
+            rdst = ops[0].strip().upper()
+            rsrc = ops[1].strip()
+            rimm = rsrc.startswith('#') or rsrc.lstrip('-+').replace('#','').isdigit()
+            rsrc_u = rsrc.upper()
+            if rimm:
+                # immediate second operand: load into R1 first
+                if rdst != 'R0':
+                    out.append(f'mov {ops[0]}, R0')
+                out.append(f'mov {rsrc}, R1')
+                out.append(f'cal {fn}')
+                if rdst != 'R0':
+                    out.append(f'mov R0, {ops[0]}')
+            elif rsrc_u == 'R0' and rdst != 'R0':
+                # src is R0 and dst is not — moving dst to R0 would clobber src;
+                # use R2 (caller-saved scratch) to shuttle the original R0 into R1.
+                out.append(f'mov R0, R2')
+                out.append(f'mov {ops[0]}, R0')
+                out.append(f'mov R2, R1')
+                out.append(f'cal {fn}')
+                out.append(f'mov R0, {ops[0]}')
+            else:
+                if rdst != 'R0':
+                    out.append(f'mov {ops[0]}, R0')
+                if rsrc_u != 'R1':
+                    out.append(f'mov {rsrc}, R1')
+                out.append(f'cal {fn}')
+                if rdst != 'R0':
+                    out.append(f'mov R0, {ops[0]}')
         else:
             out.append(line)
     return out
@@ -340,7 +373,7 @@ def assemble(source):
             opc = OPCODES[mn]
             dst, src = ops[0], ops[1]
             if src.startswith('#') or src.lstrip('-+').isdigit():
-                words.append(encode(opc, 0, reg(dst), imm(src)))
+                words.append(encode(opc, 0, reg(dst), resolve(src, symbols)))
             else:
                 words.append(encode(opc, 2, reg(dst), reg(src)))
             pc += 4
