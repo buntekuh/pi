@@ -20,12 +20,13 @@ OPCODES = {
     'orr': 5, 'xor': 6, 'not': 7, 'shf': 8, 'sar': 9,
     'bra': 10, 'bar': 11, 'cal': 12, 'car': 13,
     'wfi': 14, 'eai': 15, 'dai': 16, 'rti': 17,
+    'iba': 18, 'ica': 19,
 }
 
 # Instructions that take no operands — encoded with all fields zero.
 ZERO_OPERAND = {'wfi', 'eai', 'dai', 'rti'}
 
-COND = {'al': 0, 'z': 1, 'nz': 2, 'n': 3, 'nn': 4}
+COND = {'al': 0, 'z': 1, 'nz': 2, 'n': 3, 'nn': 4, 'c': 5, 'nc': 6}
 
 
 def reg(s):
@@ -228,6 +229,32 @@ def assemble(source):
                 rcmp  = reg(ops[0])
                 target = imm(ops[1]) if ops[1].startswith('#') else symbols[ops[1]]
             words.append(encode(12, cond, rcmp, target))
+            pc += 4
+            continue
+
+        # --- iba[.cond] — indirect goto via register ---
+        # Syntax: iba Rtarget  or  iba.cond Rcmp, Rtarget
+        if mn.startswith('iba'):
+            cond_name = mn.split('.')[1] if '.' in mn else 'al'
+            cond = COND[cond_name]
+            if cond == 0:
+                rcmp, rtgt = 0, reg(ops[0])
+            else:
+                rcmp, rtgt = reg(ops[0]), reg(ops[1])
+            words.append(encode(18, cond, rcmp, rtgt << 16))
+            pc += 4
+            continue
+
+        # --- ica[.cond] — indirect call via register ---
+        # Syntax: ica Rtarget  or  ica.cond Rcmp, Rtarget
+        if mn.startswith('ica'):
+            cond_name = mn.split('.')[1] if '.' in mn else 'al'
+            cond = COND[cond_name]
+            if cond == 0:
+                rcmp, rtgt = 0, reg(ops[0])
+            else:
+                rcmp, rtgt = reg(ops[0]), reg(ops[1])
+            words.append(encode(19, cond, rcmp, rtgt << 16))
             pc += 4
             continue
 
