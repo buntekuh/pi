@@ -262,7 +262,7 @@ begin
                             when "101" =>
                                 next_pc := std_logic_vector(
                                     unsigned(registers(register_index)) +
-                                    unsigned((31 downto 16 => d_imm20(15)) & d_imm20(15 downto 0)));
+                                    unsigned(resize(signed(d_imm20(15 downto 0)), 32)));
                                 memory_address     <= next_pc;
                                 memory_read_enable <= '1';
                                 load_destination   <= to_integer(unsigned(d_imm20(19 downto 16)));
@@ -277,7 +277,7 @@ begin
                             when "110" =>
                                 next_pc := std_logic_vector(
                                     unsigned(registers(to_integer(unsigned(d_imm20(19 downto 16))))) +
-                                    unsigned((31 downto 16 => d_imm20(15)) & d_imm20(15 downto 0)));
+                                    unsigned(resize(signed(d_imm20(15 downto 0)), 32)));
                                 memory_address      <= next_pc;
                                 memory_write_data   <= registers(register_index);
                                 memory_write_enable <= '1';
