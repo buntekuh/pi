@@ -193,6 +193,31 @@ pn_digit:
         cal     putc
         ret
 
+; ── print_hex_word ───────────────────────────────────────────────────────────
+; Print R0 as 8 uppercase hex digits. Clobbers R0–R2. Preserves R3–R4.
+print_hex_word:
+        psh     R3
+        psh     R4
+        mov     R0, R4
+        mov     R4, R0
+        shr     R0, #24
+        and     R0, #0xFF
+        cal     print_hex_byte
+        mov     R4, R0
+        shr     R0, #16
+        and     R0, #0xFF
+        cal     print_hex_byte
+        mov     R4, R0
+        shr     R0, #8
+        and     R0, #0xFF
+        cal     print_hex_byte
+        mov     R4, R0
+        and     R0, #0xFF
+        cal     print_hex_byte
+        pop     R4
+        pop     R3
+        ret
+
 ; ── getc ─────────────────────────────────────────────────────────────────────
 ; Block until RX buffer has a byte. Returns byte in R0.
 ; Clobbers R0–R2.
@@ -287,6 +312,7 @@ sram_done:
 
         mov     #greeting, R0
         cal     puts
+        cal     run_tests
 
         ; SD card test: init, read sector 0, hexdump first 16 bytes
         cal     sd_init

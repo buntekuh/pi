@@ -28,6 +28,6 @@ package board_pkg is
     -- 57600 words = 225 KB, using all available Block RAM on the Artix-7 35T.
     -- The Block RAM window covers 0x000000–0x03FFFF (bit 18 = 0); addresses
     -- above the firmware size read as zero.
-    constant BLOCK_RAM_WORDS : integer := 1024;
+    constant BLOCK_RAM_WORDS : integer := 2048;
 
 end package board_pkg;

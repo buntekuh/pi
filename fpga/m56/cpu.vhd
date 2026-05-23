@@ -162,6 +162,7 @@ begin
         variable alu_src              : std_logic_vector(31 downto 0);
         variable result33             : std_logic_vector(32 downto 0);
         variable shift_count          : integer range 0 to 31;
+        variable sar_ext              : unsigned(63 downto 0);
     begin
 
         if resetn = '0' then
@@ -389,7 +390,11 @@ begin
                         else
                             shift_count := to_integer(unsigned(d_imm20(4 downto 0)));
                         end if;
-                        registers(register_index) <= std_logic_vector(shift_right(signed(registers(register_index)), shift_count));
+                        -- GHDL emits >> (logical) for shift_right(signed,...) in Verilog.
+                        -- Workaround: sign-extend to 64 bits, shift as unsigned, take bits 31:0.
+                        sar_ext(63 downto 32) := (others => registers(register_index)(31));
+                        sar_ext(31 downto  0) := unsigned(registers(register_index));
+                        registers(register_index) <= std_logic_vector(shift_right(sar_ext, shift_count)(31 downto 0));
                         memory_address     <= registers(15);
                         memory_read_enable <= '1';
                         state <= FETCH;
