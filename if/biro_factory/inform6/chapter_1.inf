@@ -1,0 +1,142 @@
+!------------------------------------------------------------------------
+! Chapter 1 — A Stain on the Family Escutcheon
+!------------------------------------------------------------------------
+
+Global wrath_turn = 0;
+Constant WRATH_LAST = 11;
+
+[ PrintWrath n;
+    print "^";
+    switch (n) {
+        0:  print "Wrathful at your latest transgressions, the heads of the family have gathered.";
+        1:  print "Lord Wagsworth exclaims ~Dashed disgraceful, Crumpet! You've brought shame on
+ the family -- worse even than the incident of Cousin Reggie last summer! In my day, a chap would
+ have had the decency to disappear to the colonies until the worst had blown over.~";
+        2:  print "Aunt Mildred rages ~Crumpet, you have failed us thoroughly. To think, the family
+ name -- our name -- dragged through the mud like a common garden gnome! No sense of honour, no
+ spine, no moral fibre. Frankly, I am lost for words.~";
+        3:  print "Aunt Edwina rasps wearily ~Well, well, well, young Crumpet. Too much jazz, too
+ many parties, too much wreckage in your wake. If your great-grandfather were alive today...~ She
+ does not finish the thought.";
+        4:  print "Lord Wagsworth, now trembling with righteous fury: ~In the regiment, we had a
+ code -- a fellow didn't sully his uniform! But you've practically embroidered disgrace onto the
+ escutcheon.~";
+        5:  print "You blank out the droning voices. Wistfully you remember wanting to golf with
+ Miriam today.";
+        6:  print "You glance out the window. A perfect day to work on your handicap.";
+        7:  print "Uncle Basil's thundering voice brings you back to the present.";
+        8:  print "~It will have to be the colonies for a year,~ says Aunt Edwina.";
+        9:  print "~Out of the question,~ booms Uncle Basil. ~We cannot bear the mark of a loser
+ in our proud family.~";
+        10: print "~The director of the biro factory has resigned this morning,~ Lord Wagsworth
+ muses. ~A simple post, even for a cretin. The factory practically runs itself!~";
+        11: print "With a sigh of relief around the room the discussion turns to Lady Chatterley's
+ scandalous wardrobe. You have evidently been dismissed.";
+    }
+    print "^^";
+];
+
+!--- Rooms ---
+
+Object DrawingRoom "Drawing Room at the Family Estate"
+    with description
+        "Richly decorated sofas, armchairs and the occasional table are tastefully arranged
+         around the room. Nameless ancestors look sternly down on you, proud through the ages,
+         ensconced in their gilded frames along the walls.",
+         e_to GreatHall,
+         each_turn [;
+             if (wrath_turn <= WRATH_LAST) {
+                 PrintWrath(wrath_turn);
+                 wrath_turn++;
+                 if (wrath_turn > WRATH_LAST) PlayerTo(FactoryLobby);
+             }
+         ],
+         before [;
+             Go:     if (wrath_turn <= WRATH_LAST) { "You are rooted to the spot, unable to move."; }
+             Wait:   if (wrath_turn <= WRATH_LAST) { "You hope for the storm to pass over quickly."; }
+             Answer: if (wrath_turn <= WRATH_LAST) { "You grasp for words but little more than a gurgle leaves your lips."; }
+         ],
+    has light;
+
+Object GreatHall "The Great Hall"
+    with description "A vast hall. The drawing room lies to the west.",
+         w_to DrawingRoom,
+    has light;
+
+!--- Scenery ---
+
+Object ancestors "nameless ancestors" DrawingRoom
+    with name 'ancestor' 'ancestors' 'portrait' 'portraits' 'nameless',
+         description "Proud through the ages, ensconced in their gilded frames.",
+    has scenery pluralname;
+
+Object sofas "sofas and armchairs" DrawingRoom
+    with name 'sofa' 'sofas' 'armchair' 'armchairs' 'chair' 'furniture',
+         description "Richly upholstered. Disapproving.",
+    has scenery pluralname;
+
+Object tables "occasional tables" DrawingRoom
+    with name 'table' 'tables',
+         description "Each bears an arrangement of objects you would not dare touch.",
+    has scenery pluralname;
+
+!--- NPCs ---
+
+Object lord_wagsworth "Lord Wagsworth" DrawingRoom
+    with name 'lord' 'wagsworth',
+         description
+             "Lord Wagsworth reclines in his armchair in a peculiar form of disdainful repose.
+              His left eyebrow is menacingly raised by a quarter of an inch.",
+         before [; Ask, Tell: "You dare not speak."; ],
+    has animate;
+
+Object aunt_mildred "Aunt Mildred" DrawingRoom
+    with name 'aunt' 'mildred',
+         description
+             "There are glaciers with warmer dispositions than Aunt Mildred,
+              and they melt faster, too.",
+         before [; Ask, Tell: "You dare not speak."; ],
+    has animate female;
+
+Object aunt_edwina "Aunt Edwina" DrawingRoom
+    with name 'aunt' 'edwina',
+         description
+             "It is not uncommon for cabinet ministers to blanch at her smile.
+              Aunt Edwina is not smiling now.",
+         before [; Ask, Tell: "You dare not speak."; ],
+    has animate female;
+
+Object uncle_basil "Uncle Basil" DrawingRoom
+    with name 'uncle' 'basil',
+         description
+             "His gaze alone may have broken the Conqueror's resolve.
+              Yours is definitely breaking now.",
+         before [; Ask, Tell: "You dare not speak."; ],
+    has animate;
+
+!--- Player inventory ---
+
+Object pocket_watch "pocket watch"
+    with name 'pocket' 'watch' 'timepiece',
+         description
+             "A time piece of exquisite refinement. It usually nestles in the silken depths
+              of your waistcoat pocket. Sadly, it is broken.",
+         before [;
+             Drop, Give, PutOn, ThrowAt:
+                 "Never have you relinquished your cherished pocket watch. With a flourish,
+                  you let it slip gracefully back into the embrace of your waistcoat pocket.";
+             Examine:
+                 if (wrath_turn <= WRATH_LAST) { "You dare not move."; }
+         ],
+    has ;
+
+Object smartphone "smartphone"
+    with name 'smartphone' 'phone' 'iphone' 'mobile',
+         description "The latest iPhone model.",
+         before [;
+             Drop, Give, PutOn, ThrowAt:
+                 "And lose your lifeline to the world? You slip it absently back into your pocket.";
+             Examine:
+                 if (wrath_turn <= WRATH_LAST) { "You dare not move."; }
+         ],
+    has ;

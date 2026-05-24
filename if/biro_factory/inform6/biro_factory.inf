@@ -1,0 +1,20 @@
+Constant Story "Biro Factory";
+Constant Headline "^An Interactive Comedy^";
+Constant MAX_SCORE 0;
+
+Include "Parser";
+Include "VerbLib";
+
+Include ">chapter_1";
+Include ">chapter_2";
+
+Include "Grammar";
+
+[ Initialise;
+    location = DrawingRoom;
+    move pocket_watch to player;
+    move smartphone to player;
+    (golden_robot.&program)-->0 = green_cube;
+    (purple_robot.&program)-->0 = purple_cube;
+    print "^^~Biro Factory~^An Interactive Comedy^^^";
+];

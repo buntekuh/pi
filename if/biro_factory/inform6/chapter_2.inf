@@ -1,0 +1,147 @@
+!------------------------------------------------------------------------
+! Chapter 2 — The Biro Factory
+!------------------------------------------------------------------------
+
+Constant CMD_NONE  = 0;
+Constant CMD_BEEP  = 1;
+Constant CMD_DANCE = 2;
+Constant CMD_SEEK  = 3;
+
+!--- Rooms ---
+
+Global factory_started = 0;
+
+Object FactoryLobby "Lobby of the Biro Factory"
+    with description
+        "The lobby of the Biro Factory. The hum of machinery drifts in from both sides.",
+         w_to RedRoom,
+         e_to GreenRoom,
+         each_turn [;
+             if (factory_started == 0) {
+                 factory_started = 1;
+                 StartDaemon(golden_robot);
+                 StartDaemon(purple_robot);
+             }
+         ],
+    has light;
+
+Object RedRoom "Red Room"
+    with description "A room painted a confident red. Component machinery lines the walls.",
+         e_to FactoryLobby,
+    has light;
+
+Object GreenRoom "Green Room"
+    with description "Lime green walls. Cheerful in a headache-inducing sort of way.",
+         w_to FactoryLobby,
+         e_to PurpleRoom,
+    has light;
+
+Object PurpleRoom "Purple Room"
+    with description "Deep purple shot through with silver. Rather regal.",
+         w_to GreenRoom,
+    has light;
+
+!--- Robot execution engine ---
+
+[ PrintRobotProgram r  i cube;
+    print "Program:^";
+    for (i = 0 : i < 4 : i++) {
+        cube = (r.&program)-->i;
+        print "  ["; print i + 1; print "] ";
+        if (cube == nil_cube || cube == 0) { print "empty"; }
+        else { print (name) cube; }
+        if (i == r.counter) { print " <--"; }
+        print "^";
+    }
+];
+
+[ RobotExecute r  slots cube cmd;
+    if (r.power == 0) return;
+    slots = (r.#program) / 2;
+    cube = (r.&program)-->(r.counter);
+    r.counter = (r.counter + 1) % slots;
+    if (cube == nil_cube || cube == 0) return;
+    cmd = cube.command;
+    switch (cmd) {
+        CMD_BEEP:
+            if (parent(r) == parent(player)) {
+                print (The) r; " beeps cheerfully.";
+            }
+        CMD_DANCE:
+            if (parent(r) == parent(player)) {
+                print (The) r; " gracefully waltzes about.";
+            }
+        CMD_SEEK:
+            ! TODO: pathfinding toward player
+            if (parent(r) ~= parent(player)) {
+                print (The) r; " trundles purposefully somewhere.^";
+            }
+    }
+];
+
+!--- Nil cube ---
+
+Object nil_cube "empty slot"
+    with name 'nil' 'empty' 'slot',
+         command CMD_NONE,
+    has ;
+
+!--- Robots ---
+
+Object golden_robot "golden robot" FactoryLobby
+    with name 'golden' 'robot',
+         description [;
+             print "A standard Roboton utility unit, gleaming gold.^";
+             PrintRobotProgram(self);
+             rtrue;
+         ],
+         daemon  [; RobotExecute(self); ],
+         program nil_cube nil_cube nil_cube nil_cube,
+         counter 0,
+         power   1,
+    has animate;
+
+Object purple_robot "purple robot" FactoryLobby
+    with name 'purple' 'robot',
+         description [;
+             print "A standard Roboton utility unit, painted deep purple.^";
+             PrintRobotProgram(self);
+             rtrue;
+         ],
+         daemon  [; RobotExecute(self); ],
+         program nil_cube nil_cube nil_cube nil_cube,
+         counter 0,
+         power   1,
+    has animate;
+
+!--- Command cubes ---
+
+Object red_cube "red cube" FactoryLobby
+    with name 'red' 'cube',
+         description "A flamenco dancer embossed on the side.",
+         command CMD_DANCE,
+    has ;
+
+Object green_cube "green cube" FactoryLobby
+    with name 'green' 'cube',
+         description "The symbol of a bell embossed on the side.",
+         command CMD_BEEP,
+    has ;
+
+Object purple_cube "purple cube" FactoryLobby
+    with name 'purple' 'cube',
+         description "A gaming piece embossed on the side.",
+         command CMD_SEEK,
+    has ;
+
+!--- Lobby objects ---
+
+Object lobby_box "cardboard box" FactoryLobby
+    with name 'box' 'cardboard',
+         description "A plain cardboard box.",
+    has container open;
+
+Object herring "red herring" lobby_box
+    with name 'red' 'herring' 'fish',
+         description "A conspicuously placed fish.",
+    has ;
