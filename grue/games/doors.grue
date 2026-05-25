@@ -1,0 +1,25 @@
+# Doors
+
+room WhiteRoom "A White Room"
+    "Dazzling white walls on all sides. A blue door stands before you."
+    east blue_door
+
+    door blue door "blue door"
+        "A perfectly smooth blue door."
+        leads: BlueRoom
+        is openable.
+
+room BlueRoom "A Blue Room"
+    "Deep blue walls on all sides. A white door stands before you."
+    west blue_door
+
+    door white door "white door"
+        "A perfectly smooth white door."
+        leads: WhiteRoom
+        is openable.
+
+test "default"
+    open blue door. "You open"
+    east. "Blue Room"
+    open white door. "You open"
+    west. "White Room"

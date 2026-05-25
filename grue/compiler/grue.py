@@ -152,7 +152,13 @@ def parse(source: str) -> dict:
                 if m:
                     current_room['exits'][m.group(1).lower()] = m.group(2)
 
-            elif re.match(r'(object|scenery|man|woman|robot)\s+', stripped):
+            # exit via door object:  east blue_door  (unquoted identifier)
+            elif re.match(r'(north|south|east|west|up|down|ne|nw|se|sw):?\s+\w+\s*$', stripped, re.I):
+                m = re.match(r'(\w+):?\s+(\w+)', stripped)
+                if m:
+                    current_room['exits'][m.group(1).lower()] = m.group(2)
+
+            elif re.match(r'(object|scenery|man|woman|robot|door)\s+', stripped):
                 kind    = stripped.split()[0]
                 rest    = stripped[len(kind):].strip()
                 if '"' in rest:
@@ -258,6 +264,49 @@ def _obj_attributes(obj: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Inform 6 object emitters
+# ---------------------------------------------------------------------------
+
+def _emit_object(w, obj: dict, parent: str):
+    oid   = obj['id']
+    attrs = _obj_attributes(obj)
+    kws   = ' '.join(f"'{k}'" for k in obj['keywords']) if obj['keywords'] else ''
+    loc   = obj['properties'].get('inside', parent)
+
+    w(f'Object {oid} "{_i6str(obj["name"])}" {loc}')
+    if kws:
+        w(f'    with name {kws},')
+    w(f'         description "{_i6str(obj["desc"])}",')
+    if 'key' in obj['properties']:
+        w(f'         with_key {obj["properties"]["key"]},')
+    w(f'    has {attrs};' if attrs else '    has ;')
+    w('')
+
+
+def _emit_door(w, obj: dict, parent_rid: str, door_map: dict):
+    oid  = obj['id']
+    kws  = ' '.join(f"'{k}'" for k in obj['keywords']) if obj['keywords'] else ''
+    _, _, dest_rid = door_map[oid]
+
+    attrs = 'door openable'
+    if 'lockable' in obj['behaviours']:
+        attrs += ' lockable'
+        if obj['properties'].get('security') == 'locked':
+            attrs += ' locked'
+
+    w(f'Object {oid} "{_i6str(obj["name"])}" {parent_rid}')
+    if kws:
+        w(f'    with name {kws},')
+    w(f'         description "{_i6str(obj["desc"])}",')
+    w(f'         door_to [; if (location == {parent_rid}) return {dest_rid};')
+    w(f'                    return {parent_rid}; ],')
+    if 'key' in obj['properties']:
+        w(f'         with_key {obj["properties"]["key"]},')
+    w(f'    has {attrs};')
+    w('')
+
+
+# ---------------------------------------------------------------------------
 # Inform 6 emitter
 # ---------------------------------------------------------------------------
 
@@ -284,32 +333,37 @@ def emit_i6(ast: dict) -> str:
     room_by_name = {r['name']: r['id'] for r in rooms}
     room_by_id   = {r['id']:   r['id'] for r in rooms}
 
+    # door_id → (door_obj, parent_room_id, dest_room_id)
+    door_map = {}
+    for room in rooms:
+        for obj in room['objects']:
+            if obj['kind'] == 'door':
+                dest_name = obj['properties'].get('leads', '')
+                dest_id   = (room_by_name.get(dest_name)
+                             or room_by_id.get(dest_name)
+                             or _to_id(dest_name))
+                door_map[obj['id']] = (obj, room['id'], dest_id)
+
     for room in rooms:
         rid = room['id']
         w(f'Object {rid} "{_i6str(room["name"])}"')
         w( '    with description')
         w(f'        "{_i6str(room["desc"])}",')
         for direction, dest in room['exits'].items():
-            i6dir   = _DIR_MAP.get(direction, direction + '_to')
-            dest_id = room_by_name.get(dest) or room_by_id.get(dest) or _to_id(dest)
-            w(f'         {i6dir} {dest_id},')
+            i6dir = _DIR_MAP.get(direction, direction + '_to')
+            if dest in door_map:
+                w(f'         {i6dir} {dest},')
+            else:
+                dest_id = room_by_name.get(dest) or room_by_id.get(dest) or _to_id(dest)
+                w(f'         {i6dir} {dest_id},')
         w( '    has light;')
         w('')
 
         for obj in room['objects']:
-            oid    = obj['id']
-            attrs  = _obj_attributes(obj)
-            kws    = ' '.join(f"'{k}'" for k in obj['keywords']) if obj['keywords'] else ''
-            parent = obj['properties'].get('inside', rid)
-
-            w(f'Object {oid} "{_i6str(obj["name"])}" {parent}')
-            if kws:
-                w(f'    with name {kws},')
-            w(f'         description "{_i6str(obj["desc"])}",')
-            if 'key' in obj['properties']:
-                w(f'         with_key {obj["properties"]["key"]},')
-            w(f'    has {attrs};' if attrs else '    has ;')
-            w('')
+            if obj['kind'] == 'door':
+                _emit_door(w, obj, rid, door_map)
+            else:
+                _emit_object(w, obj, rid)
 
     w('Include "Grammar";')
     w('')
