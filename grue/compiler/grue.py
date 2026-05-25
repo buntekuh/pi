@@ -63,75 +63,87 @@ def _extract_string(s: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Parser
+# Parser — Python-style indentation
+#
+# Each block opener records the column it appeared on.  Any subsequent line
+# at or before that column closes the block (exactly like Python's dedent).
+# No hardcoded column numbers — purely relative indentation.
+# Tabs are expanded to 4-space stops before measuring.
 # ---------------------------------------------------------------------------
 
 def parse(source: str) -> dict:
     """
-    Parse Grue source into an AST:
+    Returns:
     {
       uses:  [library_name, ...]
-      rooms: [ ... ]
-      tests: [
-        {
-          name:     str,
-          commands: [ { cmd: str, expect: str|None } ]
-        }
+      rooms: [
+        { id, name, desc, exits: {dir: room_name},
+          objects: [{ id, keywords, name, desc, behaviours, properties, kind }],
+          handlers: {key: [(verb, arg), ...]} }
       ]
+      tests: [{ name, commands: [{ cmd, expect }] }]
     }
     """
     source = _preprocess(source)
-    lines  = source.splitlines()
     ast    = {'uses': [], 'rooms': [], 'tests': []}
 
-    current_room    = None
-    current_object  = None
-    current_handler = None
-    current_test    = None
+    current_room    = None;  room_col    = -1
+    current_object  = None;  obj_col     = -1
+    current_handler = None;  handler_col = -1
+    current_test    = None;  test_col    = -1
 
-    for raw in lines:
+    for raw in source.splitlines():
         stripped = raw.strip()
-        indent   = len(raw) - len(raw.lstrip())
-
         if not stripped or stripped.startswith('#'):
             continue
 
-        # ---- indent 0: top level ----------------------------------------
-        if indent == 0:
-            current_room    = None
-            current_object  = None
+        col = len(raw.expandtabs(4)) - len(raw.expandtabs(4).lstrip())
+
+        # Close inner blocks whose opener is at or after the current column
+        if current_handler is not None and col <= handler_col:
             current_handler = None
-            current_test    = None
+        if current_object is not None and col <= obj_col:
+            current_object = None
+        if current_room is not None and col <= room_col:
+            current_room = None
+        if current_test is not None and col <= test_col:
+            current_test = None
 
-            if stripped.startswith('uses '):
-                lib = stripped[5:].rstrip('.').strip()
-                ast['uses'].append(lib)
+        # ---- dispatch on active context, innermost first -----------------
 
-            elif stripped.startswith('room '):
-                m = re.match(r'room\s+(\w+)\s+"([^"]*)"', stripped)
-                if not m:
-                    raise GrueError(f'bad room: {stripped!r}')
-                current_room = {
-                    'id':       m.group(1),
-                    'name':     m.group(2),
-                    'desc':     '',
-                    'exits':    {},
-                    'objects':  [],
-                    'handlers': {},
-                }
-                ast['rooms'].append(current_room)
+        if current_test is not None:
+            dot = stripped.find('.')
+            if dot >= 0:
+                cmd    = stripped[:dot].strip()
+                rest   = stripped[dot + 1:].strip()
+                expect = _extract_string(rest) if rest.startswith('"') else None
+            else:
+                cmd    = stripped
+                expect = None
+            if cmd:
+                current_test['commands'].append({'cmd': cmd, 'expect': expect})
 
-            elif stripped.startswith('test '):
-                m = re.match(r'test\s+"([^"]*)"', stripped)
+        elif current_object is not None:
+            if stripped.startswith('"'):
+                current_object['desc'] = _extract_string(stripped)
+            elif stripped.startswith('is '):
+                current_object['behaviours'].append(stripped[3:].rstrip('.').strip())
+            elif re.match(r'\w+:\s+\S', stripped):
+                m = re.match(r'(\w+):\s+(.+)', stripped)
                 if m:
-                    current_test = {'name': m.group(1), 'commands': []}
-                    ast['tests'].append(current_test)
+                    current_object['properties'][m.group(1)] = m.group(2).rstrip('.')
+            elif re.match(r'\w+\s*=\s*\w+', stripped):
+                m = re.match(r'(\w+)\s*=\s*(\w+)', stripped)
+                if m:
+                    current_object['properties'][m.group(1)] = m.group(2)
 
-        # ---- indent 2: room body ----------------------------------------
-        elif indent == 2 and current_room is not None:
-            current_object  = None
-            current_handler = None
+        elif current_handler is not None:
+            if stripped.startswith('say '):
+                current_handler.append(('say', _extract_string(stripped[4:])))
+            elif stripped.startswith('go '):
+                current_handler.append(('go', stripped[3:].strip().strip('"')))
 
+        elif current_room is not None:
             if stripped.startswith('"'):
                 current_room['desc'] = _extract_string(stripped)
 
@@ -153,56 +165,47 @@ def parse(source: str) -> dict:
                 keywords = [w.strip().strip(',') for w in kw_part.split() if w.strip().strip(',')]
                 obj_id   = '_'.join(keywords) if keywords else _to_id(display)
                 current_object = {
-                    'id':         obj_id,
-                    'keywords':   keywords,
-                    'name':       display,
-                    'desc':       '',
-                    'behaviours': [],
-                    'properties': {},
-                    'kind':       kind,
+                    'id': obj_id, 'keywords': keywords, 'name': display,
+                    'desc': '', 'behaviours': [], 'properties': {}, 'kind': kind,
                 }
+                obj_col = col
                 current_room['objects'].append(current_object)
 
             elif re.match(r'(instead of|on|after)\s+', stripped):
                 key = stripped.rstrip(':')
                 current_handler = []
+                handler_col = col
                 current_room['handlers'][key] = current_handler
 
-        # ---- indent 4: object body, handler body, or test commands -------
-        elif indent == 4:
-            if current_test is not None:
-                # command. "expected output"  or just  command.
-                dot = stripped.find('.')
-                if dot >= 0:
-                    cmd  = stripped[:dot].strip()
-                    rest = stripped[dot + 1:].strip()
-                    expect = _extract_string(rest) if rest.startswith('"') else None
+        else:
+            # top level
+            if stripped.startswith('uses '):
+                ast['uses'].append(stripped[5:].rstrip('.').strip())
+
+            elif stripped.startswith('room '):
+                # room <id> "Name"  or  room "Name"  (id auto-derived)
+                m = re.match(r'room\s+(\w+)\s+"([^"]*)"', stripped)
+                if m:
+                    rid, rname = m.group(1), m.group(2)
                 else:
-                    cmd    = stripped
-                    expect = None
-                if cmd:
-                    current_test['commands'].append({'cmd': cmd, 'expect': expect})
+                    m2 = re.match(r'room\s+"([^"]*)"', stripped)
+                    if not m2:
+                        raise GrueError(f'bad room: {stripped!r}')
+                    rname = m2.group(1)
+                    rid   = _to_id(rname)
+                current_room = {
+                    'id': rid, 'name': rname, 'desc': '',
+                    'exits': {}, 'objects': [], 'handlers': {},
+                }
+                room_col = col
+                ast['rooms'].append(current_room)
 
-            elif current_object is not None:
-                if stripped.startswith('"'):
-                    current_object['desc'] = _extract_string(stripped)
-                elif stripped.startswith('is '):
-                    beh = stripped[3:].rstrip('.').strip()
-                    current_object['behaviours'].append(beh)
-                elif re.match(r'\w+:\s+\w+', stripped):
-                    m = re.match(r'(\w+):\s+(\w+)', stripped)
-                    if m:
-                        current_object['properties'][m.group(1)] = m.group(2)
-                elif re.match(r'\w+\s*=\s*\w+', stripped):
-                    m = re.match(r'(\w+)\s*=\s*(\w+)', stripped)
-                    if m:
-                        current_object['properties'][m.group(1)] = m.group(2)
-
-            elif current_handler is not None:
-                if stripped.startswith('say '):
-                    current_handler.append(('say', _extract_string(stripped[4:])))
-                elif stripped.startswith('go '):
-                    current_handler.append(('go', stripped[3:].strip().strip('"')))
+            elif stripped.startswith('test '):
+                m = re.match(r'test\s+"([^"]*)"', stripped)
+                if m:
+                    current_test = {'name': m.group(1), 'commands': []}
+                    test_col = col
+                    ast['tests'].append(current_test)
 
     return ast
 
@@ -276,16 +279,19 @@ def emit_i6(ast: dict) -> str:
     w('Include "VerbLib";')
     w('')
 
-    room_id_map = {r['id']: r['id'] for r in rooms}
+    # Both name→id and id→id so exits resolve whether the author
+    # wrote  north "Display Name"  or  north "room_id"
+    room_by_name = {r['name']: r['id'] for r in rooms}
+    room_by_id   = {r['id']:   r['id'] for r in rooms}
 
     for room in rooms:
         rid = room['id']
         w(f'Object {rid} "{_i6str(room["name"])}"')
         w( '    with description')
         w(f'        "{_i6str(room["desc"])}",')
-        for direction, dest_name in room['exits'].items():
+        for direction, dest in room['exits'].items():
             i6dir   = _DIR_MAP.get(direction, direction + '_to')
-            dest_id = room_id_map.get(dest_name, _to_id(dest_name))
+            dest_id = room_by_name.get(dest) or room_by_id.get(dest) or _to_id(dest)
             w(f'         {i6dir} {dest_id},')
         w( '    has light;')
         w('')
