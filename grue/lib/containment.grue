@@ -1,0 +1,83 @@
+# Grue Standard Library — Containment
+# ============================================================
+# Defines openable, lockable, container and supporter behaviours.
+# Example: class cabinet is object, is container, is openable, is lockable
+# ============================================================
+
+
+# --- State types ---
+
+type containment: open, closed
+type security: locked, unlocked
+
+
+# --- Behaviours ---
+
+behaviour openable
+  containment: closed
+
+  verb open
+    instead of open when containment is open:
+      say "It is already open."
+    after open:
+      containment = open
+      say "Opened."
+
+  verb close
+    instead of close when containment is closed:
+      say "It is already closed."
+    after close:
+      containment = closed
+      say "Closed."
+
+
+behaviour lockable
+  security: unlocked
+
+  verb lock
+    # requires key
+    instead of lock when security is locked:
+      say "It is already locked."
+    instead of lock when containment is open:
+      say "You would need to close it first."
+    after lock:
+      security = locked
+      say "Locked."
+
+  verb unlock
+    # requires key
+    instead of unlock when security is unlocked:
+      say "It is already unlocked."
+    after unlock:
+      security = unlocked
+      say "Unlocked."
+
+  instead of open when security is locked:
+    say "It is locked."
+
+
+behaviour container
+  verb put in
+    instead of put in when containment is closed:
+      say "You would need to open it first."
+    after put in:
+      say "Done."
+
+  verb take from
+    instead of take from when containment is closed:
+      say "You would need to open it first."
+
+  on examine:
+    if containment is open:
+      say contents
+
+
+behaviour supporter
+  verb put on
+    after put on:
+      say "Done."
+
+  verb take from
+
+  on examine:
+    say contents

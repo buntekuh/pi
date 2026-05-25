@@ -1,0 +1,21 @@
+# The Imperial Treasury
+
+uses containment.
+
+room Treasury "Kublai Khan's Imperial Treasury"
+  "A vast chamber, cool and dim. The wealth of three empires gleams softly
+   from every surface. In the centre of the room stands a heavy oaken chest."
+
+  object war chest "Kublai Khan's war chest"
+    "A symbol of power and might. 
+    Delapidated yet proud, veteran of many a campaign. An elaborate keyhole is inset at the front."
+    is openable.
+    is lockable.
+    is container.
+    containment: closed
+    security: unlocked
+
+test "default"
+    examine chest. "An elaborate keyhole"
+    open chest. "You open the"
+    close chest.

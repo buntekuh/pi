@@ -1,0 +1,115 @@
+# Biro Factory
+# An Interactive Comedy
+
+
+# ============================================================
+# Chapter 1 — A Stain on the Family Escutcheon
+# ============================================================
+
+room "Drawing Room at the Family Estate"
+  "Richly decorated sofas, armchairs and the occasional table are tastefully arranged
+   around the room. Nameless ancestors look sternly down on you, proud through the ages,
+   ensconced in their gilded frames along the walls."
+
+  east "The Great Hall"
+
+  scenery ancestors, pictures, frames "Proud through the ages, ensconced in their gilded frames."
+  scenery sofas, settee, Hepplewhite, armchair "Heavy, elaborate, venerable. Marie Antoinette is said to have lounged on one, but you've never bothered to remember which."
+  scenery tables "Each bears an arrangement of objects you would not dare touch."
+  scenery robot "The humble servant forged from iron, diligent in labor, proud in its craft."
+
+  man Lord Wagsworth
+    "Lord Wagsworth reclines in his armchair in a peculiar form of disdainful repose.
+     His left eyebrow is menacingly raised by a quarter of an inch."
+
+  woman Aunt Mildred
+    "There are glaciers with warmer dispositions than Aunt Mildred,
+     and they melt faster, too."
+
+  woman Aunt Edwina
+    "It is not uncommon for cabinet ministers to blanch at her smile.
+     Aunt Edwina is not smiling now."
+
+  man Uncle Basil
+    "His gaze alone may have broken the Conqueror's resolve.
+     Yours is definitely breaking now."
+
+  object Pocket Watch
+    "A timepiece of exquisite refinement. It usually nestles in the silken depths
+     of your waistcoat pocket. Sadly, it is broken."
+
+  object Smartphone
+    "The latest model. Your lifeline to the world."
+
+  instead of go:
+    say "You are rooted to the spot, unable to move."
+    
+  instead of say:
+      say "You grasp for words but little more than a gurgle leaves your lips."
+
+  on wait:
+    say "You hope for the storm to pass over quickly."
+
+  on turn 0:
+    say "Wrathful at your latest transgressions, the heads of the family have gathered."
+
+  on turn 1:
+    say "Lord Wagsworth exclaims \"Dashed disgraceful, Crumpet! You've brought shame on
+         the family -- worse even than the incident of Cousin Reggie last summer! In my
+         day, a chap would have had the decency to disappear to the colonies until the
+         worst had blown over.\""
+
+  on turn 2:
+    say "Aunt Mildred rages \"Crumpet, you have failed us thoroughly. To think, the family
+         name -- our name -- dragged through the mud like a common garden gnome! No sense
+         of honour, no spine, no moral fibre. Frankly, I am lost for words.\"
+         
+         A robot enters from the great hall."
+
+  on turn 3:
+    say "Aunt Edwina rasps wearily \"Well, well, well, young Crumpet. Too much jazz, too
+         many parties, too much wreckage in your wake. If your great-grandfather were
+         alive today... \"She does not finish the thought.
+         
+         The robot starts dusting the picture frames."
+
+  on turn 4:
+    say "Lord Wagsworth, now trembling with righteous fury: \"In the regiment, we had a
+         code -- a fellow didn't sully his uniform! But you've practically embroidered
+         disgrace onto the escutcheon.\""
+
+  on turn 5:
+    say "You blank out the droning voices. Wistfully you remember wanting to golf
+         with Miriam today.
+         
+         The robot scans the room, daring a mote of dust to disturb its equanimity."
+
+  on turn 6:
+    say "You glance out the window. A perfect day to work on your handicap."
+
+  on turn 7:
+    say "Uncle Basil's thundering voice brings you back to the present."
+
+  on turn 8:
+    say "\"It will have to be the colonies for a year,\" says Aunt Edwina.
+    
+    The robot bears down on a tiny crumb under the settee."
+
+  on turn 9:
+    say "\"Out of the question,\" booms Uncle Basil. \"The mark of a loser
+         would sully our name.\""
+
+  on turn 10:
+    say "\"The director of the biro factory has resigned this morning,\" Lord Wagsworth
+         muses eyeing the robot. \"A simple post, even for a cretin. The factory practically runs itself!\""
+
+  on turn 11:
+    say "With a sigh of relief around the room the discussion turns to Lady Chatterley's
+         scandalous wardrobe. Evidently you have been dismissed."
+    go "Lobby of the Biro Factory"
+
+
+room "The Great Hall"
+  "A vast hall. The drawing room lies to the west."
+
+  west "Drawing Room at the Family Estate"

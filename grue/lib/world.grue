@@ -1,0 +1,20 @@
+# Grue Standard Library — Core World Model
+# ============================================================
+# The root of everything. All game objects inherit from object.
+# ============================================================
+
+class object
+  has name
+  has description
+
+  verb examine
+    say description
+
+  instead of take:
+    say "You can't take that."
+
+  instead of put in:
+    say "You can't put anything in that."
+
+  instead of put on:
+    say "You can't put anything on that."
