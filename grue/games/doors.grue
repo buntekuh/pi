@@ -1,22 +1,18 @@
 # Doors
 
-room WhiteRoom "A White Room"
-    "Dazzling white walls on all sides. A blue door stands before you."
-    east blue_door
+room White Room "Dazzling white walls all around. It is eerily silent. A blue door leads east."
 
-    door blue door "blue door"
-        "A perfectly smooth blue door."
-        leads: BlueRoom
-        is openable.
+room Blue Room "You stand in a blue room. When you listen carefully, you hear gulls and the surf of the waves. A white door adornes the west wall."
 
-room BlueRoom "A Blue Room"
-    "Deep blue walls on all sides. A white door stands before you."
-    west blue_door
+door blue door "A perfectly smooth blue door."
+    east: Blue Room
+    west: White Room
+    is openable.
 
-    door white door "white door"
-        "A perfectly smooth white door."
-        leads: WhiteRoom
-        is openable.
+door white door "Whiter than an unblemished soul."
+    east: White Room
+    west: Blue Room
+    is openable.
 
 test "default"
     open blue door. "You open"

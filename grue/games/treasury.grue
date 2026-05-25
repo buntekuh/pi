@@ -2,7 +2,7 @@
 
 uses containment.
 
-room Treasury "Kublai Khan's Imperial Treasury"
+room "Kublai Khan's Imperial Treasury"
   "A vast chamber, cool and dim. The wealth of three empires gleams softly
    from every surface. In the centre of the room stands a heavy oaken chest."
   west "Antechamber"
@@ -35,7 +35,7 @@ room Treasury "Kublai Khan's Imperial Treasury"
      upon presentation to the bearer. Signed, M. Polo. Venice, 1275."
     inside: war_chest
 
-room Antechamber "Antechamber"
+room Antechamber
   "A narrow antechamber. Torches flicker in iron brackets.
    The treasury lies to the east."
   east "Kublai Khan's Imperial Treasury"

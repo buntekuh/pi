@@ -85,12 +85,13 @@ def parse(source: str) -> dict:
     }
     """
     source = _preprocess(source)
-    ast    = {'uses': [], 'rooms': [], 'tests': []}
+    ast    = {'uses': [], 'rooms': [], 'doors': [], 'tests': []}
 
     current_room    = None;  room_col    = -1
     current_object  = None;  obj_col     = -1
     current_handler = None;  handler_col = -1
     current_test    = None;  test_col    = -1
+    current_door    = None;  door_col    = -1
 
     for raw in source.splitlines():
         stripped = raw.strip()
@@ -108,6 +109,8 @@ def parse(source: str) -> dict:
             current_room = None
         if current_test is not None and col <= test_col:
             current_test = None
+        if current_door is not None and col <= door_col:
+            current_door = None
 
         # ---- dispatch on active context, innermost first -----------------
 
@@ -162,17 +165,24 @@ def parse(source: str) -> dict:
                 kind    = stripped.split()[0]
                 rest    = stripped[len(kind):].strip()
                 if '"' in rest:
-                    idx     = rest.index('"')
-                    kw_part = rest[:idx].strip()
-                    display = _extract_string(rest[idx:])
+                    idx        = rest.index('"')
+                    kw_part    = rest[:idx].strip()
+                    inline_desc = _extract_string(rest[idx:])
                 else:
-                    kw_part = rest
-                    display = ''
+                    kw_part    = rest
+                    inline_desc = ''
                 keywords = [w.strip().strip(',') for w in kw_part.split() if w.strip().strip(',')]
-                obj_id   = '_'.join(keywords) if keywords else _to_id(display)
+                # Comma-separated: synonyms — first keyword is canonical name and id.
+                # Space-separated: compound noun (e.g. "blue door") — all words joined.
+                if ',' in kw_part and keywords:
+                    display = keywords[0].lower()
+                    obj_id  = _to_id(keywords[0])
+                else:
+                    display = ' '.join(k.lower() for k in keywords) if keywords else ''
+                    obj_id  = '_'.join(k.lower() for k in keywords) if keywords else _to_id(inline_desc)
                 current_object = {
                     'id': obj_id, 'keywords': keywords, 'name': display,
-                    'desc': '', 'behaviours': [], 'properties': {}, 'kind': kind,
+                    'desc': inline_desc, 'behaviours': [], 'properties': {}, 'kind': kind,
                 }
                 obj_col = col
                 current_room['objects'].append(current_object)
@@ -183,28 +193,66 @@ def parse(source: str) -> dict:
                 handler_col = col
                 current_room['handlers'][key] = current_handler
 
+        elif current_door is not None:
+            if re.match(r'(north|south|east|west|up|down|ne|nw|se|sw):\s+', stripped, re.I):
+                m = re.match(r'(\w+):\s+(.+)', stripped)
+                if m:
+                    current_door['connections'][m.group(1).lower()] = m.group(2).strip().strip('"')
+            elif stripped.startswith('is '):
+                current_door['behaviours'].append(stripped[3:].rstrip('.').strip())
+            elif re.match(r'\w+:\s+\S', stripped):
+                m = re.match(r'(\w+):\s+(.+)', stripped)
+                if m:
+                    current_door['properties'][m.group(1)] = m.group(2).rstrip('.')
+
         else:
             # top level
             if stripped.startswith('uses '):
                 ast['uses'].append(stripped[5:].rstrip('.').strip())
 
             elif stripped.startswith('room '):
-                # room <id> "Name"  or  room "Name"  (id auto-derived)
-                m = re.match(r'room\s+(\w+)\s+"([^"]*)"', stripped)
+                # room White Room "description"  — unquoted name + quoted desc
+                # room "Kublai Khan's Treasury"  "description"  — quoted name + quoted desc
+                # room "Name"                    — quoted name, desc set in body
+                rest = stripped[5:]
+                m = re.match(r'(.+)\s+"([^"]*)"$', rest.strip())
                 if m:
-                    rid, rname = m.group(1), m.group(2)
+                    rname = m.group(1).strip().strip('"')
+                    desc  = m.group(2)
                 else:
-                    m2 = re.match(r'room\s+"([^"]*)"', stripped)
-                    if not m2:
-                        raise GrueError(f'bad room: {stripped!r}')
-                    rname = m2.group(1)
-                    rid   = _to_id(rname)
+                    rname = rest.strip().strip('"')
+                    desc  = ''
+                rid = _to_id(rname)
                 current_room = {
-                    'id': rid, 'name': rname, 'desc': '',
+                    'id': rid, 'name': rname, 'desc': desc,
                     'exits': {}, 'objects': [], 'handlers': {},
                 }
                 room_col = col
                 ast['rooms'].append(current_room)
+
+            elif stripped.startswith('door '):
+                rest = stripped[5:].strip()
+                if '"' in rest:
+                    idx         = rest.index('"')
+                    kw_part     = rest[:idx].strip()
+                    inline_desc = _extract_string(rest[idx:])
+                else:
+                    kw_part     = rest
+                    inline_desc = ''
+                keywords = [w.strip().strip(',') for w in kw_part.split() if w.strip().strip(',')]
+                if ',' in kw_part and keywords:
+                    display = keywords[0].lower()
+                    obj_id  = _to_id(keywords[0])
+                else:
+                    display = ' '.join(k.lower() for k in keywords) if keywords else ''
+                    obj_id  = '_'.join(k.lower() for k in keywords) if keywords else _to_id(inline_desc)
+                current_door = {
+                    'id': obj_id, 'keywords': keywords, 'name': display,
+                    'desc': inline_desc, 'behaviours': [], 'properties': {},
+                    'connections': {},
+                }
+                door_col = col
+                ast['doors'].append(current_door)
 
             elif stripped.startswith('test '):
                 m = re.match(r'test\s+"([^"]*)"', stripped)
@@ -224,6 +272,12 @@ _DIR_MAP = {
     'north': 'n_to', 'south': 's_to', 'east':  'e_to', 'west':  'w_to',
     'up':    'u_to', 'down':  'd_to',
     'ne': 'ne_to',   'nw': 'nw_to',   'se': 'se_to',   'sw': 'sw_to',
+}
+
+_OPPOSITE_DIR = {
+    'north': 'south', 'south': 'north', 'east': 'west',  'west': 'east',
+    'up':    'down',  'down':  'up',
+    'ne': 'sw', 'sw': 'ne', 'nw': 'se', 'se': 'nw',
 }
 
 def _to_id(name: str) -> str:
@@ -328,21 +382,71 @@ def emit_i6(ast: dict) -> str:
     w('Include "VerbLib";')
     w('')
 
-    # Both name→id and id→id so exits resolve whether the author
-    # wrote  north "Display Name"  or  north "room_id"
-    room_by_name = {r['name']: r['id'] for r in rooms}
-    room_by_id   = {r['id']:   r['id'] for r in rooms}
+    # Normalize any room reference to the canonical Inform 6 id.
+    # Accepts: display name ("Blue Room"), derived id ("blue_room"),
+    # or camelCase shorthand ("BlueRoom") — all map to the same id.
+    room_by_norm = {}
+    for r in rooms:
+        room_by_norm[_to_id(r['name'])]        = r['id']  # "Blue Room"  → blue_room
+        room_by_norm[r['id']]                  = r['id']  # blue_room    → blue_room
+        room_by_norm[r['id'].replace('_', '')] = r['id']  # blueroom     → blue_room
 
-    # door_id → (door_obj, parent_room_id, dest_room_id)
+    def _resolve_room(ref: str) -> str:
+        return room_by_norm.get(ref) or room_by_norm.get(_to_id(ref)) or _to_id(ref)
+
+    # door_id → (door_obj, parent_room_id, dest_room_id)  [in-room doors]
     door_map = {}
     for room in rooms:
         for obj in room['objects']:
             if obj['kind'] == 'door':
                 dest_name = obj['properties'].get('leads', '')
-                dest_id   = (room_by_name.get(dest_name)
-                             or room_by_id.get(dest_name)
-                             or _to_id(dest_name))
+                dest_id   = _resolve_room(dest_name)
                 door_map[obj['id']] = (obj, room['id'], dest_id)
+
+    # Top-level doors: resolve connections, derive room exits automatically.
+    # connections maps direction → destination room id.
+    # For each (dir, dest): the departure room is the destination of the opposite dir,
+    # so that room needs  dir_to door_id  added to its exits.
+    top_door_routes = {}   # door_id → {dir: resolved_room_id}
+    room_extra_exits = {}  # room_id → {dir: door_id}
+    for door in ast.get('doors', []):
+        resolved = {d: _resolve_room(dest) for d, dest in door['connections'].items()}
+        top_door_routes[door['id']] = resolved
+        for dir_, dest_id in resolved.items():
+            opp = _OPPOSITE_DIR.get(dir_)
+            if opp and opp in resolved:
+                departure_id = resolved[opp]
+                room_extra_exits.setdefault(departure_id, {})[dir_] = door['id']
+
+    # Parent of each top-level door: the departure room of its first connection.
+    # (departure = the room you leave when travelling in that direction)
+    top_door_parent = {}      # door_id → room_id
+    top_door_parent_dir = {}  # door_id → direction from parent room through door
+    for door in ast.get('doors', []):
+        did = door['id']
+        routes = top_door_routes[did]
+        for dir_, dest_id in routes.items():
+            opp = _OPPOSITE_DIR.get(dir_)
+            if opp and opp in routes:
+                top_door_parent[did]     = routes[opp]
+                top_door_parent_dir[did] = dir_
+                break
+
+    # For each top-level door, find partner doors: other top-level doors whose
+    # parent room appears in this door's connection destinations.
+    # add_to_scope on the door (a child of its parent room) brings partners
+    # into scope so the player can e.g. "open white door" from the other side.
+    door_conn_rooms = {d['id']: set(top_door_routes[d['id']].values())
+                       for d in ast.get('doors', [])}
+    door_partners = {}
+    for door in ast.get('doors', []):
+        did = door['id']
+        partners = [
+            o['id'] for o in ast.get('doors', [])
+            if o['id'] != did
+            and top_door_parent.get(o['id']) in door_conn_rooms.get(did, set())
+        ]
+        door_partners[did] = partners
 
     for room in rooms:
         rid = room['id']
@@ -354,8 +458,10 @@ def emit_i6(ast: dict) -> str:
             if dest in door_map:
                 w(f'         {i6dir} {dest},')
             else:
-                dest_id = room_by_name.get(dest) or room_by_id.get(dest) or _to_id(dest)
-                w(f'         {i6dir} {dest_id},')
+                w(f'         {i6dir} {_resolve_room(dest)},')
+        for direction, door_id in room_extra_exits.get(rid, {}).items():
+            i6dir = _DIR_MAP.get(direction, direction + '_to')
+            w(f'         {i6dir} {door_id},')
         w( '    has light;')
         w('')
 
@@ -364,6 +470,51 @@ def emit_i6(ast: dict) -> str:
                 _emit_door(w, obj, rid, door_map)
             else:
                 _emit_object(w, obj, rid)
+
+    # Top-level door objects
+    for door in ast.get('doors', []):
+        did     = door['id']
+        kws     = ' '.join(f"'{k}'" for k in door['keywords']) if door['keywords'] else ''
+        routes  = top_door_routes.get(did, {})
+        attrs   = 'door'
+        if 'openable' in door['behaviours']:
+            attrs += ' openable'
+        if 'lockable' in door['behaviours']:
+            attrs += ' lockable'
+            if door['properties'].get('security') == 'locked':
+                attrs += ' locked'
+
+        # Parent = first room (in declaration order) that references this door.
+        # door_dir = the direction in that room leading through this door.
+        parent_id  = top_door_parent.get(did, '')
+        parent_dir = top_door_parent_dir.get(did, '')
+
+        w(f'Object {did} "{_i6str(door["name"])}" {parent_id}')
+        if kws:
+            w(f'    with name {kws},')
+        w(f'         description "{_i6str(door["desc"])}",')
+        if parent_dir:
+            w(f'         door_dir {_DIR_MAP.get(parent_dir, parent_dir + "_to")},')
+        # door_to: one branch per connection; each branch tests departure room
+        branches = []
+        for dir_, dest_id in routes.items():
+            opp = _OPPOSITE_DIR.get(dir_)
+            if opp and opp in routes:
+                departure_id = routes[opp]
+                branches.append(f'if (location == {departure_id}) return {dest_id};')
+        if branches:
+            w(f'         door_to [; {branches[0]}')
+            for b in branches[1:]:
+                w(f'                    {b}')
+            w( '                    return 0; ],')
+        partners = door_partners.get(did, [])
+        if partners:
+            scope_calls = ' '.join(f'PlaceInScope({p});' for p in partners)
+            w(f'         add_to_scope [; {scope_calls} ],')
+        if 'key' in door['properties']:
+            w(f'         with_key {door["properties"]["key"]},')
+        w(f'    has {attrs};')
+        w('')
 
     w('Include "Grammar";')
     w('')
