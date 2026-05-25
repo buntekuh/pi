@@ -1,81 +1,272 @@
 !------------------------------------------------------------------------
 ! Chapter 2 — The Biro Factory
 !------------------------------------------------------------------------
+!
+! Factory layout:
+!
+!              [LoadingDock]
+!                    |
+!             [CartridgeRoom]       red
+!                    |
+! [LockerRoom]-[CleaningRoom]-[SpringRoom]-[FillingRoom]-[QARoom]
+!                  blue          yellow        green
+!                                    |
+!                             [BallpointRoom]   purple
+!                                    |
+!              [DirectorOffice]-[FactoryLobby]
+!
+
+Attribute source;
 
 Constant CMD_NONE  = 0;
 Constant CMD_BEEP  = 1;
 Constant CMD_DANCE = 2;
-Constant CMD_SEEK  = 3;
-
-!--- Rooms ---
+Constant CMD_GOTO  = 3;
+Constant CMD_GRAB  = 4;
+Constant CMD_DROP  = 5;
 
 Global factory_started = 0;
 
+!--- Rooms ---
+
 Object FactoryLobby "Lobby of the Biro Factory"
     with description
-        "The lobby of the Biro Factory. The hum of machinery drifts in from both sides.",
-         w_to RedRoom,
-         e_to GreenRoom,
+        "The lobby of the Biro Factory. Machinery hums from the north. The director's office
+         is to the west.",
+         n_to BallpointRoom,
+         w_to DirectorOffice,
+         machine 0,
          each_turn [;
              if (factory_started == 0) {
                  factory_started = 1;
-                 StartDaemon(golden_robot);
-                 StartDaemon(purple_robot);
+                 StartFactoryDaemons();
              }
          ],
     has light;
 
-Object RedRoom "Red Room"
-    with description "A room painted a confident red. Component machinery lines the walls.",
+Object DirectorOffice "Director's Office"
+    with description
+        "A tidy office smelling of pomade. A logbook sits on the desk. A framed production
+         chart hangs slightly askew on the wall.",
          e_to FactoryLobby,
+         machine 0,
     has light;
 
-Object GreenRoom "Green Room"
-    with description "Lime green walls. Cheerful in a headache-inducing sort of way.",
-         w_to FactoryLobby,
-         e_to PurpleRoom,
+Object BallpointRoom "Ballpoint Assembly Bay"
+    with description
+        "Deep purple walls. A ballpoint press occupies the centre of the room, stamping out
+         small precision tips in a steady rhythm.",
+         s_to FactoryLobby,
+         n_to SpringRoom,
+         machine ballpoint_machine,
     has light;
 
-Object PurpleRoom "Purple Room"
-    with description "Deep purple shot through with silver. Rather regal.",
-         w_to GreenRoom,
+Object SpringRoom "Spring Room"
+    with description
+        "The central hub of the factory. Four corridors lead off in each direction. A large
+         assembly bench dominates the middle of the room.",
+         s_to BallpointRoom,
+         n_to CartridgeRoom,
+         e_to FillingRoom,
+         w_to CleaningRoom,
+         machine spring_machine,
     has light;
+
+Object CartridgeRoom "Cartridge Room"
+    with description
+        "Painted a confident red. A cartridge press dominates the room, stamping out blank
+         shells at intervals.",
+         s_to SpringRoom,
+         n_to LoadingDock,
+         machine cartridge_machine,
+    has light;
+
+Object LoadingDock "Loading Dock"
+    with description
+        "A cavernous space. Crates of finished product line the east wall, waiting for
+         collection.",
+         s_to CartridgeRoom,
+         machine shipping_bin,
+    has light;
+
+Object FillingRoom "Filling Room"
+    with description
+        "Lime green walls. Cheerful in a headache-inducing sort of way. A filling rig stands
+         in the centre, surrounded by caskets of compound stabiliser.",
+         w_to SpringRoom,
+         e_to QARoom,
+         machine filling_machine,
+    has light;
+
+Object QARoom "Quality Assurance"
+    with description
+        "A long narrow room. A gun is mounted on a pivot at the near end. Fifty feet away,
+         a target hangs undisturbed.",
+         w_to FillingRoom,
+         machine 0,
+    has light;
+
+Object CleaningRoom "Cleaning Bay"
+    with description
+        "Blue-painted walls. An empty plinth sits in the centre of the room, connection
+         pipes dangling where a machine used to stand.",
+         e_to SpringRoom,
+         w_to LockerRoom,
+         machine 0,
+    has light;
+
+Object LockerRoom "Storage Locker"
+    with description
+        "A cramped room off the cleaning bay. Heavy shelves line the walls. In the centre,
+         a cleaning unit squats on a low dolly.",
+         e_to CleaningRoom,
+         machine 0,
+    has light;
+
+!--- Pathfinding ---
+
+[ NextStep from to;
+    if (from == to) return from;
+    switch (from) {
+        FactoryLobby:
+            if (to == DirectorOffice) return DirectorOffice;
+            return BallpointRoom;
+        DirectorOffice:
+            return FactoryLobby;
+        BallpointRoom:
+            if (to == FactoryLobby || to == DirectorOffice) return FactoryLobby;
+            return SpringRoom;
+        SpringRoom:
+            if (to == BallpointRoom || to == FactoryLobby || to == DirectorOffice)
+                return BallpointRoom;
+            if (to == FillingRoom || to == QARoom) return FillingRoom;
+            if (to == CleaningRoom || to == LockerRoom) return CleaningRoom;
+            return CartridgeRoom;
+        CartridgeRoom:
+            if (to == LoadingDock) return LoadingDock;
+            return SpringRoom;
+        LoadingDock:
+            return CartridgeRoom;
+        FillingRoom:
+            if (to == QARoom) return QARoom;
+            return SpringRoom;
+        QARoom:
+            return FillingRoom;
+        CleaningRoom:
+            if (to == LockerRoom) return LockerRoom;
+            return SpringRoom;
+        LockerRoom:
+            return CleaningRoom;
+    }
+    return from;
+];
+
+!--- Machine processing ---
+
+[ MachineProcess m  input;
+    input = 0;
+    if (m hasnt source) {
+        input = m.receptacle;
+        if (input == 0) return;
+    }
+    if (m.product ~= 0) {
+        if (parent(m.product) ~= 0) return;
+        if (m.dispenser ~= 0) return;
+    }
+    if (input ~= 0) { m.receptacle = 0; remove input; }
+    if (m.product ~= 0) { m.dispenser = m.product; move (m.product) to m; }
+];
+
+[ RunMachines;
+    MachineProcess(cartridge_machine);
+    MachineProcess(ballpoint_machine);
+    MachineProcess(cleaning_machine);
+    MachineProcess(filling_machine);
+    MachineProcess(spring_machine);
+    MachineProcess(shipping_bin);
+];
+
+[ GamePostRoutine;
+    if (factory_started) RunMachines();
+];
 
 !--- Robot execution engine ---
 
-[ PrintRobotProgram r  i cube;
+[ PrintRobotProgram r  i cube cmd;
     print "Program:^";
     for (i = 0 : i < 4 : i++) {
         cube = (r.&program)-->i;
         print "  ["; print i + 1; print "] ";
-        if (cube == nil_cube || cube == 0) { print "empty"; }
-        else { print (name) cube; }
+        if (cube == nil_cube || cube == 0) {
+            print "empty";
+        } else {
+            cmd = cube.command;
+            switch (cmd) {
+                CMD_GOTO:  print "go to "; print (name) cube.target;
+                CMD_GRAB:  print "grab";
+                CMD_DROP:  print "drop";
+                CMD_BEEP:  print "beep";
+                CMD_DANCE: print "dance";
+                default:   print (name) cube;
+            }
+        }
         if (i == r.counter) { print " <--"; }
         print "^";
     }
 ];
 
-[ RobotExecute r  slots cube cmd;
+[ RobotExecute r  slots cube cmd dest next m item;
     if (r.power == 0) return;
     slots = (r.#program) / 2;
     cube = (r.&program)-->(r.counter);
-    r.counter = (r.counter + 1) % slots;
-    if (cube == nil_cube || cube == 0) return;
+    if (cube == nil_cube || cube == 0) {
+        r.counter = (r.counter + 1) % slots;
+        return;
+    }
     cmd = cube.command;
     switch (cmd) {
+        CMD_GOTO:
+            dest = cube.target;
+            if (parent(r) == dest) {
+                r.counter = (r.counter + 1) % slots;
+            } else {
+                next = NextStep(parent(r), dest);
+                move r to next;
+                if (parent(r) == parent(player)) {
+                    print (The) r, " trundles in.^";
+                }
+            }
+        CMD_GRAB:
+            if (r.cargo ~= 0) { r.counter = (r.counter + 1) % slots; return; }
+            m = (parent(r)).machine;
+            if (m == 0) { r.counter = (r.counter + 1) % slots; return; }
+            item = m.dispenser;
+            if (item == 0) return;
+            if (parent(r) == parent(player)) {
+                print (The) r, " lifts ", (the) item, " from ", (the) m, ".^";
+            }
+            m.dispenser = 0;
+            r.cargo = item;
+            move item to r;
+            r.counter = (r.counter + 1) % slots;
+        CMD_DROP:
+            m = (parent(r)).machine;
+            if (m == 0 || r.cargo == 0) { r.counter = (r.counter + 1) % slots; return; }
+            if (m.receptacle ~= 0) return;
+            item = r.cargo;
+            if (parent(r) == parent(player)) {
+                print (The) r, " slides ", (the) item, " into ", (the) m, ".^";
+            }
+            r.cargo = 0;
+            m.receptacle = item;
+            move item to m;
+            r.counter = (r.counter + 1) % slots;
         CMD_BEEP:
-            if (parent(r) == parent(player)) {
-                print (The) r; " beeps cheerfully.";
-            }
+            if (parent(r) == parent(player)) { print (The) r, " beeps cheerfully.^"; }
+            r.counter = (r.counter + 1) % slots;
         CMD_DANCE:
-            if (parent(r) == parent(player)) {
-                print (The) r; " gracefully waltzes about.";
-            }
-        CMD_SEEK:
-            ! TODO: pathfinding toward player
-            if (parent(r) ~= parent(player)) {
-                print (The) r; " trundles purposefully somewhere.^";
-            }
+            if (parent(r) == parent(player)) { print (The) r, " gracefully waltzes about.^"; }
+            r.counter = (r.counter + 1) % slots;
     }
 ];
 
@@ -84,55 +275,259 @@ Object PurpleRoom "Purple Room"
 Object nil_cube "empty slot"
     with name 'nil' 'empty' 'slot',
          command CMD_NONE,
+         target 0,
+    has ;
+
+!--- Navigation cubes ---
+
+Object red_cube "red cube"
+    with name 'red' 'cube',
+         description "An arrow embossed on the side.",
+         command CMD_GOTO,
+         target CartridgeRoom,
+    has ;
+
+Object blue_cube "blue cube"
+    with name 'blue' 'cube',
+         description "An arrow embossed on the side.",
+         command CMD_GOTO,
+         target CleaningRoom,
+    has ;
+
+Object green_cube "green cube"
+    with name 'green' 'cube',
+         description "An arrow embossed on the side.",
+         command CMD_GOTO,
+         target FillingRoom,
+    has ;
+
+Object yellow_cube "yellow cube"
+    with name 'yellow' 'cube',
+         description "An arrow embossed on the side.",
+         command CMD_GOTO,
+         target SpringRoom,
+    has ;
+
+Object purple_cube "purple cube"
+    with name 'purple' 'cube',
+         description "An arrow embossed on the side.",
+         command CMD_GOTO,
+         target BallpointRoom,
+    has ;
+
+Object grey_cube "grey cube"
+    with name 'grey' 'gray' 'cube',
+         description "An arrow embossed on the side.",
+         command CMD_GOTO,
+         target LoadingDock,
+    has ;
+
+!--- Action cubes ---
+
+Object grab_cube "grab cube"
+    with name 'grab' 'cube',
+         description "A grasping hand embossed on the side.",
+         command CMD_GRAB,
+         target 0,
+    has ;
+
+Object drop_cube "drop cube"
+    with name 'drop' 'cube',
+         description "An open hand embossed on the side.",
+         command CMD_DROP,
+         target 0,
+    has ;
+
+!--- Fun cubes ---
+
+Object beep_cube "beep cube"
+    with name 'beep' 'cube',
+         description "The symbol of a bell embossed on the side.",
+         command CMD_BEEP,
+         target 0,
+    has ;
+
+Object dance_cube "dance cube"
+    with name 'dance' 'cube',
+         description "A flamenco dancer embossed on the side.",
+         command CMD_DANCE,
+         target 0,
+    has ;
+
+!--- Items flowing through the factory ---
+
+Object cartridge_item "cartridge shell"
+    with name 'cartridge' 'shell',
+         description "A small metal cylinder, blank and unfinished.",
+    has ;
+
+Object clean_cartridge_item "cleaned cartridge"
+    with name 'cleaned' 'clean' 'cartridge',
+         description "A cartridge shell, stripped of all residue. Ready to fill.",
+    has ;
+
+Object filled_cartridge_item "filled cartridge"
+    with name 'filled' 'cartridge',
+         description "A cartridge filled with compound stabiliser. Smells faintly chemical.",
+    has ;
+
+Object ballpoint_item "ballpoint tip"
+    with name 'ballpoint' 'tip',
+         description "A precision-machined tip, smaller than your thumbnail.",
+    has ;
+
+Object finished_shell_item "finished shell"
+    with name 'finished' 'shell',
+         description "It looks remarkably like a biro. It is not a biro.",
+    has ;
+
+!--- Machines ---
+
+Object cartridge_machine "cartridge press" CartridgeRoom
+    with name 'cartridge' 'press' 'machine',
+         description "Stamps out blank cartridge shells at intervals.",
+         receptacle 0,
+         dispenser 0,
+         product cartridge_item,
+    has source;
+
+Object cleaning_machine "cleaning unit" LockerRoom
+    with name 'cleaning' 'unit' 'machine',
+         description "A machine that strips residue from cartridge shells. Connection pipes
+                      dangle from its underside.",
+         receptacle 0,
+         dispenser 0,
+         product clean_cartridge_item,
+    has ;
+
+Object filling_machine "filling rig" FillingRoom
+    with name 'filling' 'rig' 'machine',
+         description "A rig loaded with compound stabiliser. It waits.",
+         receptacle 0,
+         dispenser 0,
+         product filled_cartridge_item,
+    has ;
+
+Object ballpoint_machine "ballpoint press" BallpointRoom
+    with name 'ballpoint' 'press' 'machine',
+         description "Stamps out precision tips in a steady rhythm.",
+         receptacle 0,
+         dispenser 0,
+         product ballpoint_item,
+    has source;
+
+Object spring_machine "assembly bench" SpringRoom
+    with name 'assembly' 'bench' 'machine',
+         description "The final assembly station. Two input hoppers, one output chute.",
+         receptacle 0,
+         dispenser 0,
+         product finished_shell_item,
+    has ;
+
+Object shipping_bin "shipping crate" LoadingDock
+    with name 'shipping' 'crate',
+         description "A large crate. Finished product goes in here for collection.",
+         receptacle 0,
+         dispenser 0,
+         product 0,
     has ;
 
 !--- Robots ---
+! Ammunition line (jammed): Cartridge -> Cleaning -> Filling -> Spring
+! Red robot tries to deliver to Cleaning, but no machine is there.
 
 Object golden_robot "golden robot" FactoryLobby
     with name 'golden' 'robot',
          description [;
-             print "A standard Roboton utility unit, gleaming gold.^";
+             print "A standard Roboton utility unit, gleaming gold. It wears a small apron.^";
              PrintRobotProgram(self);
              rtrue;
          ],
-         daemon  [; RobotExecute(self); ],
+         daemon [; RobotExecute(self); ],
          program nil_cube nil_cube nil_cube nil_cube,
          counter 0,
-         power   1,
+         cargo 0,
+         power 1,
     has animate;
 
-Object purple_robot "purple robot" FactoryLobby
+Object red_robot "red robot" CartridgeRoom
+    with name 'red' 'robot',
+         description [;
+             print "A Roboton unit, painted red.^";
+             PrintRobotProgram(self);
+             rtrue;
+         ],
+         daemon [; RobotExecute(self); ],
+         program red_cube grab_cube blue_cube drop_cube,
+         counter 0,
+         cargo 0,
+         power 1,
+    has animate;
+
+Object blue_robot "blue robot" CleaningRoom
+    with name 'blue' 'robot',
+         description [;
+             print "A Roboton unit, painted blue. It sits idle at the empty plinth.^";
+             PrintRobotProgram(self);
+             rtrue;
+         ],
+         daemon [; RobotExecute(self); ],
+         program blue_cube grab_cube green_cube drop_cube,
+         counter 0,
+         cargo 0,
+         power 1,
+    has animate;
+
+Object green_robot "green robot" FillingRoom
+    with name 'green' 'robot',
+         description [;
+             print "A Roboton unit, painted green.^";
+             PrintRobotProgram(self);
+             rtrue;
+         ],
+         daemon [; RobotExecute(self); ],
+         program green_cube grab_cube yellow_cube drop_cube,
+         counter 0,
+         cargo 0,
+         power 1,
+    has animate;
+
+Object purple_robot "purple robot" BallpointRoom
     with name 'purple' 'robot',
          description [;
-             print "A standard Roboton utility unit, painted deep purple.^";
+             print "A Roboton unit, painted purple.^";
              PrintRobotProgram(self);
              rtrue;
          ],
-         daemon  [; RobotExecute(self); ],
-         program nil_cube nil_cube nil_cube nil_cube,
+         daemon [; RobotExecute(self); ],
+         program purple_cube grab_cube yellow_cube drop_cube,
          counter 0,
-         power   1,
+         cargo 0,
+         power 1,
     has animate;
 
-!--- Command cubes ---
+Object yellow_robot "yellow robot" SpringRoom
+    with name 'yellow' 'robot',
+         description [;
+             print "A Roboton unit, painted yellow.^";
+             PrintRobotProgram(self);
+             rtrue;
+         ],
+         daemon [; RobotExecute(self); ],
+         program yellow_cube grab_cube grey_cube drop_cube,
+         counter 0,
+         cargo 0,
+         power 1,
+    has animate;
 
-Object red_cube "red cube" FactoryLobby
-    with name 'red' 'cube',
-         description "A flamenco dancer embossed on the side.",
-         command CMD_DANCE,
-    has ;
-
-Object green_cube "green cube" FactoryLobby
-    with name 'green' 'cube',
-         description "The symbol of a bell embossed on the side.",
-         command CMD_BEEP,
-    has ;
-
-Object purple_cube "purple cube" FactoryLobby
-    with name 'purple' 'cube',
-         description "A gaming piece embossed on the side.",
-         command CMD_SEEK,
-    has ;
+[ StartFactoryDaemons;
+    StartDaemon(golden_robot);
+    StartDaemon(red_robot);
+    StartDaemon(blue_robot);
+    StartDaemon(green_robot);
+    StartDaemon(purple_robot);
+    StartDaemon(yellow_robot);
+];
 
 !--- Lobby objects ---
 

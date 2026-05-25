@@ -11,10 +11,9 @@ Include ">chapter_2";
 Include "Grammar";
 
 [ Initialise;
-    location = DrawingRoom;
+    !location = DrawingRoom;
+    location = FactoryLobby;
     move pocket_watch to player;
     move smartphone to player;
-    (golden_robot.&program)-->0 = green_cube;
-    (purple_robot.&program)-->0 = purple_cube;
     print "^^~Biro Factory~^An Interactive Comedy^^^";
 ];
