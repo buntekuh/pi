@@ -6,16 +6,39 @@ room Treasury "Kublai Khan's Imperial Treasury"
   "A vast chamber, cool and dim. The wealth of three empires gleams softly
    from every surface. In the centre of the room stands a heavy oaken chest."
 
+  object green key "small green key"
+    "An ornate key with a jade handle, warm to the touch."
+
   object war chest "Kublai Khan's war chest"
-    "A symbol of power and might. 
-    Delapidated yet proud, veteran of many a campaign. An elaborate keyhole is inset at the front."
+    "A symbol of power and might. Delapidated yet proud, veteran of many a campaign.
+     An elaborate keyhole is inset at the front."
     is openable.
     is lockable.
     is container.
     containment: closed
-    security: unlocked
+    security: locked
+    key: green_key
+
+  object jade dragon "Jade Dragon"
+    "A small jade figurine of a coiled dragon, its eyes set with tiny rubies.
+     The craftsmanship is extraordinary."
+    inside: war_chest
+
+  object zorkmid "a Zorkmid"
+    "The standard currency of the Great Underground Empire.
+     How it ended up in a Mongol treasury is anyone's guess."
+    inside: war_chest
+
+  object marco polo iou "an IOU signed by Marco Polo"
+    "In a flowing hand: I, Marco Polo, do solemnly owe one favour, redeemable
+     upon presentation to the bearer. Signed, M. Polo. Venice, 1275."
+    inside: war_chest
 
 test "default"
     examine chest. "An elaborate keyhole"
-    open chest. "You open the"
-    close chest.
+    take key.
+    unlock chest. "You unlock"
+    open chest. "You open"
+    examine chest.
+    take zorkmid. "Taken."
+    examine zorkmid. "Great Underground Empire"

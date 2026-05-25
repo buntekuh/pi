@@ -243,6 +243,7 @@ def _obj_attributes(obj: dict) -> str:
         if props.get('containment') == 'open':
             attrs.append('open')
     if 'lockable' in behs:
+        attrs.append('lockable')
         if props.get('security') == 'locked':
             attrs.append('locked')
     if 'container' in behs:
@@ -290,14 +291,17 @@ def emit_i6(ast: dict) -> str:
         w('')
 
         for obj in room['objects']:
-            oid   = obj['id']
-            attrs = _obj_attributes(obj)
-            kws   = ' '.join(f"'{k}'" for k in obj['keywords']) if obj['keywords'] else ''
+            oid    = obj['id']
+            attrs  = _obj_attributes(obj)
+            kws    = ' '.join(f"'{k}'" for k in obj['keywords']) if obj['keywords'] else ''
+            parent = obj['properties'].get('inside', rid)
 
-            w(f'Object {oid} "{_i6str(obj["name"])}" {rid}')
+            w(f'Object {oid} "{_i6str(obj["name"])}" {parent}')
             if kws:
                 w(f'    with name {kws},')
             w(f'         description "{_i6str(obj["desc"])}",')
+            if 'key' in obj['properties']:
+                w(f'         with_key {obj["properties"]["key"]},')
             w(f'    has {attrs};' if attrs else '    has ;')
             w('')
 
