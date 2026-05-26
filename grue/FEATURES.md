@@ -1,5 +1,8 @@
 # Grue language features
 
+## Target platform
+Grue 1.0 targets the Z-machine via Inform 6. Glulx (graphics, sound, full Unicode) is deferred to a future version.
+
 ## Source handling
 - Multi-line quoted strings joined by preprocessor
 - Python-style indentation for all blocks (no braces or end keywords)
