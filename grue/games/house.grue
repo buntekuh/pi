@@ -1,0 +1,35 @@
+# The White House
+
+verb pry, tear, wrench
+    * noun 'with' held
+    "There's nothing to pry there."
+
+room Front of House "You stand before a white clapboard house. The paint is peeling and one shutter hangs at an angle, but the bones look sound. A blue door faces east. A dented mailbox stands by the path."
+
+    scenery white house, house "The house is white, or was once. Time and weather have had their say."
+
+    object mailbox "A dented tin mailbox, its flag raised with misplaced optimism."
+        is openable.
+        is container.
+
+    object crowbar "A heavy iron crowbar, flecked with rust, leaning against the house."
+
+room Inside "You stand inside the house. Dust motes drift in the thin light from the doorway. It smells of old paper and closed rooms."
+
+door blue door "A sturdy blue door, its frame crossed by a heavy iron bar nailed firmly in place."
+    east: Inside
+    west: Front of House
+    is openable.
+    instead of prying with crowbar:
+        if open:
+            say "The door is already open."
+        else:
+            say "You lever the iron bar free with a grunt of effort. It clatters to the ground."
+            open.
+
+test "default"
+    examine house. "weather"
+    examine mailbox. "optimism"
+    take crowbar. "Taken."
+    pry blue door with crowbar. "You lever"
+    east. "Inside"
