@@ -66,6 +66,25 @@ def _extract_string(s: str) -> str:
 # Parser — Python-style indentation
 # ---------------------------------------------------------------------------
 
+def _parse_keywords(rest: str) -> tuple:
+    """Parse 'keyword keyword, synonym "desc"' → (keywords, display, obj_id, inline_desc)."""
+    if '"' in rest:
+        idx         = rest.index('"')
+        kw_part     = rest[:idx].strip()
+        inline_desc = _extract_string(rest[idx:])
+    else:
+        kw_part     = rest
+        inline_desc = ''
+    keywords = [w.strip().strip(',') for w in kw_part.split() if w.strip().strip(',')]
+    if ',' in kw_part and keywords:
+        display = keywords[0].lower()
+        obj_id  = _to_id(keywords[0])
+    else:
+        display = ' '.join(k.lower() for k in keywords) if keywords else ''
+        obj_id  = '_'.join(k.lower() for k in keywords) if keywords else _to_id(inline_desc)
+    return keywords, display, obj_id, inline_desc
+
+
 def _append_stmt(stmts: list, stripped: str) -> None:
     if stripped.startswith('say '):
         stmts.append({'type': 'say', 'arg': _extract_string(stripped[4:])})
@@ -189,21 +208,7 @@ def parse(source: str) -> dict:
 
             elif re.match(r'(object|scenery|man|woman|robot|door)\s+', stripped):
                 kind = stripped.split()[0]
-                rest = stripped[len(kind):].strip()
-                if '"' in rest:
-                    idx         = rest.index('"')
-                    kw_part     = rest[:idx].strip()
-                    inline_desc = _extract_string(rest[idx:])
-                else:
-                    kw_part     = rest
-                    inline_desc = ''
-                keywords = [w.strip().strip(',') for w in kw_part.split() if w.strip().strip(',')]
-                if ',' in kw_part and keywords:
-                    display = keywords[0].lower()
-                    obj_id  = _to_id(keywords[0])
-                else:
-                    display = ' '.join(k.lower() for k in keywords) if keywords else ''
-                    obj_id  = '_'.join(k.lower() for k in keywords) if keywords else _to_id(inline_desc)
+                keywords, display, obj_id, inline_desc = _parse_keywords(stripped[len(kind):].strip())
                 current_object = {
                     'id': obj_id, 'keywords': keywords, 'name': display,
                     'desc': inline_desc, 'behaviours': [], 'properties': {},
@@ -271,21 +276,7 @@ def parse(source: str) -> dict:
                 ast['rooms'].append(current_room)
 
             elif stripped.startswith('door '):
-                rest = stripped[5:].strip()
-                if '"' in rest:
-                    idx         = rest.index('"')
-                    kw_part     = rest[:idx].strip()
-                    inline_desc = _extract_string(rest[idx:])
-                else:
-                    kw_part     = rest
-                    inline_desc = ''
-                keywords = [w.strip().strip(',') for w in kw_part.split() if w.strip().strip(',')]
-                if ',' in kw_part and keywords:
-                    display = keywords[0].lower()
-                    obj_id  = _to_id(keywords[0])
-                else:
-                    display = ' '.join(k.lower() for k in keywords) if keywords else ''
-                    obj_id  = '_'.join(k.lower() for k in keywords) if keywords else _to_id(inline_desc)
+                keywords, display, obj_id, inline_desc = _parse_keywords(stripped[5:].strip())
                 current_door = {
                     'id': obj_id, 'keywords': keywords, 'name': display,
                     'desc': inline_desc, 'behaviours': [], 'properties': {},
@@ -394,8 +385,6 @@ def _parse_handler_key(key: str, verb_action_map: dict) -> tuple:
     if base in verb_action_map:
         return (verb_action_map[base], second)
     return (base.capitalize(), second)
-
-
 
 
 def _obj_attributes(obj: dict) -> str:
@@ -553,6 +542,46 @@ def _emit_door(w, obj: dict, parent_rid: str, door_map: dict, verb_action_map: d
     w('')
 
 
+def _emit_top_door(w, door: dict, routes: dict, parent_id: str, parent_dir: str,
+                   partners: list, verb_action_map: dict, known_ids: set):
+    did  = door['id']
+    kws  = ' '.join(f"'{k}'" for k in door['keywords']) if door['keywords'] else ''
+    attrs = 'door'
+    if 'openable' in door['behaviours']:
+        attrs += ' openable'
+    if 'lockable' in door['behaviours']:
+        attrs += ' lockable'
+        if door['properties'].get('security') == 'locked':
+            attrs += ' locked'
+
+    w(f'Object {did} "{_i6str(door["name"])}" {parent_id}')
+    if kws:
+        w(f'    with name {kws},')
+        w(f'         description "{_i6str(door["desc"])}",')
+    else:
+        w(f'    with description "{_i6str(door["desc"])}",')
+    if parent_dir:
+        w(f'         door_dir {_DIR_MAP.get(parent_dir, parent_dir + "_to")},')
+    branches = []
+    for dir_, dest_id in routes.items():
+        opp = _OPPOSITE_DIR.get(dir_)
+        if opp and opp in routes:
+            branches.append(f'if (location == {routes[opp]}) return {dest_id};')
+    if branches:
+        w(f'         door_to [; {branches[0]}')
+        for b in branches[1:]:
+            w(f'                    {b}')
+        w( '                    return 0; ],')
+    if partners:
+        scope_calls = ' '.join(f'PlaceInScope({p});' for p in partners)
+        w(f'         add_to_scope [; {scope_calls} ],')
+    if 'key' in door['properties']:
+        w(f'         with_key {door["properties"]["key"]},')
+    _emit_handlers(w, door.get('handlers', {}), verb_action_map, known_ids)
+    w(f'    has {attrs};')
+    w('')
+
+
 # ---------------------------------------------------------------------------
 # Inform 6 emitter
 # ---------------------------------------------------------------------------
@@ -689,48 +718,14 @@ def emit_i6(ast: dict) -> str:
 
     # Top-level door objects
     for door in ast.get('doors', []):
-        did     = door['id']
-        kws     = ' '.join(f"'{k}'" for k in door['keywords']) if door['keywords'] else ''
-        routes  = top_door_routes.get(did, {})
-        attrs   = 'door'
-        if 'openable' in door['behaviours']:
-            attrs += ' openable'
-        if 'lockable' in door['behaviours']:
-            attrs += ' lockable'
-            if door['properties'].get('security') == 'locked':
-                attrs += ' locked'
-
-        parent_id  = top_door_parent.get(did, '')
-        parent_dir = top_door_parent_dir.get(did, '')
-
-        w(f'Object {did} "{_i6str(door["name"])}" {parent_id}')
-        if kws:
-            w(f'    with name {kws},')
-            w(f'         description "{_i6str(door["desc"])}",')
-        else:
-            w(f'    with description "{_i6str(door["desc"])}",')
-        if parent_dir:
-            w(f'         door_dir {_DIR_MAP.get(parent_dir, parent_dir + "_to")},')
-        branches = []
-        for dir_, dest_id in routes.items():
-            opp = _OPPOSITE_DIR.get(dir_)
-            if opp and opp in routes:
-                departure_id = routes[opp]
-                branches.append(f'if (location == {departure_id}) return {dest_id};')
-        if branches:
-            w(f'         door_to [; {branches[0]}')
-            for b in branches[1:]:
-                w(f'                    {b}')
-            w( '                    return 0; ],')
-        partners = door_partners.get(did, [])
-        if partners:
-            scope_calls = ' '.join(f'PlaceInScope({p});' for p in partners)
-            w(f'         add_to_scope [; {scope_calls} ],')
-        if 'key' in door['properties']:
-            w(f'         with_key {door["properties"]["key"]},')
-        _emit_handlers(w, door.get('handlers', {}), verb_action_map, known_ids)
-        w(f'    has {attrs};')
-        w('')
+        did = door['id']
+        _emit_top_door(w, door,
+                       routes=top_door_routes.get(did, {}),
+                       parent_id=top_door_parent.get(did, ''),
+                       parent_dir=top_door_parent_dir.get(did, ''),
+                       partners=door_partners.get(did, []),
+                       verb_action_map=verb_action_map,
+                       known_ids=known_ids)
 
     w('Include "Grammar";')
     w('')
