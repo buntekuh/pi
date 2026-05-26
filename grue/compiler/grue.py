@@ -94,6 +94,8 @@ def _append_stmt(stmts: list, stripped: str) -> None:
         stmts.append({'type': 'close'})
     elif stripped.startswith('go '):
         stmts.append({'type': 'go', 'arg': stripped[3:].strip().strip('"')})
+    elif stripped.startswith('box '):
+        stmts.append({'type': 'box', 'arg': _extract_string(stripped[4:])})
 
 
 def parse(source: str) -> dict:
@@ -340,6 +342,13 @@ def _i6str(s: str) -> str:
     return s.replace('"', '~')
 
 
+def _i6box_line(s: str) -> str:
+    """Encode one line of a box quotation — no newline translation."""
+    s = s.replace('\\t', '@@9')
+    s = re.sub(r'\s+', ' ', s).strip()
+    return s.replace('"', '~')
+
+
 def _degerund(word: str) -> str:
     if word.endswith('ying'):
         return word[:-4] + 'y'
@@ -478,6 +487,16 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set) -> None:
             w(f'{prefix}give self ~open;')
         elif t == 'go':
             w(f'{prefix}PlayerTo({_to_id(stmt["arg"])});')
+        elif t == 'box':
+            raw_lines = stmt['arg'].split('\\n')
+            encoded = [_i6box_line(l) for l in raw_lines]
+            if len(encoded) == 1:
+                w(f'{prefix}box "{encoded[0]}";')
+            else:
+                w(f'{prefix}box "{encoded[0]}"')
+                for line in encoded[1:-1]:
+                    w(f'{prefix}    "{line}"')
+                w(f'{prefix}    "{encoded[-1]}";')
         elif t == 'if':
             inner = prefix + '    '
             cond_expr = 'self has open' if stmt['cond'] == 'open' else 'self hasnt open'
@@ -494,15 +513,20 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set) -> None:
 def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set) -> None:
     if not handlers:
         return
-    w(f'{_PROP}before [;')
-    for key, stmts in handlers.items():
-        action, second_filter = _parse_handler_key(key, verb_action_map)
-        w(f'{_ACTION}{action}:')
-        if second_filter:
-            w(f'{_STMT0}if (second ~= {second_filter}) rfalse;')
-        _emit_stmts(w, stmts, _STMT0, known_ids)
-        w(f'{_STMT0}rtrue;')
-    w(f'{_PROP}],')
+    before_h = {k: v for k, v in handlers.items() if not k.startswith('after ')}
+    after_h  = {k: v for k, v in handlers.items() if k.startswith('after ')}
+    for prop, hmap in (('before', before_h), ('after', after_h)):
+        if not hmap:
+            continue
+        w(f'{_PROP}{prop} [;')
+        for key, stmts in hmap.items():
+            action, second_filter = _parse_handler_key(key, verb_action_map)
+            w(f'{_ACTION}{action}:')
+            if second_filter:
+                w(f'{_STMT0}if (second ~= {second_filter}) rfalse;')
+            _emit_stmts(w, stmts, _STMT0, known_ids)
+            w(f'{_STMT0}rtrue;')
+        w(f'{_PROP}],')
 
 
 # ---------------------------------------------------------------------------
@@ -721,6 +745,7 @@ def emit_i6(ast: dict) -> str:
         for direction, door_id in room_extra_exits.get(rid, {}).items():
             i6dir = _DIR_MAP.get(direction, direction + '_to')
             w(f'         {i6dir} {door_id},')
+        _emit_handlers(w, room.get('handlers', {}), verb_action_map, known_ids)
         w( '    has light;')
         w('')
 

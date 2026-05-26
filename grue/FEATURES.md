@@ -61,7 +61,8 @@ instead of prying with crowbar:
 - Action matched by gerund (`prying` → `pry`) against declared verbs and standard action table
 - Second-noun filter: `with crowbar` → `if (second ~= crowbar) rfalse;`
 - Conditionals: `if open:` / `if closed:` / `else:`
-- Statements: `say "..."`, `open.`, `close.`, `go room`
+- Statements: `say "..."`, `open.`, `close.`, `go room`, `box "..."`
+- `after` handlers emit to Inform 6 `after` property; all others to `before`
 
 ## Say / string features
 - `say "text"` in handlers emits `print`
