@@ -1,0 +1,11 @@
+# objects — compound nouns, comma synonyms, examine
+
+room Room "A bare room."
+
+    object blue box "A small blue box."
+
+    object red ball, sphere "A red ball."
+
+test "default"
+    examine blue box. "blue box"
+    examine sphere. "red ball"

@@ -76,11 +76,12 @@ def _parse_keywords(rest: str) -> tuple:
         kw_part     = rest
         inline_desc = ''
     keywords = [w.strip().strip(',') for w in kw_part.split() if w.strip().strip(',')]
+    proper   = bool(keywords) and keywords[0][0].isupper()
     if ',' in kw_part and keywords:
-        display = keywords[0].lower()
+        display = keywords[0] if proper else keywords[0].lower()
         obj_id  = _to_id(keywords[0])
     else:
-        display = ' '.join(k.lower() for k in keywords) if keywords else ''
+        display = ' '.join(keywords) if proper else ' '.join(k.lower() for k in keywords) if keywords else ''
         obj_id  = '_'.join(k.lower() for k in keywords) if keywords else _to_id(inline_desc)
     return keywords, display, obj_id, inline_desc
 
@@ -88,14 +89,29 @@ def _parse_keywords(rest: str) -> tuple:
 def _append_stmt(stmts: list, stripped: str) -> None:
     if stripped.startswith('say '):
         stmts.append({'type': 'say', 'arg': _extract_string(stripped[4:])})
-    elif stripped.rstrip('.') == 'open':
-        stmts.append({'type': 'open'})
-    elif stripped.rstrip('.') == 'close':
-        stmts.append({'type': 'close'})
     elif stripped.startswith('go '):
         stmts.append({'type': 'go', 'arg': stripped[3:].strip().strip('"')})
     elif stripped.startswith('box '):
         stmts.append({'type': 'box', 'arg': _extract_string(stripped[4:])})
+    else:
+        word = stripped.rstrip('.')
+        m = re.match(r'the\s+(\w+)\s+is\s+(not\s+)?(\w+)$', word)
+        if m:
+            subj     = m.group(1)
+            neg_kw   = bool(m.group(2))
+            raw_attr = m.group(3)
+            attr     = _NEGATION.get(raw_attr, raw_attr)
+            neg      = neg_kw or raw_attr in _NEGATION
+            stmts.append({'type': 'give', 'subj': subj, 'attr': attr, 'neg': neg})
+        elif re.match(r'not\s+\w+$', word):
+            raw_attr = word.split(None, 1)[1]
+            attr     = _NEGATION.get(raw_attr, raw_attr)
+            stmts.append({'type': 'give', 'subj': 'self', 'attr': attr, 'neg': True})
+        elif re.match(r'\w+$', word):
+            raw_attr = word
+            attr     = _NEGATION.get(raw_attr, raw_attr)
+            neg      = raw_attr in _NEGATION
+            stmts.append({'type': 'give', 'subj': 'self', 'attr': attr, 'neg': neg})
 
 
 def parse(source: str) -> dict:
@@ -149,12 +165,24 @@ def parse(source: str) -> dict:
             if dot >= 0:
                 cmd    = stripped[:dot].strip()
                 rest   = stripped[dot + 1:].strip()
-                expect = _extract_string(rest) if rest.startswith('"') else None
+                if rest.lower().startswith('not '):
+                    expect = _extract_string(rest[4:])
+                    negate = True
+                elif rest.startswith('"'):
+                    expect = _extract_string(rest)
+                    negate = False
+                else:
+                    expect = None
+                    negate = False
             else:
                 cmd    = stripped
                 expect = None
+                negate = False
             if cmd:
-                current_test['commands'].append({'cmd': cmd, 'expect': expect})
+                entry = {'cmd': cmd, 'expect': expect}
+                if negate:
+                    entry['negate'] = True
+                current_test['commands'].append(entry)
 
         elif current_if is not None:
             branch = current_if[if_branch]
@@ -163,16 +191,20 @@ def parse(source: str) -> dict:
             _append_stmt(branch, stripped)
 
         elif current_handler is not None:
-            m = re.match(r'if (open|closed)\s*:', stripped)
+            m = re.match(r'if\s+(not\s+)?(\w+)\s*:', stripped)
             if m:
-                current_if = {'type': 'if', 'cond': m.group(1), 'then': [], 'else': None}
+                neg_kw   = bool(m.group(1))
+                raw_attr = m.group(2)
+                attr     = _NEGATION.get(raw_attr, raw_attr)
+                neg      = neg_kw or raw_attr in _NEGATION
+                current_if = {'type': 'if', 'attr': attr, 'neg': neg, 'then': [], 'else': None}
                 if_col = col
                 if_branch = 'then'
             else:
                 _append_stmt(current_handler, stripped)
 
         elif current_object is not None:
-            if re.match(r'(instead of|on|after)\s+', stripped):
+            if re.match(r'(instead of|on|after|each)\s+', stripped):
                 key = stripped.rstrip(':')
                 current_handler = []
                 handler_col = col
@@ -180,7 +212,12 @@ def parse(source: str) -> dict:
             elif stripped.startswith('"'):
                 current_object['desc'] = _extract_string(stripped)
             elif stripped.startswith('is '):
-                current_object['behaviours'].append(stripped[3:].rstrip('.').strip())
+                word = stripped[3:].rstrip('.').strip()
+                if word in _BEHAVIOURS:
+                    current_object['behaviours'].append(word)
+                else:
+                    attr = _NEGATION.get(word, word)
+                    current_object['properties'][attr] = 'false' if word in _NEGATION else 'true'
             elif re.match(r'\w+:\s+\S', stripped):
                 m = re.match(r'(\w+):\s+(.+)', stripped)
                 if m:
@@ -215,7 +252,7 @@ def parse(source: str) -> dict:
                 obj_col = col
                 current_room['objects'].append(current_object)
 
-            elif re.match(r'(instead of|on|after)\s+', stripped):
+            elif re.match(r'(instead of|on|after|each)\s+', stripped):
                 key = stripped.rstrip(':')
                 current_handler = []
                 handler_col = col
@@ -235,7 +272,10 @@ def parse(source: str) -> dict:
             elif stripped.startswith('verb '):
                 words_part = stripped[5:].rstrip('.')
                 words = [w.strip().strip(',') for w in words_part.split() if w.strip().strip(',')]
-                current_verb = {'words': words, 'grammar': [], 'default': ''}
+                # Only comma-separated words are I6 synonyms; space-only extras are variant markers
+                synonyms = [w.strip() for w in words_part.split(',') if w.strip()]
+                synonyms = [synonyms[0].split()[0]] + [s.strip() for s in synonyms[1:]] if synonyms else words[:1]
+                current_verb = {'words': words, 'synonyms': synonyms, 'grammar': [], 'default': ''}
                 verb_col = col
                 ast['verbs'].append(current_verb)
 
@@ -298,6 +338,18 @@ _STD_ACTIONS = {
     'attack': 'Attack', 'attacking': 'Attack',
 }
 
+# Known behaviour keywords — everything else after 'is' sets a boolean attribute.
+_BEHAVIOURS = {'openable', 'lockable', 'container', 'supporter'}
+
+# Friendly negation aliases: word → (canonical_attr, negated).
+# 'closed' means hasnt open; 'unlocked' means hasnt locked; etc.
+_NEGATION = {
+    'close':    'open',
+    'closed':   'open',
+    'unlocked': 'locked',
+    'off':      'on',
+}
+
 
 def _to_id(name: str) -> str:
     s = name.lower().replace("'", '')
@@ -358,8 +410,13 @@ def _parse_handler_key(key: str, verb_action_map: dict) -> tuple:
         if wi + 1 < len(words):
             second = _to_id(words[wi + 1])
 
+    has_with = 'with' in words
     if base in _STD_ACTIONS:
-        return (_STD_ACTIONS[base], second)
+        action = _STD_ACTIONS.get(base + ':with' if has_with else base) or _STD_ACTIONS[base]
+        return (action, second)
+    with_key = base + ':with'
+    if has_with and with_key in verb_action_map:
+        return (verb_action_map[with_key], second)
     if base in verb_action_map:
         return (verb_action_map[base], second)
     return (base.capitalize(), second)
@@ -375,20 +432,22 @@ def _obj_attributes(obj: dict) -> str:
         attrs.append('scenery')
     if kind in ('man', 'woman', 'robot'):
         attrs.append('animate')
+        if obj.get('keywords') and obj['keywords'][0][0].isupper():
+            attrs.append('proper')
     if kind == 'woman':
         attrs.append('female')
     if 'openable' in behs:
         attrs.append('openable')
-        if props.get('containment') == 'open':
-            attrs.append('open')
     if 'lockable' in behs:
         attrs.append('lockable')
-        if props.get('security') == 'locked':
-            attrs.append('locked')
     if 'container' in behs:
         attrs.append('container')
     if 'supporter' in behs:
         attrs.append('supporter')
+
+    for key, val in props.items():
+        if val == 'true':
+            attrs.append(key)
 
     return ' '.join(attrs)
 
@@ -421,6 +480,13 @@ def _emit_say(w, text: str, prefix: str, known_ids: set) -> None:
     if not parts:
         parts = [('lit', '')]
 
+    def _after_stop(idx):
+        """True if position idx follows a sentence-ending period."""
+        if idx == 0:
+            return False
+        prev_kind, prev_val = parts[idx - 1]
+        return prev_kind == 'lit' and prev_val.rstrip().endswith('.')
+
     items = []
     for i, (kind, val) in enumerate(parts):
         is_last = (i == len(parts) - 1)
@@ -433,7 +499,8 @@ def _emit_say(w, text: str, prefix: str, known_ids: set) -> None:
             if article == 's' and ident:
                 items.append(f'(Grue_s) {ident}')
             elif article in ('the', 'a') and ident in obj_ids:
-                items.append(f'({article}) {ident}')
+                cap = _after_stop(i)
+                items.append(f'({article.capitalize() if cap else article}) {ident}')
             elif val in obj_ids:
                 items.append(f'(name) {val}')
             else:
@@ -450,10 +517,9 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set) -> None:
         t = stmt['type']
         if t == 'say':
             _emit_say(w, stmt['arg'], prefix, known_ids)
-        elif t == 'open':
-            w(f'{prefix}give self open;')
-        elif t == 'close':
-            w(f'{prefix}give self ~open;')
+        elif t == 'give':
+            tilde = '~' if stmt['neg'] else ''
+            w(f'{prefix}give {stmt["subj"]} {tilde}{stmt["attr"]};')
         elif t == 'go':
             w(f'{prefix}PlayerTo({_to_id(stmt["arg"])});')
         elif t == 'box':
@@ -468,7 +534,8 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set) -> None:
                 w(f'{prefix}    "{encoded[-1]}";')
         elif t == 'if':
             inner = prefix + '    '
-            cond_expr = 'self has open' if stmt['cond'] == 'open' else 'self hasnt open'
+            has_or_hasnt = 'hasnt' if stmt['neg'] else 'has'
+            cond_expr = f'self {has_or_hasnt} {stmt["attr"]}'
             w(f'{prefix}if ({cond_expr}) {{')
             _emit_stmts(w, stmt['then'], inner, known_ids)
             w(f'{inner}rtrue;')
@@ -514,7 +581,8 @@ def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set) -> 
             if second_filter:
                 w(f'{_STMT0}if (second ~= {second_filter}) rfalse;')
             _emit_stmts(w, stmts, _STMT0, known_ids)
-            w(f'{_STMT0}rtrue;')
+            if not (stmts and stmts[-1]['type'] == 'if' and stmts[-1].get('else')):
+                w(f'{_STMT0}rtrue;')
         w(f'{_PROP}],')
 
 
@@ -546,13 +614,15 @@ def _emit_door(w, obj: dict, parent_rid: str, door_dir: str, dest_rid: str,
     oid  = obj['id']
     kws  = ' '.join(f"'{k}'" for k in obj['keywords']) if obj['keywords'] else ''
 
-    attrs = 'door'
+    attr_list = ['door']
     if 'openable' in obj['behaviours']:
-        attrs += ' openable'
+        attr_list.append('openable')
     if 'lockable' in obj['behaviours']:
-        attrs += ' lockable'
-        if obj['properties'].get('security') == 'locked':
-            attrs += ' locked'
+        attr_list.append('lockable')
+    for key, val in obj['properties'].items():
+        if val == 'true':
+            attr_list.append(key)
+    attrs = ' '.join(attr_list)
 
     w(f'Object {oid} "{_i6str(obj["name"])}" {parent_rid}')
     if kws:
@@ -573,6 +643,61 @@ def _emit_door(w, obj: dict, parent_rid: str, door_dir: str, dest_rid: str,
 # Inform 6 emitter
 # ---------------------------------------------------------------------------
 
+# I6 standard library attributes — no Attribute declaration needed for these.
+_I6_BUILTIN_ATTRS = {
+    'open', 'locked', 'openable', 'lockable', 'container', 'supporter',
+    'light', 'animate', 'female', 'proper', 'scenery', 'static', 'absent',
+    'concealed', 'worn', 'clothing', 'edible', 'talkable', 'switchable', 'on',
+    'door', 'enterable', 'visited', 'general', 'transparent', 'described',
+    'reactive', 'untouchable', 'moved',
+}
+
+
+def _collect_user_attributes(ast: dict) -> set:
+    """Return all attribute names used in give/if/properties that need Attribute declarations."""
+    attrs = set()
+
+    def _scan_stmts(stmts):
+        for s in stmts:
+            if s['type'] == 'give':
+                attrs.add(s['attr'])
+            elif s['type'] == 'if':
+                attrs.add(s['attr'])
+                _scan_stmts(s['then'])
+                _scan_stmts(s.get('else') or [])
+
+    for room in ast.get('rooms', []):
+        for stmts in room.get('handlers', {}).values():
+            _scan_stmts(stmts)
+        for obj in room.get('objects', []):
+            for key, val in obj.get('properties', {}).items():
+                if val == 'true':
+                    attrs.add(key)
+            for stmts in obj.get('handlers', {}).values():
+                _scan_stmts(stmts)
+
+    return attrs - _I6_BUILTIN_ATTRS
+
+
+def _uses_plural_s(ast: dict) -> bool:
+    """Return True if any say string in the AST uses {s ...} interpolation."""
+    def _scan_stmts(stmts):
+        for s in stmts:
+            if s['type'] == 'say' and re.search(r'\{s\s+', s['arg']):
+                return True
+            if s['type'] == 'if':
+                if _scan_stmts(s['then']): return True
+                if _scan_stmts(s.get('else') or []): return True
+        return False
+    for room in ast.get('rooms', []):
+        for stmts in room.get('handlers', {}).values():
+            if _scan_stmts(stmts): return True
+        for obj in room.get('objects', []):
+            for stmts in obj.get('handlers', {}).values():
+                if _scan_stmts(stmts): return True
+    return False
+
+
 def emit_i6(ast: dict) -> str:
     rooms = ast['rooms']
     if not rooms:
@@ -590,17 +715,28 @@ def emit_i6(ast: dict) -> str:
     w('Include "Parser";')
     w('Include "VerbLib";')
     w('')
-    w('[ Grue_s n; if (n ~= 1) print "s"; ];')
-    w('')
+    if _uses_plural_s(ast):
+        w('[ Grue_s n; if (n ~= 1) print "s"; ];')
+        w('')
+    for attr in sorted(_collect_user_attributes(ast)):
+        w(f'Attribute {attr};')
+    if _collect_user_attributes(ast):
+        w('')
 
     # Build verb_action_map: base_word → action_name
+    # verb_action_map: plain key → plain action, key+':with' → with-action
     verb_action_map = {}
     for verb in ast.get('verbs', []):
-        action = _verb_action_name(verb)
-        for word in verb['words']:
-            verb_action_map[word.lower()] = action
+        action     = _verb_action_name(verb)
+        base_word  = verb['words'][0].lower()
+        if action.endswith('With'):
+            verb_action_map[base_word + ':with'] = action
+        else:
+            for word in verb['words']:
+                verb_action_map[word.lower()] = action
 
     # Emit custom verb stubs and Verb declarations
+    declared_verb_words: set = set()
     for verb in ast.get('verbs', []):
         action   = _verb_action_name(verb)
         sub_name = action + 'Sub'
@@ -610,8 +746,14 @@ def emit_i6(ast: dict) -> str:
             w(f'    "{_i6str(default)}";')
         w('];')
         w('')
-        verb_words = ' '.join(f"'{word}'" for word in verb['words'])
-        w(f'Verb {verb_words}')
+        synonyms   = verb.get('synonyms', verb['words'][:1])
+        base_word  = synonyms[0].lower()
+        if base_word in declared_verb_words:
+            w(f"Extend '{base_word}'")
+        else:
+            verb_words = ' '.join(f"'{s}'" for s in synonyms)
+            w(f'Verb {verb_words}')
+            declared_verb_words.update(s.lower() for s in synonyms)
         for grammar_line in verb['grammar']:
             w(f'    {grammar_line} -> {action};')
         w('')

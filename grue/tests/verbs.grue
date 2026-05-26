@@ -1,0 +1,15 @@
+# verbs — custom verb declaration, default message, handler override
+
+verb tap, knock
+    * noun
+    "Nothing to tap."
+
+room Room "A room."
+
+    object drum "A drum."
+        instead of tap:
+            say "Boom."
+
+test "default"
+    tap drum. "Boom"
+    knock drum. "Boom"

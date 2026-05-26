@@ -1,0 +1,21 @@
+# container — put in, take from, closed blocks insertion
+
+room Room "A room."
+
+    object coin "A gold coin."
+
+    object bag "A leather bag."
+        is openable.
+        is container.
+
+test "default"
+    put coin in bag. "You need to be holding the coin before you can put it into something else."
+    take coin. "Taken"
+    close bag.
+    put coin in bag. "You put the coin into the bag."
+    open bag.
+    put coin in bag. "You put the coin into the bag."
+    close bag.
+    take coin. "You can't see any such thing."
+    open bag.
+    take coin. "Taken"

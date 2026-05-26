@@ -1,0 +1,27 @@
+# handlers — instead of, after, second-noun filter
+
+verb tap
+    * noun
+    "Nothing to tap."
+
+verb tap with
+    * noun 'with' held
+    "Nothing to tap with that."
+
+room Room "A room."
+
+    object stick "A stick."
+
+    object drum "A drum."
+        instead of tap with stick:
+            say "Crack."
+        instead of tap:
+            say "Thud."
+        after take:
+            say "Groovy sound."
+
+test "default"
+    tap drum. "Thud"
+    take stick.
+    tap drum with stick. "Crack"
+    take drum. "Groovy"

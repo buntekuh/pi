@@ -1,0 +1,12 @@
+# openable — open/close, already open/closed messages
+
+room Room "A room."
+
+    object box "A plain box."
+        is openable.
+
+test "default"
+    open box. "You open"
+    open box. "already open"
+    close box. "You close"
+    close box. "already closed"

@@ -1,0 +1,9 @@
+# box — centred box quotation
+
+room Room "A room."
+
+    on turn 1:
+        box "Hello."
+
+test "default"
+    look. "Hello"

@@ -1,0 +1,11 @@
+# say — string interpolation: {obj}, {the obj}, {a obj}
+
+room Room "A room."
+
+    object lantern "A brass lantern."
+        after examine:
+            say "You study {the lantern} carefully. {a lantern} indeed."
+
+test "default"
+    examine lantern. "the lantern"
+    examine lantern. "A lantern indeed"

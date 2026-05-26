@@ -1,0 +1,19 @@
+# lockable — locked initial state, unlock with key, lock again
+
+room Room "A room."
+
+    object brass key "A brass key."
+
+    object chest "A heavy chest."
+        is openable.
+        is lockable.
+        locked: true.
+        key: brass_key
+
+test "default"
+    open chest. "locked"
+    take brass key.
+    unlock chest with brass key. "You unlock"
+    open chest. "You open"
+    close chest.
+    lock chest with brass key. "You lock"

@@ -21,7 +21,38 @@ Kinds: `object`, `scenery`, `man`, `woman`, `robot`
 - Compound nouns: `object blue door "desc"` → id `blue_door`, name `blue door`
 - Comma synonyms: `scenery mailbox, box "desc"` → id `mailbox`, parser accepts all synonyms
 - Behaviours: `is openable`, `is lockable`, `is container`, `is supporter`
-- Properties: `key: item_id`, `security: locked`, `containment: open`, `inside: room_id`
+- Boolean attributes: `locked: true`, `open: true` — any property with value `true` becomes an I6 `has` attribute
+- `is locked.` is equivalent to `locked: true`; `is closed.` is equivalent to `open: false`
+- Properties: `key: item_id`, `inside: room_id`
+
+## Kinds and attributes
+
+```
+bendable: straight, bent
+texture: rough, stubbly, smooth
+```
+
+- Declares a named kind with a list of values; the first value is the default
+- Two values → I6 `Attribute` (second value is the attribute name; first is its absence)
+- Three or more values → I6 `Property` with named constants
+- `true` and `false` are prohibited as values — forces meaningful names
+- Value names are scoped to an object's declared kinds; qualify as `kind:value` when ambiguous across libraries
+
+### Setting and testing attributes in handlers
+
+```
+locked.              ! give self locked;
+not locked.          ! give self ~locked;
+the noun is bent.    ! give noun bent;
+the noun is not bent.
+if locked:           ! self has locked
+if not locked:       ! self hasnt locked
+```
+
+Friendly aliases resolve to their canonical I6 attribute:
+- `closed.` / `if closed:` → `~open` / `hasnt open`
+- `unlocked.` / `if unlocked:` → `~locked` / `hasnt locked`
+- `off.` / `if off:` → `~on` / `hasnt on`
 
 ## Doors
 - In-room: `door blue door "desc"` inside a room block, with `leads:` property
@@ -58,10 +89,10 @@ instead of prying with crowbar:
 ```
 
 - Timing: `instead of`, `on`, `after`
-- Action matched by gerund (`prying` → `pry`) against declared verbs and standard action table
+- Action matched by base verb form (`instead of pry`); gerund form also accepted for compatibility
 - Second-noun filter: `with crowbar` → `if (second ~= crowbar) rfalse;`
-- Conditionals: `if open:` / `if closed:` / `else:`
-- Statements: `say "..."`, `open.`, `close.`, `go room`, `box "..."`
+- Conditionals: `if locked:` / `if not locked:` / `if closed:` / `else:` — any I6 attribute name
+- Statements: `say "..."`, `locked.`, `not locked.`, `the noun is bent.`, `go room`, `box "..."`
 - `after` handlers emit to Inform 6 `after` property; all others to `before`
 - `on turn N:` fires on a specific turn count via `each_turn` with `turns == N` guard
 - `each turn:` fires every turn via `each_turn`

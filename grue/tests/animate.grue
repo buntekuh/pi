@@ -1,0 +1,18 @@
+# animate — man, woman, robot kinds
+# Lowercase first keyword: treated as common noun, article applied.
+# Uppercase first keyword: has proper, printed without article.
+
+room Room "A room."
+
+    man butler "A stiff-backed butler."
+
+    woman Lady Gaga "The one and only."
+
+    robot cleaner "A humming cleaner."
+
+test "default"
+    look. "Lady Gaga"
+    look. Not "a Lady Gaga"
+    look. "a butler"
+    take butler. "would care for that"
+    take Lady Gaga. "would care for that"

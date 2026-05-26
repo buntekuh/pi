@@ -1,0 +1,13 @@
+# supporter — put on, take from
+
+room Room "A room."
+
+    object book "A paperback book."
+
+    object table "A sturdy table."
+        is supporter.
+
+test "default"
+    put book on table. "You need to be holding the book before you can put it on top of something else."
+    take book. "Taken"
+    put book on table. "You put"

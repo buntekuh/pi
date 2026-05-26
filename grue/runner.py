@@ -27,7 +27,7 @@ def _clean(text: str) -> str:
     return text
 
 
-def run_test(z5: Path, test: dict, debug: bool = False) -> tuple[int, int]:
+def run_test(z5: Path, test: dict, debug: bool = False, verbose: bool = False) -> tuple[int, int]:
     cmds = [c['cmd'] for c in test['commands']]
     inp  = '\n'.join(cmds) + '\nquit\ny\n'
 
@@ -40,7 +40,19 @@ def run_test(z5: Path, test: dict, debug: bool = False) -> tuple[int, int]:
 
     output = _clean(result.stdout)
 
-    if debug:
+    if verbose:
+        sections = output.split('\n>')
+        print('--- transcript ---')
+        print(sections[0].strip())
+        for i, section in enumerate(sections[1:]):
+            lines    = section.splitlines()
+            response = '\n'.join(lines[1:]).strip()  # skip status bar (first line)
+            cmd      = cmds[i] if i < len(cmds) else '?'
+            print(f'\n\033[34m> {cmd}\033[0m')
+            if response:
+                print(response)
+        print('------------------')
+    elif debug:
         print('--- raw output ---')
         print(repr(output))
         print('------------------')
@@ -51,23 +63,34 @@ def run_test(z5: Path, test: dict, debug: bool = False) -> tuple[int, int]:
         if not expect:
             continue
 
-        if expect in output:
-            print(f'  pass  {cmd_info["cmd"]!r}')
+        negate  = cmd_info.get('negate', False)
+        found   = expect in output
+        ok      = (not found) if negate else found
+
+        if ok:
+            print(f'  \033[32mpass\033[0m  {cmd_info["cmd"]!r}')
             passed += 1
         else:
-            print(f'  FAIL  {cmd_info["cmd"]!r}')
-            print(f'        expected : {expect!r}')
+            print(f'  \033[31mFAIL\033[0m  {cmd_info["cmd"]!r}')
+            if negate:
+                print(f'        unexpected : {expect!r}')
+            else:
+                print(f'        expected   : {expect!r}')
             failed += 1
 
     return passed, failed
 
 
 def main():
-    debug = False
-    args  = sys.argv[1:]
-    if args and args[0] == '--debug':
-        debug = True
-        args  = args[1:]
+    debug   = False
+    verbose = False
+    args    = sys.argv[1:]
+    while args and args[0].startswith('-'):
+        if args[0] == '--debug':
+            debug = True
+        elif args[0] in ('--verbose', '-v'):
+            verbose = True
+        args = args[1:]
 
     if not args:
         print('usage: runner.py [--debug] <game.z5> [game.gts]', file=sys.stderr)
@@ -88,7 +111,7 @@ def main():
 
     for test in tests:
         print(f'\ntest: {test["name"]!r}')
-        p, f = run_test(z5, test, debug=debug)
+        p, f = run_test(z5, test, debug=debug, verbose=verbose)
         total_pass += p
         total_fail += f
 

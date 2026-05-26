@@ -1,0 +1,17 @@
+# on_turn — on turn N fires once, each turn fires every turn
+
+room Room "A room."
+
+    on turn 1:
+        say "Turn one."
+
+    each turn:
+        say "Every turn."
+
+test "default"
+    look. "Turn one"
+    look. "Every turn"
+    look. "Every turn"
+    go east.
+    go west.
+    look. "Turn one"

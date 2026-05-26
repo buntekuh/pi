@@ -8,6 +8,8 @@ room White Room "Dazzling white walls all around. It is eerily silent. A blue do
     door blue door "A perfectly smooth blue door."
         east: Blue Room
         is openable.
+        is lockable. 
+        locked: true.
 
 room Blue Room "You stand in a blue room. When you listen carefully, you hear gulls and the surf of the waves. A white door adorns the west wall."
 

@@ -1,0 +1,15 @@
+# door — in-room door, openable, auto reverse exit
+
+room West "West room."
+
+    door wooden door "A plain wooden door."
+        east: East
+        is openable.
+
+room East "East room."
+
+test "default"
+    east. "You can't, since the wooden door is in the way."
+    open wooden door. "You open"
+    east. "East room"
+    west. "West room"

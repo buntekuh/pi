@@ -1,0 +1,21 @@
+# scenery — fixed in place, not takeable; applicable to objects and doors
+
+room Heaven "Clouds and light. A pearly gate leads east."
+
+    scenery clouds "Billowing white clouds."
+
+    instead of take clouds:
+        say "Whisps of steam defy your grasp."
+
+    door Pearly Gate "Heaven beckons yonder."
+        east: Beyond
+        is scenery.
+        is open.
+
+room Beyond "The heavenly Realm."
+
+test "default"
+    examine clouds. "Billowing"
+    take clouds. "Whisps of steam defy your grasp."
+    look. Not "Pearly Gate is here"
+    east. "The heavenly Realm."

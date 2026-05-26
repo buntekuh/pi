@@ -1,0 +1,11 @@
+# rooms — room declaration, description, exits
+
+room Hall "A plain hall. A corridor leads north."
+    north: Garden
+
+room Garden "A small garden. The hall lies south."
+    south: Hall
+
+test "default"
+    north. "garden"
+    south. "hall"

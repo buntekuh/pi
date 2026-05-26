@@ -1,0 +1,19 @@
+# attributes — boolean attrs: locked: true, is locked, if/give statements
+
+verb stamp
+    * noun
+    "Nothing to stamp."
+
+room Room "A room."
+
+    object passport "A clean passport."
+        instead of stamp:
+            if stamped:
+                say "Already stamped."
+            else:
+                stamped.
+                say "Stamped."
+
+test "default"
+    stamp passport. "Stamped"
+    stamp passport. "Already stamped"
