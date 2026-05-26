@@ -69,6 +69,7 @@ instead of prying with crowbar:
 - `\n` → `^` (Inform 6 newline)
 - `\t` → `@@9` (tab character)
 - `"` → `~` (Inform 6 string escape)
+- ISO 8859-1 characters (é, ñ, ü, etc.) encoded automatically as `@@decimal`
 - Extra whitespace normalised
 
 ## Tests
@@ -78,3 +79,6 @@ test "default"
     east. "Inside"
 ```
 Writes a `.gts` JSON file alongside the `.inf` for use by a test runner.
+
+## Planned
+- User-defined functions — named routines callable from handlers, for shared logic
