@@ -2,17 +2,18 @@
 
 room White Room "Dazzling white walls all around. It is eerily silent. A blue door leads east."
 
-room Blue Room "You stand in a blue room. When you listen carefully, you hear gulls and the surf of the waves. A white door adornes the west wall."
+    on turn 1:
+        box "Fun with doors."
 
-door blue door "A perfectly smooth blue door."
-    east: Blue Room
-    west: White Room
-    is openable.
+    door blue door "A perfectly smooth blue door."
+        east: Blue Room
+        is openable.
 
-door white door "Whiter than an unblemished soul."
-    east: White Room
-    west: Blue Room
-    is openable.
+room Blue Room "You stand in a blue room. When you listen carefully, you hear gulls and the surf of the waves. A white door adorns the west wall."
+
+    door white door "Whiter than an unblemished soul."
+        west: White Room
+        is openable.
 
 test "default"
     open blue door. "You open"

@@ -14,18 +14,17 @@ room Front of House "You stand before a white clapboard house. The paint is peel
 
     object crowbar "A heavy iron crowbar, flecked with rust, leaning against the house."
 
-room Inside "You stand inside the house. Dust motes drift in the thin light from the doorway. It smells of old paper and closed rooms."
+    door blue door "A sturdy blue door, its frame crossed by a heavy iron bar nailed firmly in place."
+        east: Inside
+        is openable.
+        instead of prying with crowbar:
+            if open:
+                say "The door is already open."
+            else:
+                say "You lever the iron bar free with a grunt of effort. It clatters to the ground."
+                open.
 
-door blue door "A sturdy blue door, its frame crossed by a heavy iron bar nailed firmly in place."
-    east: Inside
-    west: Front of House
-    is openable.
-    instead of prying with crowbar:
-        if open:
-            say "The door is already open."
-        else:
-            say "You lever the iron bar free with a grunt of effort. It clatters to the ground."
-            open.
+room Inside "You stand inside the house. Dust motes drift in the thin light from the doorway. It smells of old paper and closed rooms."
 
 test "default"
     examine house. "weather"

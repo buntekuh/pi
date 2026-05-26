@@ -100,14 +100,13 @@ def _append_stmt(stmts: list, stripped: str) -> None:
 
 def parse(source: str) -> dict:
     source = _preprocess(source)
-    ast = {'uses': [], 'rooms': [], 'doors': [], 'verbs': [], 'tests': []}
+    ast = {'uses': [], 'rooms': [], 'verbs': [], 'tests': []}
 
     current_room    = None;  room_col    = -1
     current_object  = None;  obj_col     = -1
     current_handler = None;  handler_col = -1
     current_if      = None;  if_col      = -1;  if_branch = 'then'
     current_test    = None;  test_col    = -1
-    current_door    = None;  door_col    = -1
     current_verb    = None;  verb_col    = -1
 
     for raw in source.splitlines():
@@ -139,9 +138,6 @@ def parse(source: str) -> dict:
 
         if current_test is not None and col <= test_col:
             current_test = None
-
-        if current_door is not None and col <= door_col:
-            current_door = None
 
         if current_verb is not None and col <= verb_col:
             current_verb = None
@@ -225,23 +221,6 @@ def parse(source: str) -> dict:
                 handler_col = col
                 current_room['handlers'][key] = current_handler
 
-        elif current_door is not None:
-            if re.match(r'(instead of|on|after)\s+', stripped):
-                key = stripped.rstrip(':')
-                current_handler = []
-                handler_col = col
-                current_door['handlers'][key] = current_handler
-            elif re.match(r'(north|south|east|west|up|down|ne|nw|se|sw):\s+', stripped, re.I):
-                m = re.match(r'(\w+):\s+(.+)', stripped)
-                if m:
-                    current_door['connections'][m.group(1).lower()] = m.group(2).strip().strip('"')
-            elif stripped.startswith('is '):
-                current_door['behaviours'].append(stripped[3:].rstrip('.').strip())
-            elif re.match(r'\w+:\s+\S', stripped):
-                m = re.match(r'(\w+):\s+(.+)', stripped)
-                if m:
-                    current_door['properties'][m.group(1)] = m.group(2).rstrip('.')
-
         elif current_verb is not None:
             if stripped.startswith('*'):
                 current_verb['grammar'].append(stripped)
@@ -276,16 +255,6 @@ def parse(source: str) -> dict:
                 }
                 room_col = col
                 ast['rooms'].append(current_room)
-
-            elif stripped.startswith('door '):
-                keywords, display, obj_id, inline_desc = _parse_keywords(stripped[5:].strip())
-                current_door = {
-                    'id': obj_id, 'keywords': keywords, 'name': display,
-                    'desc': inline_desc, 'behaviours': [], 'properties': {},
-                    'connections': {}, 'handlers': {},
-                }
-                door_col = col
-                ast['doors'].append(current_door)
 
             elif stripped.startswith('test '):
                 m = re.match(r'test\s+"([^"]*)"', stripped)
@@ -572,12 +541,14 @@ def _emit_object(w, obj: dict, parent: str, verb_action_map: dict, known_ids: se
     w('')
 
 
-def _emit_door(w, obj: dict, parent_rid: str, door_map: dict, verb_action_map: dict, known_ids: set):
+def _emit_door(w, obj: dict, parent_rid: str, door_dir: str, dest_rid: str,
+               verb_action_map: dict, known_ids: set):
     oid  = obj['id']
     kws  = ' '.join(f"'{k}'" for k in obj['keywords']) if obj['keywords'] else ''
-    _, _, dest_rid = door_map[oid]
 
-    attrs = 'door openable'
+    attrs = 'door'
+    if 'openable' in obj['behaviours']:
+        attrs += ' openable'
     if 'lockable' in obj['behaviours']:
         attrs += ' lockable'
         if obj['properties'].get('security') == 'locked':
@@ -589,51 +560,11 @@ def _emit_door(w, obj: dict, parent_rid: str, door_map: dict, verb_action_map: d
         w(f'         description "{_i6str(obj["desc"])}",')
     else:
         w(f'    with description "{_i6str(obj["desc"])}",')
-    w(f'         door_to [; if (location == {parent_rid}) return {dest_rid};')
-    w(f'                    return {parent_rid}; ],')
+    w(f'         door_dir {_DIR_MAP[door_dir]},')
+    w(f'         door_to [; return {dest_rid}; ],')
     if 'key' in obj['properties']:
         w(f'         with_key {obj["properties"]["key"]},')
     _emit_handlers(w, obj.get('handlers', {}), verb_action_map, known_ids)
-    w(f'    has {attrs};')
-    w('')
-
-
-def _emit_top_door(w, door: dict, routes: dict, parent_id: str, parent_dir: str,
-                   partners: list, verb_action_map: dict, known_ids: set):
-    did  = door['id']
-    kws  = ' '.join(f"'{k}'" for k in door['keywords']) if door['keywords'] else ''
-    attrs = 'door'
-    if 'openable' in door['behaviours']:
-        attrs += ' openable'
-    if 'lockable' in door['behaviours']:
-        attrs += ' lockable'
-        if door['properties'].get('security') == 'locked':
-            attrs += ' locked'
-
-    w(f'Object {did} "{_i6str(door["name"])}" {parent_id}')
-    if kws:
-        w(f'    with name {kws},')
-        w(f'         description "{_i6str(door["desc"])}",')
-    else:
-        w(f'    with description "{_i6str(door["desc"])}",')
-    if parent_dir:
-        w(f'         door_dir {_DIR_MAP.get(parent_dir, parent_dir + "_to")},')
-    branches = []
-    for dir_, dest_id in routes.items():
-        opp = _OPPOSITE_DIR.get(dir_)
-        if opp and opp in routes:
-            branches.append(f'if (location == {routes[opp]}) return {dest_id};')
-    if branches:
-        w(f'         door_to [; {branches[0]}')
-        for b in branches[1:]:
-            w(f'                    {b}')
-        w( '                    return 0; ],')
-    if partners:
-        scope_calls = ' '.join(f'PlaceInScope({p});' for p in partners)
-        w(f'         add_to_scope [; {scope_calls} ],')
-    if 'key' in door['properties']:
-        w(f'         with_key {door["properties"]["key"]},')
-    _emit_handlers(w, door.get('handlers', {}), verb_action_map, known_ids)
     w(f'    has {attrs};')
     w('')
 
@@ -695,52 +626,32 @@ def emit_i6(ast: dict) -> str:
     def _resolve_room(ref: str) -> str:
         return room_by_norm.get(ref) or room_by_norm.get(_to_id(ref)) or _to_id(ref)
 
-    # door_id → (door_obj, parent_room_id, dest_room_id)  [in-room doors]
-    door_map = {}
+    # door_id → (obj, parent_room_id, door_direction, dest_room_id)
+    door_info = {}
     for room in rooms:
         for obj in room['objects']:
             if obj['kind'] == 'door':
-                dest_name = obj['properties'].get('leads', '')
-                dest_id   = _resolve_room(dest_name)
-                door_map[obj['id']] = (obj, room['id'], dest_id)
+                for prop_key in obj['properties']:
+                    if prop_key in _DIR_MAP:
+                        dest_id = _resolve_room(obj['properties'][prop_key])
+                        door_info[obj['id']] = (obj, room['id'], prop_key, dest_id)
+                        break
 
-    # Top-level doors: resolve connections, derive room exits automatically.
-    top_door_routes  = {}
-    room_extra_exits = {}
-    for door in ast.get('doors', []):
-        resolved = {d: _resolve_room(dest) for d, dest in door['connections'].items()}
-        top_door_routes[door['id']] = resolved
-        for dir_, dest_id in resolved.items():
-            opp = _OPPOSITE_DIR.get(dir_)
-            if opp and opp in resolved:
-                departure_id = resolved[opp]
-                room_extra_exits.setdefault(departure_id, {})[dir_] = door['id']
+    # Directions already covered in each room (explicit exits + in-room door exits)
+    room_covered_dirs = {}
+    for room in rooms:
+        covered = set(room['exits'].keys())
+        for obj in room['objects']:
+            if obj['kind'] == 'door' and obj['id'] in door_info:
+                covered.add(door_info[obj['id']][2])
+        room_covered_dirs[room['id']] = covered
 
-    # Parent of each top-level door: departure room of its first connection.
-    top_door_parent     = {}
-    top_door_parent_dir = {}
-    for door in ast.get('doors', []):
-        did    = door['id']
-        routes = top_door_routes[did]
-        for dir_, dest_id in routes.items():
-            opp = _OPPOSITE_DIR.get(dir_)
-            if opp and opp in routes:
-                top_door_parent[did]     = routes[opp]
-                top_door_parent_dir[did] = dir_
-                break
-
-    # Partner doors for add_to_scope
-    door_conn_rooms = {d['id']: set(top_door_routes[d['id']].values())
-                       for d in ast.get('doors', [])}
-    door_partners = {}
-    for door in ast.get('doors', []):
-        did = door['id']
-        partners = [
-            o['id'] for o in ast.get('doors', [])
-            if o['id'] != did
-            and top_door_parent.get(o['id']) in door_conn_rooms.get(did, set())
-        ]
-        door_partners[did] = partners
+    # Auto-inject plain reverse exits for in-room doors
+    reverse_exits = {}  # dest_room_id → {opp_dir: parent_room_id}
+    for did, (obj, parent_rid, door_dir, dest_rid) in door_info.items():
+        opp = _OPPOSITE_DIR.get(door_dir)
+        if opp and opp not in room_covered_dirs.get(dest_rid, set()):
+            reverse_exits.setdefault(dest_rid, {})[opp] = parent_rid
 
     # IDs of all named game objects — used to resolve {interpolations} in say
     known_ids: set = set()
@@ -748,8 +659,6 @@ def emit_i6(ast: dict) -> str:
         known_ids.add(r['id'])
         for obj in r['objects']:
             known_ids.add(obj['id'])
-    for door in ast.get('doors', []):
-        known_ids.add(door['id'])
 
     for room in rooms:
         rid = room['id']
@@ -758,33 +667,25 @@ def emit_i6(ast: dict) -> str:
         w(f'        "{_i6str(room["desc"])}",')
         for direction, dest in room['exits'].items():
             i6dir = _DIR_MAP.get(direction, direction + '_to')
-            if dest in door_map:
-                w(f'         {i6dir} {dest},')
-            else:
-                w(f'         {i6dir} {_resolve_room(dest)},')
-        for direction, door_id in room_extra_exits.get(rid, {}).items():
+            w(f'         {i6dir} {_resolve_room(dest)},')
+        for obj in room['objects']:
+            if obj['kind'] == 'door' and obj['id'] in door_info:
+                _, _, door_dir, _ = door_info[obj['id']]
+                i6dir = _DIR_MAP[door_dir]
+                w(f'         {i6dir} {obj["id"]},')
+        for direction, dest_rid in reverse_exits.get(rid, {}).items():
             i6dir = _DIR_MAP.get(direction, direction + '_to')
-            w(f'         {i6dir} {door_id},')
+            w(f'         {i6dir} {dest_rid},')
         _emit_handlers(w, room.get('handlers', {}), verb_action_map, known_ids)
         w( '    has light;')
         w('')
 
         for obj in room['objects']:
-            if obj['kind'] == 'door':
-                _emit_door(w, obj, rid, door_map, verb_action_map, known_ids)
-            else:
+            if obj['kind'] == 'door' and obj['id'] in door_info:
+                _, _, door_dir, dest_rid = door_info[obj['id']]
+                _emit_door(w, obj, rid, door_dir, dest_rid, verb_action_map, known_ids)
+            elif obj['kind'] != 'door':
                 _emit_object(w, obj, rid, verb_action_map, known_ids)
-
-    # Top-level door objects
-    for door in ast.get('doors', []):
-        did = door['id']
-        _emit_top_door(w, door,
-                       routes=top_door_routes.get(did, {}),
-                       parent_id=top_door_parent.get(did, ''),
-                       parent_dir=top_door_parent_dir.get(did, ''),
-                       partners=door_partners.get(did, []),
-                       verb_action_map=verb_action_map,
-                       known_ids=known_ids)
 
     w('Include "Grammar";')
     w('')
