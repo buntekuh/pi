@@ -344,6 +344,7 @@ def _to_id(name: str) -> str:
 
 
 def _i6str(s: str) -> str:
+    s = s.replace('\\n', '^').replace('\\t', '@@9')
     s = re.sub(r'\s+', ' ', s).strip()
     return s.replace('"', '~')
 
@@ -433,13 +434,43 @@ _PROP   = '         '    # 9 spaces — aligns with 'description', 'name', etc.
 _ACTION = '             '  # 13 spaces
 _STMT0  = '                 '  # 17 spaces
 
+_INTERP_RE = re.compile(r'\{([^}]+)\}')
 
-def _emit_stmts(w, stmts: list, prefix: str) -> None:
+
+def _emit_say(w, text: str, prefix: str, known_ids: set) -> None:
+    """Emit a print statement, resolving {identifier} interpolations."""
+    parts = []
+    last = 0
+    for m in _INTERP_RE.finditer(text):
+        if m.start() > last:
+            parts.append(('lit', text[last:m.start()]))
+        parts.append(('var', m.group(1).strip()))
+        last = m.end()
+    if last < len(text):
+        parts.append(('lit', text[last:]))
+    if not parts:
+        parts = [('lit', '')]
+
+    items = []
+    for i, (kind, val) in enumerate(parts):
+        is_last = (i == len(parts) - 1)
+        if kind == 'lit':
+            escaped = re.sub(r'\s+', ' ', val.replace('\\n', '^').replace('\\t', '@@9')).replace('"', '~')
+            items.append('"' + escaped + ('^' if is_last else '') + '"')
+        else:
+            items.append(f'(name) {val}' if val in known_ids else val)
+            if is_last:
+                items.append('"^"')
+
+    w(f'{prefix}print {", ".join(items)};')
+
+
+def _emit_stmts(w, stmts: list, prefix: str, known_ids: set) -> None:
     """Emit statements. Caller is responsible for adding a trailing rtrue."""
     for stmt in stmts:
         t = stmt['type']
         if t == 'say':
-            w(f'{prefix}print "{_i6str(stmt["arg"])}^";')
+            _emit_say(w, stmt['arg'], prefix, known_ids)
         elif t == 'open':
             w(f'{prefix}give self open;')
         elif t == 'close':
@@ -450,16 +481,16 @@ def _emit_stmts(w, stmts: list, prefix: str) -> None:
             inner = prefix + '    '
             cond_expr = 'self has open' if stmt['cond'] == 'open' else 'self hasnt open'
             w(f'{prefix}if ({cond_expr}) {{')
-            _emit_stmts(w, stmt['then'], inner)
+            _emit_stmts(w, stmt['then'], inner, known_ids)
             w(f'{inner}rtrue;')
             if stmt.get('else'):
                 w(f'{prefix}}} else {{')
-                _emit_stmts(w, stmt['else'], inner)
+                _emit_stmts(w, stmt['else'], inner, known_ids)
                 w(f'{inner}rtrue;')
             w(f'{prefix}}}')
 
 
-def _emit_handlers(w, handlers: dict, verb_action_map: dict) -> None:
+def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set) -> None:
     if not handlers:
         return
     w(f'{_PROP}before [;')
@@ -468,7 +499,7 @@ def _emit_handlers(w, handlers: dict, verb_action_map: dict) -> None:
         w(f'{_ACTION}{action}:')
         if second_filter:
             w(f'{_STMT0}if (second ~= {second_filter}) rfalse;')
-        _emit_stmts(w, stmts, _STMT0)
+        _emit_stmts(w, stmts, _STMT0, known_ids)
         w(f'{_STMT0}rtrue;')
     w(f'{_PROP}],')
 
@@ -477,7 +508,7 @@ def _emit_handlers(w, handlers: dict, verb_action_map: dict) -> None:
 # Inform 6 object emitters
 # ---------------------------------------------------------------------------
 
-def _emit_object(w, obj: dict, parent: str, verb_action_map: dict):
+def _emit_object(w, obj: dict, parent: str, verb_action_map: dict, known_ids: set):
     oid   = obj['id']
     attrs = _obj_attributes(obj)
     kws   = ' '.join(f"'{k}'" for k in obj['keywords']) if obj['keywords'] else ''
@@ -491,12 +522,12 @@ def _emit_object(w, obj: dict, parent: str, verb_action_map: dict):
         w(f'    with description "{_i6str(obj["desc"])}",')
     if 'key' in obj['properties']:
         w(f'         with_key {obj["properties"]["key"]},')
-    _emit_handlers(w, obj.get('handlers', {}), verb_action_map)
+    _emit_handlers(w, obj.get('handlers', {}), verb_action_map, known_ids)
     w(f'    has {attrs};' if attrs else '    has ;')
     w('')
 
 
-def _emit_door(w, obj: dict, parent_rid: str, door_map: dict, verb_action_map: dict):
+def _emit_door(w, obj: dict, parent_rid: str, door_map: dict, verb_action_map: dict, known_ids: set):
     oid  = obj['id']
     kws  = ' '.join(f"'{k}'" for k in obj['keywords']) if obj['keywords'] else ''
     _, _, dest_rid = door_map[oid]
@@ -517,7 +548,7 @@ def _emit_door(w, obj: dict, parent_rid: str, door_map: dict, verb_action_map: d
     w(f'                    return {parent_rid}; ],')
     if 'key' in obj['properties']:
         w(f'         with_key {obj["properties"]["key"]},')
-    _emit_handlers(w, obj.get('handlers', {}), verb_action_map)
+    _emit_handlers(w, obj.get('handlers', {}), verb_action_map, known_ids)
     w(f'    has {attrs};')
     w('')
 
@@ -624,6 +655,15 @@ def emit_i6(ast: dict) -> str:
         ]
         door_partners[did] = partners
 
+    # IDs of all named game objects — used to resolve {interpolations} in say
+    known_ids: set = set()
+    for r in rooms:
+        known_ids.add(r['id'])
+        for obj in r['objects']:
+            known_ids.add(obj['id'])
+    for door in ast.get('doors', []):
+        known_ids.add(door['id'])
+
     for room in rooms:
         rid = room['id']
         w(f'Object {rid} "{_i6str(room["name"])}"')
@@ -643,9 +683,9 @@ def emit_i6(ast: dict) -> str:
 
         for obj in room['objects']:
             if obj['kind'] == 'door':
-                _emit_door(w, obj, rid, door_map, verb_action_map)
+                _emit_door(w, obj, rid, door_map, verb_action_map, known_ids)
             else:
-                _emit_object(w, obj, rid, verb_action_map)
+                _emit_object(w, obj, rid, verb_action_map, known_ids)
 
     # Top-level door objects
     for door in ast.get('doors', []):
@@ -688,7 +728,7 @@ def emit_i6(ast: dict) -> str:
             w(f'         add_to_scope [; {scope_calls} ],')
         if 'key' in door['properties']:
             w(f'         with_key {door["properties"]["key"]},')
-        _emit_handlers(w, door.get('handlers', {}), verb_action_map)
+        _emit_handlers(w, door.get('handlers', {}), verb_action_map, known_ids)
         w(f'    has {attrs};')
         w('')
 
