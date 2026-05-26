@@ -63,6 +63,8 @@ instead of prying with crowbar:
 - Conditionals: `if open:` / `if closed:` / `else:`
 - Statements: `say "..."`, `open.`, `close.`, `go room`, `box "..."`
 - `after` handlers emit to Inform 6 `after` property; all others to `before`
+- `on turn N:` fires on a specific turn count via `each_turn` with `turns == N` guard
+- `each turn:` fires every turn via `each_turn`
 
 ## Say / string features
 - `say "text"` in handlers emits `print`

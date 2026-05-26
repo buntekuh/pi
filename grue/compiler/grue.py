@@ -510,11 +510,31 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set) -> None:
             w(f'{prefix}}}')
 
 
+_ON_TURN_RE = re.compile(r'^on turn (\d+)$')
+
+
 def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set) -> None:
     if not handlers:
         return
-    before_h = {k: v for k, v in handlers.items() if not k.startswith('after ')}
+
+    turn_h   = {k: v for k, v in handlers.items() if _ON_TURN_RE.match(k)}
+    each_h   = {k: v for k, v in handlers.items() if k == 'each turn'}
+    before_h = {k: v for k, v in handlers.items()
+                if not k.startswith('after ') and k not in turn_h and k not in each_h}
     after_h  = {k: v for k, v in handlers.items() if k.startswith('after ')}
+
+    # each_turn property: fires every turn when location matches
+    if turn_h or each_h:
+        w(f'{_PROP}each_turn [;')
+        for key, stmts in each_h.items():
+            _emit_stmts(w, stmts, _ACTION, known_ids)
+        for key, stmts in turn_h.items():
+            n = _ON_TURN_RE.match(key).group(1)
+            w(f'{_ACTION}if (turns == {n}) {{')
+            _emit_stmts(w, stmts, _STMT0, known_ids)
+            w(f'{_ACTION}}}')
+        w(f'{_PROP}],')
+
     for prop, hmap in (('before', before_h), ('after', after_h)):
         if not hmap:
             continue
