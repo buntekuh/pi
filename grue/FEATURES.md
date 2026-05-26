@@ -64,6 +64,8 @@ instead of prying with crowbar:
 - `say "text"` in handlers emits `print`
 - `{obj}` interpolation → `(name) obj` for known game objects, bare expression otherwise
 - `{the obj}` → `(the) obj`, `{a obj}` → `(a) obj`
+- `{s var}` → plural s: prints "s" unless var == 1 (e.g. `{item_count} item{s item_count}`)
+- Runtime object variables resolved automatically: `noun`, `second`, `self`, `actor`, `location`
 - `\n` → `^` (Inform 6 newline)
 - `\t` → `@@9` (tab character)
 - `"` → `~` (Inform 6 string escape)

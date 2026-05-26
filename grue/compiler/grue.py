@@ -425,6 +425,9 @@ _STMT0  = '                 '  # 17 spaces
 
 _INTERP_RE = re.compile(r'\{([^}]+)\}')
 
+# Inform 6 runtime variables that hold object references
+_I6_OBJ_VARS = {'noun', 'second', 'self', 'actor', 'location'}
+
 
 def _emit_say(w, text: str, prefix: str, known_ids: set) -> None:
     """Emit a print statement, resolving {identifier} interpolations."""
@@ -448,9 +451,12 @@ def _emit_say(w, text: str, prefix: str, known_ids: set) -> None:
             items.append('"' + escaped + ('^' if is_last else '') + '"')
         else:
             article, _, ident = val.partition(' ')
-            if article in ('the', 'a') and ident in known_ids:
+            obj_ids = known_ids | _I6_OBJ_VARS
+            if article == 's' and ident:
+                items.append(f'(Grue_s) {ident}')
+            elif article in ('the', 'a') and ident in obj_ids:
                 items.append(f'({article}) {ident}')
-            elif val in known_ids:
+            elif val in obj_ids:
                 items.append(f'(name) {val}')
             else:
                 items.append(val)
@@ -608,6 +614,8 @@ def emit_i6(ast: dict) -> str:
     w('')
     w('Include "Parser";')
     w('Include "VerbLib";')
+    w('')
+    w('[ Grue_s n; if (n ~= 1) print "s"; ];')
     w('')
 
     # Build verb_action_map: base_word → action_name
