@@ -447,7 +447,13 @@ def _emit_say(w, text: str, prefix: str, known_ids: set) -> None:
             escaped = re.sub(r'\s+', ' ', val.replace('\\n', '^').replace('\\t', '@@9')).replace('"', '~')
             items.append('"' + escaped + ('^' if is_last else '') + '"')
         else:
-            items.append(f'(name) {val}' if val in known_ids else val)
+            article, _, ident = val.partition(' ')
+            if article in ('the', 'a') and ident in known_ids:
+                items.append(f'({article}) {ident}')
+            elif val in known_ids:
+                items.append(f'(name) {val}')
+            else:
+                items.append(val)
             if is_last:
                 items.append('"^"')
 
