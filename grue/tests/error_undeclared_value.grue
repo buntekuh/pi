@@ -1,0 +1,6 @@
+# expect error: undeclared numeric property 'treeness'
+
+room Room "A room."
+
+    object oak "An oak."
+        treeness = 10.

@@ -1,0 +1,9 @@
+# expect error: unknown value 'footsore' for kind 'ailment'
+
+kind ailment: healthy, cold, sick
+
+room Room "A room."
+
+    woman Mildred "Aunt Mildred."
+        instead of tap:
+            Mildred ailment = footsore.

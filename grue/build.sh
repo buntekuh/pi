@@ -46,6 +46,26 @@ run_one() {
     INF_FILE="$BIN_DIR/$BASE.inf"
     Z5_FILE="$BIN_DIR/$BASE.z5"
     GTS_FILE="$BIN_DIR/$BASE.gts"
+    local GREEN=$'\033[32m' RED=$'\033[31m' RESET=$'\033[0m'
+
+    # expect error: directive — verify the compiler rejects the file as expected.
+    local expected_error
+    expected_error=$(grep -m1 '^# expect error:' "$GRUE_FILE" | sed 's/^# expect error:[[:space:]]*//')
+    if [ -n "$expected_error" ]; then
+        local compiler_out compiler_rc
+        compiler_out=$(python3 "$TRANSPILER" "$GRUE_FILE" "$INF_FILE" 2>&1)
+        compiler_rc=$?
+        if [ $compiler_rc -ne 0 ] && echo "$compiler_out" | grep -qF "$expected_error"; then
+            echo "${GREEN}pass${RESET}  expected error: $expected_error"
+            total_passed=$(( total_passed + 1 ))
+        else
+            echo "${RED}FAIL${RESET}  expected error not raised: $expected_error"
+            [ -n "$compiler_out" ] && echo "       got: $(echo "$compiler_out" | head -1)"
+            total_failed=$(( total_failed + 1 ))
+            return 1
+        fi
+        return 0
+    fi
 
     if $DO_BUILD; then
         python3 "$TRANSPILER" "$GRUE_FILE" "$INF_FILE" || return 1
