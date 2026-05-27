@@ -1,0 +1,72 @@
+# subject_conditions — if SUBJ is VAL: and if SUBJ has OBJ:
+
+kind wet: dry, wet
+kind charge: full, low, empty
+
+verb douse
+    takes noun
+    "Nothing to douse."
+
+verb inspect
+    takes noun
+    "Nothing to inspect."
+
+room Lab "A laboratory."
+
+    object bucket "A metal bucket."
+        is wet.
+
+    object sponge "A dry sponge."
+
+        instead of douse:
+            if bucket is wet:
+                the noun is wet.
+                say "You douse the sponge."
+            else:
+                say "The bucket is dry."
+
+        instead of examine:
+            if sponge is wet:
+                say "The sponge is wet."
+            else:
+                say "The sponge is dry."
+
+    man robot "A robot."
+        charge: empty.
+
+        instead of examine:
+            if robot is not full:
+                say "Robot is not full."
+
+    man android "An android."
+        charge: low.
+
+        instead of examine:
+            if android is low:
+                say "Android is low."
+
+    object bag "A canvas bag."
+        is container.
+        open: true.
+
+    object coin "A small coin."
+        inside: bag.
+
+        instead of inspect:
+            if bag has coin:
+                say "The coin is in the bag."
+
+    object key "A brass key."
+
+        instead of inspect:
+            if bag has not key:
+                say "The key is not in the bag."
+
+test "default"
+    examine sponge. "The sponge is dry"
+    douse sponge. "You douse the sponge"
+    examine sponge. "The sponge is wet"
+    examine robot. "Robot is not full"
+    examine android. "Android is low"
+    inspect coin. "The coin is in the bag"
+    inspect key. "The key is not in the bag"

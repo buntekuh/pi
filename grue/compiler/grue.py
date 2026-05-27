@@ -220,9 +220,23 @@ def parse(source: str) -> dict:
             _append_stmt(branch, stripped, lineno)
 
         elif current_handler is not None:
-            mk = re.match(r'if\s+(\w+)\s+(==?|is|<=?|>=?)\s+(\w+)\s*:', stripped)
-            m  = re.match(r'if\s+(not\s+)?(\w+)\s*:', stripped)
-            if mk:
+            ms_has  = re.match(r'if\s+(\w+)\s+has\s+(not\s+)?(\w+)\s*:', stripped)
+            ms_isn  = re.match(r'if\s+(\w+)\s+is\s+not\s+(\w+)\s*:', stripped)
+            mk      = re.match(r'if\s+(\w+)\s+(==?|is|<=?|>=?)\s+(\w+)\s*:', stripped)
+            m       = re.match(r'if\s+(not\s+)?(\w+)\s*:', stripped)
+            if ms_has:
+                current_if = {'type': 'if',
+                               'subj': ms_has.group(1), 'contains': ms_has.group(3),
+                               'neg': bool(ms_has.group(2)),
+                               'then': [], 'else': None, 'line': lineno}
+                if_col = col; if_branch = 'then'
+            elif ms_isn:
+                current_if = {'type': 'if',
+                               'kind': ms_isn.group(1).lower(), 'val': ms_isn.group(2).lower(),
+                               'neg': True, 'op': 'is',
+                               'then': [], 'else': None, 'line': lineno}
+                if_col = col; if_branch = 'then'
+            elif mk:
                 op      = mk.group(2)
                 val_str = mk.group(3)
                 if op in ('is', '='):
@@ -233,10 +247,9 @@ def parse(source: str) -> dict:
                                    'then': [], 'else': None, 'line': lineno}
                 else:
                     current_if = {'type': 'if', 'kind': mk.group(1).lower(),
-                                   'op': op, 'val': val_str.lower(),
+                                   'neg': False, 'op': op, 'val': val_str.lower(),
                                    'then': [], 'else': None, 'line': lineno}
-                if_col    = col
-                if_branch = 'then'
+                if_col = col; if_branch = 'then'
             elif m:
                 neg_kw   = bool(m.group(1))
                 raw_attr = m.group(2)
@@ -244,8 +257,7 @@ def parse(source: str) -> dict:
                 neg      = neg_kw or raw_attr in _NEGATION
                 current_if = {'type': 'if', 'attr': attr, 'neg': neg,
                                'then': [], 'else': None, 'line': lineno}
-                if_col    = col
-                if_branch = 'then'
+                if_col = col; if_branch = 'then'
             else:
                 _append_stmt(current_handler, stripped, lineno)
 
@@ -727,7 +739,12 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx) -> None:
                 w(f'{prefix}    "{encoded[-1]}";')
         elif t == 'if':
             inner = prefix + '    '
-            if 'prop' in stmt:
+            if 'contains' in stmt:
+                obj_ref   = stmt['contains']
+                container = stmt['subj']
+                cond_expr = (f'~~({obj_ref} in {container})' if stmt['neg']
+                             else f'{obj_ref} in {container}')
+            elif 'prop' in stmt:
                 prop = stmt['prop']
                 if prop in vars_set:
                     cond_expr = f'{prop} {stmt["op"]} {stmt["num"]}'
@@ -740,31 +757,52 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx) -> None:
                     cond_expr = f'self.{prop} {stmt["op"]} {stmt["num"]}'
             elif 'kind' in stmt:
                 kind_id = _to_id(stmt['kind'])
-                kd = kinds_by_id.get(kind_id)
-                if kd is None:
+                kd      = kinds_by_id.get(kind_id)
+                neg     = stmt.get('neg', False)
+                if kd is not None:
+                    # Self's kind property check: if wetness is wet:
+                    val = stmt['val']
+                    if val not in kd['values']:
+                        raise GrueError(
+                            f"unknown value '{val}' for kind '{stmt['kind']}'", line, 'E039')
+                    op = stmt['op']
+                    if len(kd['values']) == 2:
+                        attr_name = kd['values'][1]
+                        if op in ('==', 'is'):
+                            effective_has = (val == attr_name) ^ neg
+                            cond_expr = (f'self has {attr_name}' if effective_has
+                                         else f'self hasnt {attr_name}')
+                        else:
+                            raise GrueError(
+                                f"operator '{op}' not valid for two-value kind '{stmt['kind']}'",
+                                line, 'E040')
+                    else:
+                        cond_expr = f'self.{kind_id} {stmt["op"]} {stmt["val"].upper()}'
+                else:
+                    # Subject-qualified: if murderer is wet: / if robot is low:
                     if stmt['kind'] in values_set:
                         raise GrueError(
                             f"'{stmt['kind']}' is a numeric value property"
                             f" — use a numeric comparison: if {stmt['kind']} > 0:",
                             line, 'E042')
-                    raise GrueError(
-                        f"unknown kind '{stmt['kind']}' in condition", line, 'E038')
-                val = stmt['val']
-                if val not in kd['values']:
-                    raise GrueError(
-                        f"unknown value '{val}' for kind '{stmt['kind']}'", line, 'E039')
-                op = stmt['op']
-                if len(kd['values']) == 2:
-                    attr_name = kd['values'][1]
-                    if op == '==':
-                        cond_expr = (f'self has {attr_name}' if val == attr_name
-                                     else f'self hasnt {attr_name}')
+                    subj = stmt['kind']
+                    word = stmt['val']
+                    val_to_kind = {v: kd2 for kd2 in kinds_by_id.values()
+                                   for v in kd2['values']}
+                    if word in val_to_kind:
+                        kd2 = val_to_kind[word]
+                        if len(kd2['values']) == 2:
+                            attr_name     = kd2['values'][1]
+                            effective_has = (word == attr_name) ^ neg
+                            cond_expr = (f'{subj} has {attr_name}' if effective_has
+                                         else f'{subj} hasnt {attr_name}')
+                        else:
+                            op2 = '~=' if neg else '=='
+                            cond_expr = f'{subj}.{kd2["id"]} {op2} {word.upper()}'
                     else:
-                        raise GrueError(
-                            f"operator '{op}' not valid for two-value kind '{stmt['kind']}'",
-                            line, 'E040')
-                else:
-                    cond_expr = f'self.{kind_id} {op} {val.upper()}'
+                        attr  = _NEGATION.get(word, word)
+                        is_neg = neg ^ (word in _NEGATION)
+                        cond_expr = f'{subj} {"hasnt" if is_neg else "has"} {attr}'
             else:
                 has_or_hasnt = 'hasnt' if stmt['neg'] else 'has'
                 cond_expr = f'self {has_or_hasnt} {stmt["attr"]}'
