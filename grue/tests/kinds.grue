@@ -1,7 +1,8 @@
-# kinds — kind declaration, assignment, condition, two-value kind
+# kinds — kind declaration, assignment, condition, two-value kind, multi-word name
 
-kind ailment: healthy, cold, sickness
+kind ailment: healthy, cold, sick
 kind waterlogged: dry, wet
+kind fill level: empty, full
 
 verb tap
     * noun
@@ -19,8 +20,8 @@ room Room "A room."
                 say "She looks unwell."
 
         instead of tap:
-            if ailment < sickness:
-                Mildred ailment = sickness.
+            if ailment < sick:
+                Mildred ailment = sick.
                 say "She suddenly looks much worse."
             else:
                 say "She's as sick as she can get."
@@ -34,9 +35,40 @@ room Room "A room."
             else:
                 say "The bucket is dry."
 
+    man Albert "Albert."
+
+        instead of examine:
+            if waterlogged is wet:
+                say "Albert is drenched from head to toe."
+            else:
+                say "Albert is perfectly dry."
+
+        instead of tap:
+            Albert waterlogged = wet.
+            say "You splash Albert with water."
+
+    object jug "A clay jug."
+        is full.
+
+        instead of examine:
+            if fill_level is full:
+                say "The jug is full of water."
+            else:
+                say "The jug is empty."
+
+        instead of tap:
+            jug fill_level = empty.
+            say "You empty the jug."
+
 test "default"
     examine Mildred. "She looks unwell"
     tap Mildred. "She suddenly looks much worse"
     examine Mildred. "She looks unwell"
     tap Mildred. "She's as sick as she can get"
     examine bucket. "The bucket is dripping"
+    examine Albert. "Albert is perfectly dry"
+    tap Albert. "You splash Albert with water"
+    examine Albert. "Albert is drenched from head to toe"
+    examine jug. "The jug is full of water"
+    tap jug. "You empty the jug"
+    examine jug. "The jug is empty"
