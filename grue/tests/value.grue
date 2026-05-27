@@ -1,0 +1,29 @@
+# value — integer-valued properties
+
+value treeness
+value age
+
+verb tap
+    * noun
+    "Nothing to tap."
+
+room Room "A room."
+
+    object oak "A wizened oak."
+        treeness = 10.
+        age = 100.
+
+        instead of examine:
+            if treeness > 5:
+                say "Very tree-like."
+            else:
+                say "Just a cute little shrub."
+
+        instead of tap:
+            oak treeness = 3.
+            say "The oak shrinks."
+
+test "default"
+    examine oak. "Very tree-like"
+    tap oak. "The oak shrinks"
+    examine oak. "Just a cute little shrub"

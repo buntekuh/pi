@@ -96,7 +96,8 @@ def _append_stmt(stmts: list, stripped: str) -> None:
     else:
         word = stripped.rstrip('.')
         m  = re.match(r'the\s+(\w+)\s+is\s+(not\s+)?(\w+)$', word)
-        mk = re.match(r'(\w+)\s+(\w+)\s+(?:=|is)\s+(\w+)$', word)
+        mn = re.match(r'(\w+)\s+(\w+)\s+=\s+(\d+)$', word)
+        mk = re.match(r'(\w+)\s+(\w+)\s+(?:=|is)\s+([a-zA-Z_]\w*)$', word)
         if m:
             subj     = m.group(1)
             neg_kw   = bool(m.group(2))
@@ -104,6 +105,11 @@ def _append_stmt(stmts: list, stripped: str) -> None:
             attr     = _NEGATION.get(raw_attr, raw_attr)
             neg      = neg_kw or raw_attr in _NEGATION
             stmts.append({'type': 'give', 'subj': subj, 'attr': attr, 'neg': neg})
+        elif mn:
+            stmts.append({'type': 'prop_assign',
+                          'obj':  mn.group(1).lower(),
+                          'prop': mn.group(2).lower(),
+                          'num':  int(mn.group(3))})
         elif mk:
             stmts.append({'type': 'kind_assign',
                           'obj':  mk.group(1).lower(),
@@ -122,7 +128,7 @@ def _append_stmt(stmts: list, stripped: str) -> None:
 
 def parse(source: str) -> dict:
     source = _preprocess(source)
-    ast = {'uses': [], 'kinds': [], 'rooms': [], 'verbs': [], 'tests': []}
+    ast = {'uses': [], 'kinds': [], 'values': [], 'rooms': [], 'verbs': [], 'tests': []}
 
     current_room    = None;  room_col    = -1
     current_object  = None;  obj_col     = -1
@@ -200,12 +206,18 @@ def parse(source: str) -> dict:
             mk = re.match(r'if\s+(\w+)\s+(==?|is|<=?|>=?)\s+(\w+)\s*:', stripped)
             m  = re.match(r'if\s+(not\s+)?(\w+)\s*:', stripped)
             if mk:
-                op = mk.group(2)
+                op      = mk.group(2)
+                val_str = mk.group(3)
                 if op in ('is', '='):
                     op = '=='
-                current_if = {'type': 'if', 'kind': mk.group(1).lower(),
-                               'op': op, 'val': mk.group(3).lower(),
-                               'then': [], 'else': None}
+                if val_str.isdigit():
+                    current_if = {'type': 'if', 'prop': mk.group(1).lower(),
+                                   'op': op, 'num': int(val_str),
+                                   'then': [], 'else': None}
+                else:
+                    current_if = {'type': 'if', 'kind': mk.group(1).lower(),
+                                   'op': op, 'val': val_str.lower(),
+                                   'then': [], 'else': None}
                 if_col    = col
                 if_branch = 'then'
             elif m:
@@ -295,6 +307,11 @@ def parse(source: str) -> dict:
                     if len(values) < 2:
                         raise GrueError(f'kind {kind_name!r}: at least two values required')
                     ast['kinds'].append({'name': kind_name, 'id': k_id, 'values': values})
+
+            elif stripped.startswith('value '):
+                val_name = stripped[6:].rstrip('.')
+                v_id = '_'.join(k.lower() for k in val_name.split())
+                ast['values'].append({'name': val_name, 'id': v_id})
 
             elif stripped.startswith('verb '):
                 words_part = stripped[5:].rstrip('.')
@@ -547,8 +564,14 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx=None) -> 
         elif t == 'give':
             tilde = '~' if stmt['neg'] else ''
             w(f'{prefix}give {stmt["subj"]} {tilde}{stmt["attr"]};')
+        elif t == 'prop_assign':
+            kinds_by_id, _, values_set = kinds_ctx or ({}, {}, set())
+            if stmt['prop'] not in values_set:
+                raise GrueError(
+                    f"unknown value property '{stmt['prop']}' — declare with 'value {stmt['prop']}'")
+            w(f'{prefix}{stmt["obj"]}.{stmt["prop"]} = {stmt["num"]};')
         elif t == 'kind_assign':
-            kinds_by_id, _ = kinds_ctx or ({}, {})
+            kinds_by_id, _, values_set = kinds_ctx or ({}, {}, set())
             kind_id = _to_id(stmt['kind'])
             kd = kinds_by_id.get(kind_id)
             if kd is None:
@@ -577,8 +600,14 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx=None) -> 
                 w(f'{prefix}    "{encoded[-1]}";')
         elif t == 'if':
             inner = prefix + '    '
-            if 'kind' in stmt:
-                kinds_by_id, _ = kinds_ctx or ({}, {})
+            if 'prop' in stmt:
+                kinds_by_id, _, values_set = kinds_ctx or ({}, {}, set())
+                if stmt['prop'] not in values_set:
+                    raise GrueError(
+                        f"unknown value property '{stmt['prop']}' — declare with 'value {stmt['prop']}'")
+                cond_expr = f'self.{stmt["prop"]} {stmt["op"]} {stmt["num"]}'
+            elif 'kind' in stmt:
+                kinds_by_id, _, values_set = kinds_ctx or ({}, {}, set())
                 kind_id = _to_id(stmt['kind'])
                 kd = kinds_by_id.get(kind_id)
                 if kd is None:
@@ -670,7 +699,7 @@ def _emit_object(w, obj: dict, parent: str, verb_action_map: dict, known_ids: se
         w(f'    with description "{_i6str(obj["desc"])}",')
     if 'key' in obj['properties']:
         w(f'         with_key {obj["properties"]["key"]},')
-    kinds_by_id, _ = kinds_ctx or ({}, {})
+    kinds_by_id, _, values_set = kinds_ctx or ({}, {}, set())
     for prop_key, prop_val in obj['properties'].items():
         if prop_key in ('key', 'inside'):
             continue
@@ -683,6 +712,12 @@ def _emit_object(w, obj: dict, parent: str, verb_action_map: dict, known_ids: se
                     raise GrueError(
                         f"unknown value '{prop_val}' for kind '{prop_key}' on '{obj['id']}'")
                 w(f'         {prop_kind_id} {val.upper()},')
+        elif prop_val.isdigit():
+            if prop_key not in values_set:
+                raise GrueError(
+                    f"undeclared numeric property '{prop_key}' on '{obj['id']}'"
+                    f" — declare with 'value {prop_key}'")
+            w(f'         {prop_key} {prop_val},')
     _emit_handlers(w, obj.get('handlers', {}), verb_action_map, known_ids, kinds_ctx)
     w(f'    has {attrs};' if attrs else '    has ;')
     w('')
@@ -799,9 +834,10 @@ def emit_i6(ast: dict) -> str:
         w('[ Grue_s n; if (n ~= 1) print "s"; ];')
         w('')
 
-    # Build kind registries
+    # Build kind and value registries
     kinds_by_id = {kd['id']: kd for kd in ast.get('kinds', [])}
-    kinds_ctx   = (kinds_by_id, {})
+    values_set  = {vd['id'] for vd in ast.get('values', [])}
+    kinds_ctx   = (kinds_by_id, {}, values_set)
 
     # Two-value kind attributes are declared here; exclude from user-attribute scan
     kind_declared_attrs = set()
@@ -819,7 +855,9 @@ def emit_i6(ast: dict) -> str:
             for i, val in enumerate(kd['values']):
                 w(f'Constant {val.upper()} {i};')
             w(f'Property {kd["id"]} {kd["values"][0].upper()};')
-    if ast.get('kinds'):
+    for vd in ast.get('values', []):
+        w(f'Property {vd["id"]} 0;')
+    if ast.get('kinds') or ast.get('values'):
         w('')
 
     user_attrs = _collect_user_attributes(ast) - kind_declared_attrs
