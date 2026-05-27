@@ -1,7 +1,7 @@
 # verbs — custom verb declaration, default message, handler override
 
 verb tap, knock
-    * noun
+    takes noun
     "Nothing to tap."
 
 room Room "A room."

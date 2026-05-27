@@ -69,11 +69,47 @@ Friendly aliases resolve to their canonical I6 attribute:
 
 ## Verbs
 ```
+verb examine
+    takes noun
+    "You see nothing special."
+
 verb pry, tear, wrench
-    * noun 'with' held
+    takes noun with held noun
     "There's nothing to pry there."
+
+verb give to
+    takes noun to creature noun
+    "They don't want it."
 ```
-- First word capitalised as action base; `held`/`'with'` in grammar appends `With`
+
+Grammar line: `takes [qualifier] noun` — qualifier is optional.
+
+| Qualifier | Meaning | Applies to |
+|---|---|---|
+| *(none)* | any visible object | first or second noun |
+| `held` | object the player carries | first or second noun |
+| `creature` | an NPC | first or second noun |
+| `multi` | multiple visible objects | first noun only |
+| `held multi` | multiple carried objects | first noun only |
+
+For two-noun verbs the preposition separating them (e.g. `with`, `to`, `in`) matches the verb name suffix.
+
+**Important:** qualifiers are parse-time scope/possession filters only. You cannot filter by kind or attribute at grammar time — `takes wet noun` is not valid. To act only on wet objects, accept any noun and guard in the handler:
+
+```
+verb dry
+    takes noun
+    "You can't dry that."
+
+    instead of dry:
+        if self is wet:
+            self is dry.
+            say "You dry it."
+        else:
+            say "It's already dry."
+```
+
+- First word of verb name capitalised as I6 action base
 - Emits action stub routine and `Verb` declaration
 
 ## Handlers
@@ -121,6 +157,5 @@ Writes a `.gts` JSON file alongside the `.inf` for use by a test runner.
 - User-defined functions — named routines callable from handlers, for shared logic
 
 
-Handlers: the instead of / on / after system works but the condition syntax (when open, subject-qualified assignments) needs more coverage in tests. How do handlers with two or more nouns work, e.g. "Tap drum with stick.". 
-Kind declarations: the bendable: straight, bent system was designed but not yet implemented in the compiler
-lib/containment.grue: should be updated to reflect the new syntax now that security/containment are gone
+Handlers: subject-qualified conditions (`if murderer is wet:`, `if bag has gun:`) not yet implemented.
+Kind declarations: the `bendable: straight, bent` system was designed but not yet implemented in the compiler.

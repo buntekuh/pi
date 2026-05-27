@@ -1,7 +1,7 @@
 # expect error: unknown variable 'score'
 
 verb tap
-    * noun
+    takes noun
     "Nothing."
 
 room Room "A room."

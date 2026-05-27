@@ -4,7 +4,7 @@ value treeness
 value age
 
 verb tap
-    * noun
+    takes noun
     "Nothing to tap."
 
 room Room "A room."

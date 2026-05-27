@@ -322,8 +322,8 @@ def parse(source: str) -> dict:
                         lineno, 'E020')
 
         elif current_verb is not None:
-            if stripped.startswith('*'):
-                current_verb['grammar'].append(stripped)
+            if stripped.startswith('*') or stripped.startswith('takes '):
+                current_verb['grammar'].append(_translate_grammar(stripped.rstrip('.')))
             elif stripped.startswith('"'):
                 current_verb['default'] = _extract_string(stripped)
 
@@ -479,6 +479,38 @@ _NEGATION = {
     'unlocked': 'locked',
     'off':      'on',
 }
+
+
+_GRAMMAR_QUALIFIERS = {'held', 'creature', 'visible'}
+
+
+def _parse_noun_slot(tokens: list) -> tuple:
+    """Consume [qualifier] (noun|multi) from tokens; return (i6_token, remaining)."""
+    if not tokens:
+        return 'noun', []
+    if tokens[0] in _GRAMMAR_QUALIFIERS:
+        qual, rest = tokens[0], tokens[1:]
+        target = rest[0] if rest else 'noun'
+        rest   = rest[1:] if rest else []
+        if qual == 'visible':
+            return target, rest
+        if target == 'multi':
+            return {'held': 'multiheld'}.get(qual, target), rest
+        return qual, rest        # held noun → held, creature noun → creature
+    return tokens[0], tokens[1:]
+
+
+def _translate_grammar(line: str) -> str:
+    """Translate 'takes ...' to I6 '* ...' form; pass through raw '* ...' unchanged."""
+    if line.startswith('*') or not line.startswith('takes '):
+        return line
+    tokens = line[6:].strip().split()
+    first, tokens = _parse_noun_slot(tokens)
+    if not tokens:
+        return f'* {first}'
+    prep   = tokens[0]
+    second, _ = _parse_noun_slot(tokens[1:])
+    return f"* {first} '{prep}' {second}"
 
 
 def _to_id(name: str) -> str:

@@ -3,7 +3,7 @@
 kind wet: dry, wet
 
 verb tap
-    * noun
+    takes noun
     "Nothing."
 
 room Room "A room."

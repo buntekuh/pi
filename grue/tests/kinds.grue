@@ -5,7 +5,7 @@ kind wet: dry, wet
 kind fill level: empty, full
 
 verb tap
-    * noun
+    takes noun
     "Nothing to tap."
 
 room Room "A room."

@@ -1,11 +1,11 @@
 # handlers — instead of, after, second-noun filter
 
 verb tap
-    * noun
+    takes noun
     "Nothing to tap."
 
 verb tap with
-    * noun 'with' held
+    takes noun with held noun
     "Nothing to tap with that."
 
 room Room "A room."

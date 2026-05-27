@@ -1,7 +1,7 @@
 # attributes — boolean attrs: locked: true, is locked, if/give statements
 
 verb stamp
-    * noun
+    takes noun
     "Nothing to stamp."
 
 room Room "A room."
