@@ -1,0 +1,62 @@
+# classes — user-defined class declarations
+
+kind charge: full, low, empty
+
+verb hunt
+    takes creature noun
+    "Nothing to hunt here."
+
+verb recharge
+    takes creature noun
+    "Nothing to recharge."
+
+class Wolf
+    ferocity: 5
+    speed: required
+    is animate.
+
+    instead of hunt:
+        say "The wolf gives chase."
+
+class Robot
+    slots: 3
+    energy: 100
+    charge: full.
+    serial_id: required
+    is animate.
+
+    instead of examine:
+        say "A robot hums quietly."
+
+    instead of recharge:
+        say "The robot recharges."
+
+room Factory Floor "A busy factory floor."
+
+    Wolf gray "A gray wolf"
+        speed: 6
+
+    Wolf Fenrir "Fenrir"
+        speed: 9
+        ferocity: 10
+
+        instead of hunt:
+            say "Fenrir howls and lunges."
+
+    Robot unit7 "Unit Seven"
+        serial_id: 7
+        energy: 50
+
+    Robot guardian "The guardian"
+        serial_id: 99
+        charge: low.
+
+        instead of recharge:
+            say "The guardian recharges slowly."
+
+test "default"
+    hunt gray. "The wolf gives chase"
+    hunt Fenrir. "Fenrir howls and lunges"
+    examine unit7. "A robot hums quietly"
+    recharge unit7. "The robot recharges"
+    recharge guardian. "The guardian recharges slowly"

@@ -143,7 +143,8 @@ _ROOM_KEYWORDS = {'is', 'instead', 'on', 'after', 'each'}
 
 def parse(source: str) -> dict:
     source = _preprocess(source)
-    ast = {'uses': [], 'kinds': [], 'values': [], 'vars': [], 'rooms': [], 'verbs': [], 'tests': []}
+    ast = {'uses': [], 'kinds': [], 'values': [], 'vars': [], 'classes': [],
+           'rooms': [], 'verbs': [], 'tests': []}
 
     current_room    = None;  room_col    = -1
     current_object  = None;  obj_col     = -1
@@ -151,8 +152,10 @@ def parse(source: str) -> dict:
     current_if      = None;  if_col      = -1;  if_branch = 'then'
     current_test    = None;  test_col    = -1
     current_verb    = None;  verb_col    = -1
+    current_class   = None;  class_col   = -1
 
     kind_val_map = {}   # value_name → kind_name that claimed it
+    class_ids    = {}   # class_id   → class dict (for room-level lookup)
 
     for lineno, raw in enumerate(source.splitlines(), 1):
         stripped = raw.strip()
@@ -186,6 +189,9 @@ def parse(source: str) -> dict:
 
         if current_verb is not None and col <= verb_col:
             current_verb = None
+
+        if current_class is not None and col <= class_col:
+            current_class = None
 
         # ---- Dispatch on active context, innermost first -----------------
 
@@ -314,6 +320,22 @@ def parse(source: str) -> dict:
                 obj_col = col
                 current_room['objects'].append(current_object)
 
+            elif _to_id(stripped.split()[0]) in class_ids and '"' in stripped:
+                cls_kw  = stripped.split()[0]
+                cls_id  = _to_id(cls_kw)
+                cls     = class_ids[cls_id]
+                rest    = stripped[len(cls_kw):].strip()
+                keywords, display, obj_id, inline_desc = _parse_keywords(rest)
+                current_object = {
+                    'id': obj_id, 'keywords': keywords, 'name': display,
+                    'desc': inline_desc, 'behaviours': [], 'properties': {},
+                    'kind': 'class_instance', 'class_id': cls_id,
+                    'class_name': cls['name'],
+                    'handlers': {}, 'line': lineno,
+                }
+                obj_col = col
+                current_room['objects'].append(current_object)
+
             elif re.match(r'(instead of|on|after|each)\s+', stripped):
                 key = stripped.rstrip(':')
                 current_handler = []
@@ -338,6 +360,28 @@ def parse(source: str) -> dict:
                 current_verb['grammar'].append(_translate_grammar(stripped.rstrip('.')))
             elif stripped.startswith('"'):
                 current_verb['default'] = _extract_string(stripped)
+
+        elif current_class is not None:
+            if re.match(r'(instead of|on|after|each)\s+', stripped):
+                key = stripped.rstrip(':')
+                current_handler = []
+                handler_col = col
+                current_class['handlers'][key] = current_handler
+            elif stripped.startswith('is '):
+                word = stripped[3:].rstrip('.').strip()
+                if word in _BEHAVIOURS:
+                    current_class['behaviours'].append(word)
+                else:
+                    attr = _NEGATION.get(word, word)
+                    current_class['properties'][attr] = 'false' if word in _NEGATION else 'true'
+            elif re.match(r'\w+:\s+\S', stripped):
+                m = re.match(r'(\w+):\s+(.+)', stripped)
+                if m:
+                    current_class['properties'][m.group(1)] = m.group(2).rstrip('.')
+            elif re.match(r'\w+\s*=\s*\w+', stripped):
+                m = re.match(r'(\w+)\s*=\s*(\w+)', stripped)
+                if m:
+                    current_class['properties'][m.group(1)] = m.group(2)
 
         else:
             # top level
@@ -406,6 +450,21 @@ def parse(source: str) -> dict:
                         f"'{var_name}' already declared as a value",
                         lineno, 'E061')
                 ast['vars'].append({'name': var_name, 'id': v_id, 'line': lineno})
+
+            elif stripped.startswith('class '):
+                class_name = stripped[6:].rstrip('.').strip()
+                class_id   = _to_id(class_name)
+                if class_id in class_ids:
+                    raise GrueError(
+                        f"class '{class_name}' already declared", lineno, 'E070')
+                current_class = {
+                    'name': class_name, 'id': class_id,
+                    'properties': {}, 'behaviours': [], 'handlers': {},
+                    'line': lineno,
+                }
+                class_col = col
+                ast['classes'].append(current_class)
+                class_ids[class_id] = current_class
 
             elif stripped.startswith('verb '):
                 words_part = stripped[5:].rstrip('.')
@@ -609,6 +668,9 @@ def _obj_attributes(obj: dict) -> str:
             attrs.append('proper')
     if kind == 'woman':
         attrs.append('female')
+    if kind == 'class_instance':
+        if obj.get('keywords') and obj['keywords'][0][0].isupper():
+            attrs.append('proper')
     if 'openable' in behs:
         attrs.append('openable')
     if 'lockable' in behs:
@@ -861,14 +923,27 @@ def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set,
 # ---------------------------------------------------------------------------
 
 def _emit_object(w, obj: dict, parent: str, verb_action_map: dict, known_ids: set,
-                 kinds_ctx):
+                 kinds_ctx, classes_by_id: dict = None):
     kinds_by_id, values_set, vars_set = kinds_ctx
     oid   = obj['id']
     attrs = _obj_attributes(obj)
     kws   = ' '.join(f"'{k}'" for k in obj['keywords']) if obj['keywords'] else ''
     loc   = obj['properties'].get('inside', parent)
 
-    w(f'Object {oid} "{_i6str(obj["name"])}" {loc}')
+    # Class instance: validate required properties then emit with class name
+    cls = (classes_by_id or {}).get(obj.get('class_id'))
+    if cls:
+        for prop_key, prop_val in cls['properties'].items():
+            if prop_val == 'required' and prop_key not in obj['properties']:
+                raise GrueError(
+                    f"'{obj['id']}' is missing required property '{prop_key}'"
+                    f" — class '{cls['name']}' requires it",
+                    obj.get('line'), 'E071')
+        type_word = cls['name']
+    else:
+        type_word = 'Object'
+
+    w(f'{type_word} {oid} "{_i6str(obj["name"])}" {loc}')
     if kws:
         w(f'    with name {kws},')
         w(f'         description "{_i6str(obj["desc"])}",')
@@ -921,6 +996,53 @@ def _emit_object(w, obj: dict, parent: str, verb_action_map: dict, known_ids: se
                     obj.get('line'), 'E035')
     _emit_handlers(w, obj.get('handlers', {}), verb_action_map, known_ids, kinds_ctx)
     w(f'    has {attrs};' if attrs else '    has ;')
+    w('')
+
+
+def _emit_class(w, cls: dict, verb_action_map: dict, known_ids: set, kinds_ctx):
+    kinds_by_id, values_set, vars_set = kinds_ctx
+    cls_name = cls['name']
+
+    # Build with-clause lines (numeric/kind properties; booleans go in has)
+    with_lines = []
+    for prop_key, prop_val in cls['properties'].items():
+        prop_kind_id = _to_id(prop_key)
+        kd = kinds_by_id.get(prop_kind_id)
+        if prop_val == 'required':
+            with_lines.append(f'{prop_key} 0')
+        elif prop_val in ('true', 'false'):
+            pass  # handled in has clause
+        elif kd:
+            if len(kd['values']) > 2:
+                val = prop_val.lower()
+                if val in kd['values']:
+                    with_lines.append(f'{prop_kind_id} {val.upper()}')
+            # two-value kind → boolean attribute, falls through to has clause
+        else:
+            with_lines.append(f'{prop_key} {prop_val}')
+
+    # Build has-clause attrs (behaviours + boolean properties)
+    attr_list = list(cls['behaviours'])
+    for prop_key, prop_val in cls['properties'].items():
+        if prop_val == 'true':
+            attr_list.append(prop_key)
+        else:
+            prop_kind_id = _to_id(prop_key)
+            kd = kinds_by_id.get(prop_kind_id)
+            if kd and len(kd['values']) == 2 and prop_val.lower() == kd['values'][1]:
+                attr_list.append(kd['values'][1])
+
+    has_with     = bool(with_lines) or bool(cls['handlers'])
+    has_clause   = ' '.join(attr_list)
+
+    w(f'Class {cls_name}')
+    if has_with:
+        w( '    with')
+        for prop_line in with_lines:
+            w(f'         {prop_line},')
+        if cls['handlers']:
+            _emit_handlers(w, cls['handlers'], verb_action_map, known_ids, kinds_ctx)
+    w(f'    has {has_clause};' if has_clause else '    has ;')
     w('')
 
 
@@ -980,6 +1102,13 @@ def _collect_user_attributes(ast: dict) -> set:
                 _scan_stmts(s['then'])
                 _scan_stmts(s.get('else') or [])
 
+    for cls in ast.get('classes', []):
+        for key, val in cls.get('properties', {}).items():
+            if val == 'true':
+                attrs.add(key)
+        for stmts in cls.get('handlers', {}).values():
+            _scan_stmts(stmts)
+
     for room in ast.get('rooms', []):
         for stmts in room.get('handlers', {}).values():
             _scan_stmts(stmts)
@@ -1002,6 +1131,9 @@ def _uses_plural_s(ast: dict) -> bool:
                 if _scan_stmts(s['then']): return True
                 if _scan_stmts(s.get('else') or []): return True
         return False
+    for cls in ast.get('classes', []):
+        for stmts in cls.get('handlers', {}).values():
+            if _scan_stmts(stmts): return True
     for room in ast.get('rooms', []):
         for stmts in room.get('handlers', {}).values():
             if _scan_stmts(stmts): return True
@@ -1040,11 +1172,22 @@ def emit_i6(ast: dict) -> str:
         w('[ Grue_s n; if (n ~= 1) print "s"; ];')
         w('')
 
-    # Build kind, value, and var registries
-    kinds_by_id = {kd['id']: kd for kd in ast.get('kinds', [])}
-    values_set  = {vd['id'] for vd in ast.get('values', [])}
-    vars_set    = {vd['id'] for vd in ast.get('vars',   [])}
-    kinds_ctx   = (kinds_by_id, values_set, vars_set)
+    # Build kind, value, var, and class registries
+    kinds_by_id   = {kd['id']: kd for kd in ast.get('kinds', [])}
+    values_set    = {vd['id'] for vd in ast.get('values', [])}
+    vars_set      = {vd['id'] for vd in ast.get('vars',   [])}
+    classes_by_id = {cls['id']: cls for cls in ast.get('classes', [])}
+
+    # Class numeric/required properties are implicitly declared by the Class
+    # block in I6 — add them to values_set now so instance emit can validate.
+    for cls in ast.get('classes', []):
+        for prop_key, prop_val in cls['properties'].items():
+            if (prop_val not in ('true', 'false')
+                    and _to_id(prop_key) not in kinds_by_id
+                    and prop_key not in values_set):
+                values_set.add(prop_key)
+
+    kinds_ctx = (kinds_by_id, values_set, vars_set)
 
     kind_declared_attrs = set()
     for kd in ast.get('kinds', []):
@@ -1072,6 +1215,13 @@ def emit_i6(ast: dict) -> str:
         w(f'Attribute {attr};')
     if user_attrs:
         w('')
+
+    # Build known_ids early so class handlers can reference object names
+    known_ids: set = set()
+    for r in rooms:
+        known_ids.add(r['id'])
+        for obj in r['objects']:
+            known_ids.add(obj['id'])
 
     verb_action_map = {}
     for verb in ast.get('verbs', []):
@@ -1104,6 +1254,9 @@ def emit_i6(ast: dict) -> str:
         for grammar_line in verb['grammar']:
             w(f'    {grammar_line} -> {action};')
         w('')
+
+    for cls in ast.get('classes', []):
+        _emit_class(w, cls, verb_action_map, known_ids, kinds_ctx)
 
     # Normalize room references to canonical I6 ids
     room_by_norm = {}
@@ -1151,12 +1304,6 @@ def emit_i6(ast: dict) -> str:
         if opp and opp not in room_covered_dirs.get(dest_rid, set()):
             reverse_exits.setdefault(dest_rid, {})[opp] = parent_rid
 
-    known_ids: set = set()
-    for r in rooms:
-        known_ids.add(r['id'])
-        for obj in r['objects']:
-            known_ids.add(obj['id'])
-
     for room in rooms:
         rid = room['id']
         w(f'Object {rid} "{_i6str(room["name"])}"')
@@ -1184,7 +1331,8 @@ def emit_i6(ast: dict) -> str:
                 _emit_door(w, obj, rid, door_dir, dest_rid, verb_action_map, known_ids,
                            kinds_ctx)
             elif obj['kind'] != 'door':
-                _emit_object(w, obj, rid, verb_action_map, known_ids, kinds_ctx)
+                _emit_object(w, obj, rid, verb_action_map, known_ids, kinds_ctx,
+                             classes_by_id)
 
     w('Include "Grammar";')
     w('')

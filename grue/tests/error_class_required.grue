@@ -1,0 +1,9 @@
+# expect error: 'unit7' is missing required property 'serial_id'
+
+class Robot
+    serial_id: required
+    is animate.
+
+room Lab "A lab."
+
+    Robot unit7 "Unit Seven"
