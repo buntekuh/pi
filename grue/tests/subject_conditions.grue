@@ -83,6 +83,27 @@ room Lab "A laboratory."
             else:
                 say "The murderer has no satchel."
 
+    object towel "A damp towel."
+        is wet.
+
+        instead of take:
+            the player is wet.
+            say "You pick up the towel and get wet."
+
+        instead of examine:
+            if player is wet:
+                say "You are soaking wet."
+            else:
+                say "You are dry."
+
+    object trophy "A trophy."
+
+        instead of examine:
+            if player has trophy:
+                say "You are holding the trophy."
+            else:
+                say "You are not holding the trophy."
+
 test "default"
     examine sponge. "The sponge is dry"
     douse sponge. "You douse the sponge"
@@ -92,3 +113,9 @@ test "default"
     inspect coin. "The coin is in the bag"
     inspect key. "The key is not in the bag"
     inspect clue. "The murderer has the gem in the satchel"
+    examine towel. "You are dry"
+    take towel. "You pick up the towel and get wet"
+    examine towel. "You are soaking wet"
+    examine trophy. "You are not holding the trophy"
+    take trophy. "Taken"
+    examine trophy. "You are holding the trophy"
