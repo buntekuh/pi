@@ -95,7 +95,8 @@ def _append_stmt(stmts: list, stripped: str) -> None:
         stmts.append({'type': 'box', 'arg': _extract_string(stripped[4:])})
     else:
         word = stripped.rstrip('.')
-        m = re.match(r'the\s+(\w+)\s+is\s+(not\s+)?(\w+)$', word)
+        m  = re.match(r'the\s+(\w+)\s+is\s+(not\s+)?(\w+)$', word)
+        mk = re.match(r'(\w+)\s+(\w+)\s+(?:=|is)\s+(\w+)$', word)
         if m:
             subj     = m.group(1)
             neg_kw   = bool(m.group(2))
@@ -103,6 +104,11 @@ def _append_stmt(stmts: list, stripped: str) -> None:
             attr     = _NEGATION.get(raw_attr, raw_attr)
             neg      = neg_kw or raw_attr in _NEGATION
             stmts.append({'type': 'give', 'subj': subj, 'attr': attr, 'neg': neg})
+        elif mk:
+            stmts.append({'type': 'kind_assign',
+                          'obj':  mk.group(1).lower(),
+                          'kind': mk.group(2).lower(),
+                          'val':  mk.group(3).lower()})
         elif re.match(r'not\s+\w+$', word):
             raw_attr = word.split(None, 1)[1]
             attr     = _NEGATION.get(raw_attr, raw_attr)
@@ -116,7 +122,7 @@ def _append_stmt(stmts: list, stripped: str) -> None:
 
 def parse(source: str) -> dict:
     source = _preprocess(source)
-    ast = {'uses': [], 'rooms': [], 'verbs': [], 'tests': []}
+    ast = {'uses': [], 'kinds': [], 'rooms': [], 'verbs': [], 'tests': []}
 
     current_room    = None;  room_col    = -1
     current_object  = None;  obj_col     = -1
@@ -191,14 +197,24 @@ def parse(source: str) -> dict:
             _append_stmt(branch, stripped)
 
         elif current_handler is not None:
-            m = re.match(r'if\s+(not\s+)?(\w+)\s*:', stripped)
-            if m:
+            mk = re.match(r'if\s+(\w+)\s+(==?|is|<=?|>=?)\s+(\w+)\s*:', stripped)
+            m  = re.match(r'if\s+(not\s+)?(\w+)\s*:', stripped)
+            if mk:
+                op = mk.group(2)
+                if op in ('is', '='):
+                    op = '=='
+                current_if = {'type': 'if', 'kind': mk.group(1).lower(),
+                               'op': op, 'val': mk.group(3).lower(),
+                               'then': [], 'else': None}
+                if_col    = col
+                if_branch = 'then'
+            elif m:
                 neg_kw   = bool(m.group(1))
                 raw_attr = m.group(2)
                 attr     = _NEGATION.get(raw_attr, raw_attr)
                 neg      = neg_kw or raw_attr in _NEGATION
                 current_if = {'type': 'if', 'attr': attr, 'neg': neg, 'then': [], 'else': None}
-                if_col = col
+                if_col    = col
                 if_branch = 'then'
             else:
                 _append_stmt(current_handler, stripped)
@@ -268,6 +284,17 @@ def parse(source: str) -> dict:
             # top level
             if stripped.startswith('uses '):
                 ast['uses'].append(stripped[5:].rstrip('.').strip())
+
+            elif stripped.startswith('kind '):
+                rest = stripped[5:].rstrip('.')
+                if ':' in rest:
+                    name_part, vals_part = rest.split(':', 1)
+                    kind_name = name_part.strip()
+                    k_id      = '_'.join(k.lower() for k in kind_name.split())
+                    values    = [v.strip().lower() for v in vals_part.split(',') if v.strip()]
+                    if len(values) < 2:
+                        raise GrueError(f'kind {kind_name!r}: at least two values required')
+                    ast['kinds'].append({'name': kind_name, 'id': k_id, 'values': values})
 
             elif stripped.startswith('verb '):
                 words_part = stripped[5:].rstrip('.')
@@ -511,7 +538,7 @@ def _emit_say(w, text: str, prefix: str, known_ids: set) -> None:
     w(f'{prefix}print {", ".join(items)};')
 
 
-def _emit_stmts(w, stmts: list, prefix: str, known_ids: set) -> None:
+def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx=None) -> None:
     """Emit statements. Caller is responsible for adding a trailing rtrue."""
     for stmt in stmts:
         t = stmt['type']
@@ -520,6 +547,22 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set) -> None:
         elif t == 'give':
             tilde = '~' if stmt['neg'] else ''
             w(f'{prefix}give {stmt["subj"]} {tilde}{stmt["attr"]};')
+        elif t == 'kind_assign':
+            kinds_by_id, _ = kinds_ctx or ({}, {})
+            kind_id = _to_id(stmt['kind'])
+            kd = kinds_by_id.get(kind_id)
+            if kd is None:
+                raise GrueError(f"unknown kind '{stmt['kind']}'")
+            val = stmt['val']
+            if val not in kd['values']:
+                raise GrueError(f"unknown value '{val}' for kind '{stmt['kind']}'")
+            obj_ref = stmt['obj']
+            if len(kd['values']) == 2:
+                attr_name = kd['values'][1]
+                tilde = '' if val == attr_name else '~'
+                w(f'{prefix}give {obj_ref} {tilde}{attr_name};')
+            else:
+                w(f'{prefix}{obj_ref}.{kind_id} = {val.upper()};')
         elif t == 'go':
             w(f'{prefix}PlayerTo({_to_id(stmt["arg"])});')
         elif t == 'box':
@@ -534,14 +577,35 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set) -> None:
                 w(f'{prefix}    "{encoded[-1]}";')
         elif t == 'if':
             inner = prefix + '    '
-            has_or_hasnt = 'hasnt' if stmt['neg'] else 'has'
-            cond_expr = f'self {has_or_hasnt} {stmt["attr"]}'
+            if 'kind' in stmt:
+                kinds_by_id, _ = kinds_ctx or ({}, {})
+                kind_id = _to_id(stmt['kind'])
+                kd = kinds_by_id.get(kind_id)
+                if kd is None:
+                    raise GrueError(f"unknown kind '{stmt['kind']}' in condition")
+                val = stmt['val']
+                if val not in kd['values']:
+                    raise GrueError(f"unknown value '{val}' for kind '{stmt['kind']}'")
+                op = stmt['op']
+                if len(kd['values']) == 2:
+                    attr_name = kd['values'][1]
+                    if op == '==':
+                        cond_expr = (f'self has {attr_name}' if val == attr_name
+                                     else f'self hasnt {attr_name}')
+                    else:
+                        raise GrueError(
+                            f"operator '{op}' not valid for two-value kind '{stmt['kind']}'")
+                else:
+                    cond_expr = f'self.{kind_id} {op} {val.upper()}'
+            else:
+                has_or_hasnt = 'hasnt' if stmt['neg'] else 'has'
+                cond_expr = f'self {has_or_hasnt} {stmt["attr"]}'
             w(f'{prefix}if ({cond_expr}) {{')
-            _emit_stmts(w, stmt['then'], inner, known_ids)
+            _emit_stmts(w, stmt['then'], inner, known_ids, kinds_ctx)
             w(f'{inner}rtrue;')
             if stmt.get('else'):
                 w(f'{prefix}}} else {{')
-                _emit_stmts(w, stmt['else'], inner, known_ids)
+                _emit_stmts(w, stmt['else'], inner, known_ids, kinds_ctx)
                 w(f'{inner}rtrue;')
             w(f'{prefix}}}')
 
@@ -549,7 +613,8 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set) -> None:
 _ON_TURN_RE = re.compile(r'^on turn (\d+)$')
 
 
-def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set) -> None:
+def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set,
+                   kinds_ctx=None) -> None:
     if not handlers:
         return
 
@@ -563,11 +628,11 @@ def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set) -> 
     if turn_h or each_h:
         w(f'{_PROP}each_turn [;')
         for key, stmts in each_h.items():
-            _emit_stmts(w, stmts, _ACTION, known_ids)
+            _emit_stmts(w, stmts, _ACTION, known_ids, kinds_ctx)
         for key, stmts in turn_h.items():
             n = _ON_TURN_RE.match(key).group(1)
             w(f'{_ACTION}if (turns == {n}) {{')
-            _emit_stmts(w, stmts, _STMT0, known_ids)
+            _emit_stmts(w, stmts, _STMT0, known_ids, kinds_ctx)
             w(f'{_ACTION}}}')
         w(f'{_PROP}],')
 
@@ -580,7 +645,7 @@ def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set) -> 
             w(f'{_ACTION}{action}:')
             if second_filter:
                 w(f'{_STMT0}if (second ~= {second_filter}) rfalse;')
-            _emit_stmts(w, stmts, _STMT0, known_ids)
+            _emit_stmts(w, stmts, _STMT0, known_ids, kinds_ctx)
             if not (stmts and stmts[-1]['type'] == 'if' and stmts[-1].get('else')):
                 w(f'{_STMT0}rtrue;')
         w(f'{_PROP}],')
@@ -590,7 +655,8 @@ def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set) -> 
 # Inform 6 object emitters
 # ---------------------------------------------------------------------------
 
-def _emit_object(w, obj: dict, parent: str, verb_action_map: dict, known_ids: set):
+def _emit_object(w, obj: dict, parent: str, verb_action_map: dict, known_ids: set,
+                 kinds_ctx=None):
     oid   = obj['id']
     attrs = _obj_attributes(obj)
     kws   = ' '.join(f"'{k}'" for k in obj['keywords']) if obj['keywords'] else ''
@@ -604,13 +670,26 @@ def _emit_object(w, obj: dict, parent: str, verb_action_map: dict, known_ids: se
         w(f'    with description "{_i6str(obj["desc"])}",')
     if 'key' in obj['properties']:
         w(f'         with_key {obj["properties"]["key"]},')
-    _emit_handlers(w, obj.get('handlers', {}), verb_action_map, known_ids)
+    kinds_by_id, _ = kinds_ctx or ({}, {})
+    for prop_key, prop_val in obj['properties'].items():
+        if prop_key in ('key', 'inside'):
+            continue
+        prop_kind_id = _to_id(prop_key)
+        if prop_kind_id in kinds_by_id:
+            kd = kinds_by_id[prop_kind_id]
+            if len(kd['values']) >= 3:
+                val = prop_val.lower()
+                if val not in kd['values']:
+                    raise GrueError(
+                        f"unknown value '{prop_val}' for kind '{prop_key}' on '{obj['id']}'")
+                w(f'         {prop_kind_id} {val.upper()},')
+    _emit_handlers(w, obj.get('handlers', {}), verb_action_map, known_ids, kinds_ctx)
     w(f'    has {attrs};' if attrs else '    has ;')
     w('')
 
 
 def _emit_door(w, obj: dict, parent_rid: str, door_dir: str, dest_rid: str,
-               verb_action_map: dict, known_ids: set):
+               verb_action_map: dict, known_ids: set, kinds_ctx=None):
     oid  = obj['id']
     kws  = ' '.join(f"'{k}'" for k in obj['keywords']) if obj['keywords'] else ''
 
@@ -634,7 +713,7 @@ def _emit_door(w, obj: dict, parent_rid: str, door_dir: str, dest_rid: str,
     w(f'         door_to [; return {dest_rid}; ],')
     if 'key' in obj['properties']:
         w(f'         with_key {obj["properties"]["key"]},')
-    _emit_handlers(w, obj.get('handlers', {}), verb_action_map, known_ids)
+    _emit_handlers(w, obj.get('handlers', {}), verb_action_map, known_ids, kinds_ctx)
     w(f'    has {attrs};')
     w('')
 
@@ -662,7 +741,8 @@ def _collect_user_attributes(ast: dict) -> set:
             if s['type'] == 'give':
                 attrs.add(s['attr'])
             elif s['type'] == 'if':
-                attrs.add(s['attr'])
+                if 'attr' in s:
+                    attrs.add(s['attr'])
                 _scan_stmts(s['then'])
                 _scan_stmts(s.get('else') or [])
 
@@ -718,9 +798,34 @@ def emit_i6(ast: dict) -> str:
     if _uses_plural_s(ast):
         w('[ Grue_s n; if (n ~= 1) print "s"; ];')
         w('')
-    for attr in sorted(_collect_user_attributes(ast)):
+
+    # Build kind registries
+    kinds_by_id = {kd['id']: kd for kd in ast.get('kinds', [])}
+    kinds_ctx   = (kinds_by_id, {})
+
+    # Two-value kind attributes are declared here; exclude from user-attribute scan
+    kind_declared_attrs = set()
+    for kd in ast.get('kinds', []):
+        if len(kd['values']) == 2:
+            kind_declared_attrs.add(kd['values'][1])
+
+    # Emit kind declarations
+    for kd in ast.get('kinds', []):
+        if len(kd['values']) == 2:
+            attr_name = kd['values'][1]
+            if attr_name not in _I6_BUILTIN_ATTRS:
+                w(f'Attribute {attr_name};')
+        else:
+            for i, val in enumerate(kd['values']):
+                w(f'Constant {val.upper()} {i};')
+            w(f'Property {kd["id"]} {kd["values"][0].upper()};')
+    if ast.get('kinds'):
+        w('')
+
+    user_attrs = _collect_user_attributes(ast) - kind_declared_attrs
+    for attr in sorted(user_attrs):
         w(f'Attribute {attr};')
-    if _collect_user_attributes(ast):
+    if user_attrs:
         w('')
 
     # Build verb_action_map: base_word → action_name
@@ -818,16 +923,17 @@ def emit_i6(ast: dict) -> str:
         for direction, dest_rid in reverse_exits.get(rid, {}).items():
             i6dir = _DIR_MAP.get(direction, direction + '_to')
             w(f'         {i6dir} {dest_rid},')
-        _emit_handlers(w, room.get('handlers', {}), verb_action_map, known_ids)
+        _emit_handlers(w, room.get('handlers', {}), verb_action_map, known_ids, kinds_ctx)
         w( '    has light;')
         w('')
 
         for obj in room['objects']:
             if obj['kind'] == 'door' and obj['id'] in door_info:
                 _, _, door_dir, dest_rid = door_info[obj['id']]
-                _emit_door(w, obj, rid, door_dir, dest_rid, verb_action_map, known_ids)
+                _emit_door(w, obj, rid, door_dir, dest_rid, verb_action_map, known_ids,
+                           kinds_ctx)
             elif obj['kind'] != 'door':
-                _emit_object(w, obj, rid, verb_action_map, known_ids)
+                _emit_object(w, obj, rid, verb_action_map, known_ids, kinds_ctx)
 
     w('Include "Grammar";')
     w('')

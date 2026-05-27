@@ -1,0 +1,42 @@
+# kinds — kind declaration, assignment, condition, two-value kind
+
+kind ailment: healthy, cold, sickness
+kind waterlogged: dry, wet
+
+verb tap
+    * noun
+    "Nothing to tap."
+
+room Room "A room."
+
+    woman Mildred "Aunt Mildred."
+        ailment: cold.
+
+        instead of examine:
+            if ailment is healthy:
+                say "She looks fine."
+            else:
+                say "She looks unwell."
+
+        instead of tap:
+            if ailment < sickness:
+                Mildred ailment = sickness.
+                say "She suddenly looks much worse."
+            else:
+                say "She's as sick as she can get."
+
+    object bucket "A bucket."
+        is wet.
+
+        instead of examine:
+            if waterlogged is wet:
+                say "The bucket is dripping."
+            else:
+                say "The bucket is dry."
+
+test "default"
+    examine Mildred. "She looks unwell"
+    tap Mildred. "She suddenly looks much worse"
+    examine Mildred. "She looks unwell"
+    tap Mildred. "She's as sick as she can get"
+    examine bucket. "The bucket is dripping"
