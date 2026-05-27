@@ -407,6 +407,10 @@ def parse(source: str) -> dict:
                     test_col = col
                     ast['tests'].append(current_test)
 
+    # Flush a trailing if block never closed by an outdented line.
+    if current_if is not None and current_handler is not None:
+        current_handler.append(current_if)
+
     return ast
 
 
@@ -610,7 +614,8 @@ def _emit_say(w, text: str, prefix: str, known_ids: set) -> None:
     w(f'{prefix}print {", ".join(items)};')
 
 
-def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx=None) -> None:
+def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx) -> None:
+    kinds_by_id, values_set = kinds_ctx
     for stmt in stmts:
         t    = stmt['type']
         line = stmt.get('line')
@@ -620,7 +625,6 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx=None) -> 
             tilde = '~' if stmt['neg'] else ''
             w(f'{prefix}give {stmt["subj"]} {tilde}{stmt["attr"]};')
         elif t == 'prop_assign':
-            kinds_by_id, _, values_set = kinds_ctx or ({}, {}, set())
             if stmt['prop'] not in values_set:
                 raise GrueError(
                     f"unknown value property '{stmt['prop']}'"
@@ -628,7 +632,6 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx=None) -> 
                     line, 'E051')
             w(f'{prefix}{stmt["obj"]}.{stmt["prop"]} = {stmt["num"]};')
         elif t == 'kind_assign':
-            kinds_by_id, _, values_set = kinds_ctx or ({}, {}, set())
             kind_id = _to_id(stmt['kind'])
             kd = kinds_by_id.get(kind_id)
             if kd is None:
@@ -664,7 +667,6 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx=None) -> 
         elif t == 'if':
             inner = prefix + '    '
             if 'prop' in stmt:
-                kinds_by_id, _, values_set = kinds_ctx or ({}, {}, set())
                 if stmt['prop'] not in values_set:
                     raise GrueError(
                         f"unknown value property '{stmt['prop']}'"
@@ -672,7 +674,6 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx=None) -> 
                         line, 'E052')
                 cond_expr = f'self.{stmt["prop"]} {stmt["op"]} {stmt["num"]}'
             elif 'kind' in stmt:
-                kinds_by_id, _, values_set = kinds_ctx or ({}, {}, set())
                 kind_id = _to_id(stmt['kind'])
                 kd = kinds_by_id.get(kind_id)
                 if kd is None:
@@ -716,7 +717,7 @@ _ON_TURN_RE = re.compile(r'^on turn (\d+)$')
 
 
 def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set,
-                   kinds_ctx=None) -> None:
+                   kinds_ctx) -> None:
     if not handlers:
         return
 
@@ -757,7 +758,8 @@ def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set,
 # ---------------------------------------------------------------------------
 
 def _emit_object(w, obj: dict, parent: str, verb_action_map: dict, known_ids: set,
-                 kinds_ctx=None):
+                 kinds_ctx):
+    kinds_by_id, values_set = kinds_ctx
     oid   = obj['id']
     attrs = _obj_attributes(obj)
     kws   = ' '.join(f"'{k}'" for k in obj['keywords']) if obj['keywords'] else ''
@@ -771,7 +773,6 @@ def _emit_object(w, obj: dict, parent: str, verb_action_map: dict, known_ids: se
         w(f'    with description "{_i6str(obj["desc"])}",')
     if 'key' in obj['properties']:
         w(f'         with_key {obj["properties"]["key"]},')
-    kinds_by_id, _, values_set = kinds_ctx or ({}, {}, set())
     for prop_key, prop_val in obj['properties'].items():
         if prop_key in ('key', 'inside'):
             continue
@@ -798,13 +799,30 @@ def _emit_object(w, obj: dict, parent: str, verb_action_map: dict, known_ids: se
                     f" — declare with 'value {prop_key}'",
                     obj.get('line'), 'E050')
             w(f'         {prop_key} {prop_val},')
+        elif prop_val in ('true', 'false'):
+            # 'is X.' where X is a kind value (not the kind name itself)
+            for kd in kinds_by_id.values():
+                if prop_key not in kd['values']:
+                    continue
+                idx = kd['values'].index(prop_key)
+                if len(kd['values']) == 2 and idx == 1:
+                    break  # correct: 'is X.' sets the attribute of a two-value kind
+                if len(kd['values']) == 2:
+                    raise GrueError(
+                        f"'{prop_key}' is the default state of kind '{kd['name']}'"
+                        f" — leave unset, or use 'is {kd['values'][1]}.' to set it",
+                        obj.get('line'), 'E035')
+                raise GrueError(
+                    f"'{prop_key}' is a value of kind '{kd['name']}'"
+                    f" — use '{kd['id']}: {prop_key}.' to set an initial value",
+                    obj.get('line'), 'E035')
     _emit_handlers(w, obj.get('handlers', {}), verb_action_map, known_ids, kinds_ctx)
     w(f'    has {attrs};' if attrs else '    has ;')
     w('')
 
 
 def _emit_door(w, obj: dict, parent_rid: str, door_dir: str, dest_rid: str,
-               verb_action_map: dict, known_ids: set, kinds_ctx=None):
+               verb_action_map: dict, known_ids: set, kinds_ctx):
     oid  = obj['id']
     kws  = ' '.join(f"'{k}'" for k in obj['keywords']) if obj['keywords'] else ''
 
@@ -922,7 +940,7 @@ def emit_i6(ast: dict) -> str:
     # Build kind and value registries
     kinds_by_id = {kd['id']: kd for kd in ast.get('kinds', [])}
     values_set  = {vd['id'] for vd in ast.get('values', [])}
-    kinds_ctx   = (kinds_by_id, {}, values_set)
+    kinds_ctx   = (kinds_by_id, values_set)
 
     kind_declared_attrs = set()
     for kd in ast.get('kinds', []):

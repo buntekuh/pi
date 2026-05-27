@@ -1,0 +1,8 @@
+# expect error: 'dry' is the default state of kind 'wet'
+
+kind wet: dry, wet
+
+room Room "A room."
+
+    object bucket "A bucket."
+        is dry.

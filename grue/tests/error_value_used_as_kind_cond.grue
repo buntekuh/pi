@@ -1,0 +1,14 @@
+# expect error: 'treeness' is a numeric value property
+
+value treeness
+
+verb tap
+    * noun
+    "Nothing."
+
+room Room "A room."
+
+    object oak "An oak."
+        instead of tap:
+            if treeness is big:
+                say "Very big."

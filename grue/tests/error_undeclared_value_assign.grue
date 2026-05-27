@@ -1,0 +1,11 @@
+# expect error: unknown value property 'treeness'
+
+verb tap
+    * noun
+    "Nothing."
+
+room Room "A room."
+
+    object oak "An oak."
+        instead of tap:
+            oak treeness = 5.

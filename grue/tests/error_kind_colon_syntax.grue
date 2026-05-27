@@ -1,0 +1,8 @@
+# expect error: kind 'wet' has two values
+
+kind wet: dry, wet
+
+room Room "A room."
+
+    object bucket "A bucket."
+        wet: wet.
