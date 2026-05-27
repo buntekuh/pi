@@ -1,0 +1,11 @@
+# expect error: unknown variable 'score'
+
+verb tap
+    * noun
+    "Nothing."
+
+room Room "A room."
+
+    object drum "A drum."
+        instead of tap:
+            score = score + 1.

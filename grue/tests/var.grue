@@ -1,0 +1,30 @@
+# var — global integer variables
+
+var score
+var attempts
+
+verb grab
+    * noun
+    "Nothing to grab."
+
+room Room "A room."
+
+    object trophy "A golden trophy."
+
+        instead of examine:
+            if attempts == 0:
+                say "A shiny trophy. Score: {score}."
+            else:
+                say "You've tried {attempts} time{s attempts}. Score: {score}."
+
+        instead of grab:
+            score = score + 10.
+            attempts = attempts + 1.
+            say "You grab the trophy."
+
+test "default"
+    examine trophy. "A shiny trophy. Score: 0"
+    grab trophy. "You grab the trophy"
+    examine trophy. "You've tried 1 time. Score: 10"
+    grab trophy. "You grab the trophy"
+    examine trophy. "You've tried 2 times. Score: 20"

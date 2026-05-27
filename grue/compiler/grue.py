@@ -120,6 +120,12 @@ def _append_stmt(stmts: list, stripped: str, lineno: int) -> None:
                           'kind': mk.group(2).lower(),
                           'val':  mk.group(3).lower(),
                           'line': lineno})
+        elif re.match(r'\w+\s*=\s*.+', word):
+            mg = re.match(r'(\w+)\s*=\s*(.+)$', word)
+            stmts.append({'type': 'var_assign',
+                          'var':  mg.group(1),
+                          'expr': mg.group(2).strip(),
+                          'line': lineno})
         elif re.match(r'not\s+\w+$', word):
             raw_attr = word.split(None, 1)[1]
             attr     = _NEGATION.get(raw_attr, raw_attr)
@@ -137,7 +143,7 @@ _ROOM_KEYWORDS = {'is', 'instead', 'on', 'after', 'each'}
 
 def parse(source: str) -> dict:
     source = _preprocess(source)
-    ast = {'uses': [], 'kinds': [], 'values': [], 'rooms': [], 'verbs': [], 'tests': []}
+    ast = {'uses': [], 'kinds': [], 'values': [], 'vars': [], 'rooms': [], 'verbs': [], 'tests': []}
 
     current_room    = None;  room_col    = -1
     current_object  = None;  obj_col     = -1
@@ -371,6 +377,23 @@ def parse(source: str) -> dict:
                         f"'{val_name}' already declared as a kind",
                         lineno, 'E034')
                 ast['values'].append({'name': val_name, 'id': v_id, 'line': lineno})
+
+            elif stripped.startswith('var '):
+                var_name = stripped[4:].rstrip('.')
+                v_id = _to_id(var_name)
+                if v_id in {v['id'] for v in ast['vars']}:
+                    raise GrueError(
+                        f"var '{var_name}' already declared",
+                        lineno, 'E060')
+                if v_id in {k['id'] for k in ast['kinds']}:
+                    raise GrueError(
+                        f"'{var_name}' already declared as a kind",
+                        lineno, 'E061')
+                if v_id in {v['id'] for v in ast['values']}:
+                    raise GrueError(
+                        f"'{var_name}' already declared as a value",
+                        lineno, 'E061')
+                ast['vars'].append({'name': var_name, 'id': v_id, 'line': lineno})
 
             elif stripped.startswith('verb '):
                 words_part = stripped[5:].rstrip('.')
@@ -615,7 +638,7 @@ def _emit_say(w, text: str, prefix: str, known_ids: set) -> None:
 
 
 def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx) -> None:
-    kinds_by_id, values_set = kinds_ctx
+    kinds_by_id, values_set, vars_set = kinds_ctx
     for stmt in stmts:
         t    = stmt['type']
         line = stmt.get('line')
@@ -624,6 +647,12 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx) -> None:
         elif t == 'give':
             tilde = '~' if stmt['neg'] else ''
             w(f'{prefix}give {stmt["subj"]} {tilde}{stmt["attr"]};')
+        elif t == 'var_assign':
+            if stmt['var'] not in vars_set:
+                raise GrueError(
+                    f"unknown variable '{stmt['var']}' — declare with 'var {stmt['var']}'",
+                    line, 'E063')
+            w(f'{prefix}{stmt["var"]} = {stmt["expr"]};')
         elif t == 'prop_assign':
             if stmt['prop'] not in values_set:
                 raise GrueError(
@@ -667,12 +696,16 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx) -> None:
         elif t == 'if':
             inner = prefix + '    '
             if 'prop' in stmt:
-                if stmt['prop'] not in values_set:
+                prop = stmt['prop']
+                if prop in vars_set:
+                    cond_expr = f'{prop} {stmt["op"]} {stmt["num"]}'
+                elif prop not in values_set:
                     raise GrueError(
-                        f"unknown value property '{stmt['prop']}'"
-                        f" — declare with 'value {stmt['prop']}'",
+                        f"unknown value property '{prop}'"
+                        f" — declare with 'value {prop}' or 'var {prop}'",
                         line, 'E052')
-                cond_expr = f'self.{stmt["prop"]} {stmt["op"]} {stmt["num"]}'
+                else:
+                    cond_expr = f'self.{prop} {stmt["op"]} {stmt["num"]}'
             elif 'kind' in stmt:
                 kind_id = _to_id(stmt['kind'])
                 kd = kinds_by_id.get(kind_id)
@@ -759,7 +792,7 @@ def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set,
 
 def _emit_object(w, obj: dict, parent: str, verb_action_map: dict, known_ids: set,
                  kinds_ctx):
-    kinds_by_id, values_set = kinds_ctx
+    kinds_by_id, values_set, vars_set = kinds_ctx
     oid   = obj['id']
     attrs = _obj_attributes(obj)
     kws   = ' '.join(f"'{k}'" for k in obj['keywords']) if obj['keywords'] else ''
@@ -937,10 +970,11 @@ def emit_i6(ast: dict) -> str:
         w('[ Grue_s n; if (n ~= 1) print "s"; ];')
         w('')
 
-    # Build kind and value registries
+    # Build kind, value, and var registries
     kinds_by_id = {kd['id']: kd for kd in ast.get('kinds', [])}
     values_set  = {vd['id'] for vd in ast.get('values', [])}
-    kinds_ctx   = (kinds_by_id, values_set)
+    vars_set    = {vd['id'] for vd in ast.get('vars',   [])}
+    kinds_ctx   = (kinds_by_id, values_set, vars_set)
 
     kind_declared_attrs = set()
     for kd in ast.get('kinds', []):
@@ -958,7 +992,9 @@ def emit_i6(ast: dict) -> str:
             w(f'Property {kd["id"]} {kd["values"][0].upper()};')
     for vd in ast.get('values', []):
         w(f'Property {vd["id"]} 0;')
-    if ast.get('kinds') or ast.get('values'):
+    for vd in ast.get('vars', []):
+        w(f'Global {vd["id"]} 0;')
+    if ast.get('kinds') or ast.get('values') or ast.get('vars'):
         w('')
 
     user_attrs = _collect_user_attributes(ast) - kind_declared_attrs

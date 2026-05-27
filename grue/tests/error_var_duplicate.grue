@@ -1,0 +1,4 @@
+# expect error: var 'score' already declared
+
+var score
+var score
