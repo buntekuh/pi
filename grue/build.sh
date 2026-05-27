@@ -68,7 +68,14 @@ run_one() {
     fi
 
     if $DO_BUILD; then
-        python3 "$TRANSPILER" "$GRUE_FILE" "$INF_FILE" || return 1
+        local compiler_err compiler_rc
+        compiler_err=$(python3 "$TRANSPILER" "$GRUE_FILE" "$INF_FILE" 2>&1)
+        compiler_rc=$?
+        if [ $compiler_rc -ne 0 ]; then
+            echo "${RED}FAIL${RESET}  ${compiler_err}"
+            return 1
+        fi
+        echo "$compiler_err"
         local inform_out inform_rc
         inform_out=$(inform +"$I6_LIB" "$INF_FILE" "$Z5_FILE" 2>&1)
         inform_rc=$?
