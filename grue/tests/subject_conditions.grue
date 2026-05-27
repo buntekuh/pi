@@ -62,6 +62,27 @@ room Lab "A laboratory."
             if bag has not key:
                 say "The key is not in the bag."
 
+    man murderer "A suspicious figure."
+
+    object satchel "A leather satchel."
+        is container.
+        open: true.
+        inside: murderer.
+
+    object gem "A glittering gem."
+        inside: satchel.
+
+    object clue "A piece of evidence."
+
+        instead of inspect:
+            if murderer has satchel:
+                if satchel has gem:
+                    say "The murderer has the gem in the satchel."
+                else:
+                    say "The murderer has the satchel but no gem."
+            else:
+                say "The murderer has no satchel."
+
 test "default"
     examine sponge. "The sponge is dry"
     douse sponge. "You douse the sponge"
@@ -70,3 +91,4 @@ test "default"
     examine android. "Android is low"
     inspect coin. "The coin is in the bag"
     inspect key. "The key is not in the bag"
+    inspect clue. "The murderer has the gem in the satchel"
