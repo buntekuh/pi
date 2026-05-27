@@ -1,0 +1,5 @@
+# expect error: door 'iron_door' has no direction property
+
+room Room "A room."
+
+    door iron door "An iron door."

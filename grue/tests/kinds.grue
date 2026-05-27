@@ -1,7 +1,7 @@
 # kinds — kind declaration, assignment, condition, two-value kind, multi-word name
 
 kind ailment: healthy, cold, sick
-kind waterlogged: dry, wet
+kind wet: dry, wet
 kind fill level: empty, full
 
 verb tap
@@ -30,7 +30,7 @@ room Room "A room."
         is wet.
 
         instead of examine:
-            if waterlogged is wet:
+            if wet is wet:
                 say "The bucket is dripping."
             else:
                 say "The bucket is dry."
@@ -38,13 +38,13 @@ room Room "A room."
     man Albert "Albert."
 
         instead of examine:
-            if waterlogged is wet:
+            if wet is wet:
                 say "Albert is drenched from head to toe."
             else:
                 say "Albert is perfectly dry."
 
         instead of tap:
-            Albert waterlogged = wet.
+            Albert wet = wet.
             say "You splash Albert with water."
 
     object jug "A clay jug."

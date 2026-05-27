@@ -1,0 +1,5 @@
+# expect error: duplicate room name 'Cellar'
+
+room Cellar "The cellar."
+
+room Cellar "Another cellar."

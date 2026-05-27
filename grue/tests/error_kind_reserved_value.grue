@@ -1,0 +1,3 @@
+# expect error: values 'true' and 'false' are reserved
+
+kind mood: happy, true, false

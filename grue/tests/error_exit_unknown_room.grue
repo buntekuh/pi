@@ -1,0 +1,4 @@
+# expect error: exit leads to unknown room 'Pantry'
+
+room Kitchen "The kitchen."
+    north: Pantry

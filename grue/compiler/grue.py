@@ -20,7 +20,10 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 class GrueError(Exception):
-    pass
+    def __init__(self, msg, line=None, code=None):
+        super().__init__(msg)
+        self.line = line
+        self.code = code
 
 
 # ---------------------------------------------------------------------------
@@ -86,13 +89,13 @@ def _parse_keywords(rest: str) -> tuple:
     return keywords, display, obj_id, inline_desc
 
 
-def _append_stmt(stmts: list, stripped: str) -> None:
+def _append_stmt(stmts: list, stripped: str, lineno: int) -> None:
     if stripped.startswith('say '):
-        stmts.append({'type': 'say', 'arg': _extract_string(stripped[4:])})
+        stmts.append({'type': 'say', 'arg': _extract_string(stripped[4:]), 'line': lineno})
     elif stripped.startswith('go '):
-        stmts.append({'type': 'go', 'arg': stripped[3:].strip().strip('"')})
+        stmts.append({'type': 'go', 'arg': stripped[3:].strip().strip('"'), 'line': lineno})
     elif stripped.startswith('box '):
-        stmts.append({'type': 'box', 'arg': _extract_string(stripped[4:])})
+        stmts.append({'type': 'box', 'arg': _extract_string(stripped[4:]), 'line': lineno})
     else:
         word = stripped.rstrip('.')
         m  = re.match(r'the\s+(\w+)\s+is\s+(not\s+)?(\w+)$', word)
@@ -104,26 +107,32 @@ def _append_stmt(stmts: list, stripped: str) -> None:
             raw_attr = m.group(3)
             attr     = _NEGATION.get(raw_attr, raw_attr)
             neg      = neg_kw or raw_attr in _NEGATION
-            stmts.append({'type': 'give', 'subj': subj, 'attr': attr, 'neg': neg})
+            stmts.append({'type': 'give', 'subj': subj, 'attr': attr, 'neg': neg, 'line': lineno})
         elif mn:
             stmts.append({'type': 'prop_assign',
                           'obj':  mn.group(1).lower(),
                           'prop': mn.group(2).lower(),
-                          'num':  int(mn.group(3))})
+                          'num':  int(mn.group(3)),
+                          'line': lineno})
         elif mk:
             stmts.append({'type': 'kind_assign',
                           'obj':  mk.group(1).lower(),
                           'kind': mk.group(2).lower(),
-                          'val':  mk.group(3).lower()})
+                          'val':  mk.group(3).lower(),
+                          'line': lineno})
         elif re.match(r'not\s+\w+$', word):
             raw_attr = word.split(None, 1)[1]
             attr     = _NEGATION.get(raw_attr, raw_attr)
-            stmts.append({'type': 'give', 'subj': 'self', 'attr': attr, 'neg': True})
+            stmts.append({'type': 'give', 'subj': 'self', 'attr': attr, 'neg': True, 'line': lineno})
         elif re.match(r'\w+$', word):
             raw_attr = word
             attr     = _NEGATION.get(raw_attr, raw_attr)
             neg      = raw_attr in _NEGATION
-            stmts.append({'type': 'give', 'subj': 'self', 'attr': attr, 'neg': neg})
+            stmts.append({'type': 'give', 'subj': 'self', 'attr': attr, 'neg': neg, 'line': lineno})
+
+
+_OBJ_TYPES    = {'object', 'scenery', 'man', 'woman', 'robot', 'door'}
+_ROOM_KEYWORDS = {'is', 'instead', 'on', 'after', 'each'}
 
 
 def parse(source: str) -> dict:
@@ -137,7 +146,9 @@ def parse(source: str) -> dict:
     current_test    = None;  test_col    = -1
     current_verb    = None;  verb_col    = -1
 
-    for raw in source.splitlines():
+    kind_val_map = {}   # value_name → kind_name that claimed it
+
+    for lineno, raw in enumerate(source.splitlines(), 1):
         stripped = raw.strip()
         if not stripped or stripped.startswith('#'):
             continue
@@ -200,7 +211,7 @@ def parse(source: str) -> dict:
             branch = current_if[if_branch]
             if branch is None:
                 branch = current_if['then']
-            _append_stmt(branch, stripped)
+            _append_stmt(branch, stripped, lineno)
 
         elif current_handler is not None:
             mk = re.match(r'if\s+(\w+)\s+(==?|is|<=?|>=?)\s+(\w+)\s*:', stripped)
@@ -213,11 +224,11 @@ def parse(source: str) -> dict:
                 if val_str.isdigit():
                     current_if = {'type': 'if', 'prop': mk.group(1).lower(),
                                    'op': op, 'num': int(val_str),
-                                   'then': [], 'else': None}
+                                   'then': [], 'else': None, 'line': lineno}
                 else:
                     current_if = {'type': 'if', 'kind': mk.group(1).lower(),
                                    'op': op, 'val': val_str.lower(),
-                                   'then': [], 'else': None}
+                                   'then': [], 'else': None, 'line': lineno}
                 if_col    = col
                 if_branch = 'then'
             elif m:
@@ -225,11 +236,12 @@ def parse(source: str) -> dict:
                 raw_attr = m.group(2)
                 attr     = _NEGATION.get(raw_attr, raw_attr)
                 neg      = neg_kw or raw_attr in _NEGATION
-                current_if = {'type': 'if', 'attr': attr, 'neg': neg, 'then': [], 'else': None}
+                current_if = {'type': 'if', 'attr': attr, 'neg': neg,
+                               'then': [], 'else': None, 'line': lineno}
                 if_col    = col
                 if_branch = 'then'
             else:
-                _append_stmt(current_handler, stripped)
+                _append_stmt(current_handler, stripped, lineno)
 
         elif current_object is not None:
             if re.match(r'(instead of|on|after|each)\s+', stripped):
@@ -262,12 +274,16 @@ def parse(source: str) -> dict:
             elif re.match(r'(north|south|east|west|up|down|ne|nw|se|sw):?\s+"', stripped, re.I):
                 m = re.match(r'(\w+):?\s+"([^"]*)"', stripped)
                 if m:
-                    current_room['exits'][m.group(1).lower()] = m.group(2)
+                    d = m.group(1).lower()
+                    current_room['exits'][d]      = m.group(2)
+                    current_room['exit_lines'][d] = lineno
 
             elif re.match(r'(north|south|east|west|up|down|ne|nw|se|sw):?\s+\w+\s*$', stripped, re.I):
                 m = re.match(r'(\w+):?\s+(\w+)', stripped)
                 if m:
-                    current_room['exits'][m.group(1).lower()] = m.group(2)
+                    d = m.group(1).lower()
+                    current_room['exits'][d]      = m.group(2)
+                    current_room['exit_lines'][d] = lineno
 
             elif re.match(r'(object|scenery|man|woman|robot|door)\s+', stripped):
                 kind = stripped.split()[0]
@@ -275,7 +291,7 @@ def parse(source: str) -> dict:
                 current_object = {
                     'id': obj_id, 'keywords': keywords, 'name': display,
                     'desc': inline_desc, 'behaviours': [], 'properties': {},
-                    'kind': kind, 'handlers': {},
+                    'kind': kind, 'handlers': {}, 'line': lineno,
                 }
                 obj_col = col
                 current_room['objects'].append(current_object)
@@ -285,6 +301,19 @@ def parse(source: str) -> dict:
                 current_handler = []
                 handler_col = col
                 current_room['handlers'][key] = current_handler
+
+            else:
+                # Unknown line in room context — catch likely misspelled object types.
+                first_word = stripped.split()[0] if stripped.split() else ''
+                if (first_word and
+                        first_word.lower() not in _OBJ_TYPES and
+                        first_word.lower() not in _ROOM_KEYWORDS and
+                        first_word.lower() not in _DIR_MAP and
+                        '"' in stripped):
+                    raise GrueError(
+                        f"unknown object type '{first_word}'"
+                        f" — use object, scenery, man, woman, robot, or door",
+                        lineno, 'E020')
 
         elif current_verb is not None:
             if stripped.startswith('*'):
@@ -305,21 +334,51 @@ def parse(source: str) -> dict:
                     k_id      = '_'.join(k.lower() for k in kind_name.split())
                     values    = [v.strip().lower() for v in vals_part.split(',') if v.strip()]
                     if len(values) < 2:
-                        raise GrueError(f'kind {kind_name!r}: at least two values required')
-                    ast['kinds'].append({'name': kind_name, 'id': k_id, 'values': values})
+                        raise GrueError(
+                            f"kind '{kind_name}': at least two values required",
+                            lineno, 'E002')
+                    if 'true' in values or 'false' in values:
+                        raise GrueError(
+                            f"kind '{kind_name}': values 'true' and 'false' are reserved"
+                            f" — use 'is X.' for boolean attributes",
+                            lineno, 'E030')
+                    if k_id in {k['id'] for k in ast['kinds']}:
+                        raise GrueError(
+                            f"kind '{kind_name}' already declared",
+                            lineno, 'E032')
+                    if k_id in {v['id'] for v in ast['values']}:
+                        raise GrueError(
+                            f"'{kind_name}' already declared as a value",
+                            lineno, 'E034')
+                    for val in values:
+                        if val in kind_val_map:
+                            raise GrueError(
+                                f"kind value '{val}' already claimed by kind '{kind_val_map[val]}'",
+                                lineno, 'E031')
+                        kind_val_map[val] = kind_name
+                    ast['kinds'].append(
+                        {'name': kind_name, 'id': k_id, 'values': values, 'line': lineno})
 
             elif stripped.startswith('value '):
                 val_name = stripped[6:].rstrip('.')
                 v_id = '_'.join(k.lower() for k in val_name.split())
-                ast['values'].append({'name': val_name, 'id': v_id})
+                if v_id in {v['id'] for v in ast['values']}:
+                    raise GrueError(
+                        f"value '{val_name}' already declared",
+                        lineno, 'E033')
+                if v_id in {k['id'] for k in ast['kinds']}:
+                    raise GrueError(
+                        f"'{val_name}' already declared as a kind",
+                        lineno, 'E034')
+                ast['values'].append({'name': val_name, 'id': v_id, 'line': lineno})
 
             elif stripped.startswith('verb '):
                 words_part = stripped[5:].rstrip('.')
                 words = [w.strip().strip(',') for w in words_part.split() if w.strip().strip(',')]
-                # Only comma-separated words are I6 synonyms; space-only extras are variant markers
                 synonyms = [w.strip() for w in words_part.split(',') if w.strip()]
                 synonyms = [synonyms[0].split()[0]] + [s.strip() for s in synonyms[1:]] if synonyms else words[:1]
-                current_verb = {'words': words, 'synonyms': synonyms, 'grammar': [], 'default': ''}
+                current_verb = {'words': words, 'synonyms': synonyms,
+                                'grammar': [], 'default': '', 'line': lineno}
                 verb_col = col
                 ast['verbs'].append(current_verb)
 
@@ -335,7 +394,8 @@ def parse(source: str) -> dict:
                 rid = _to_id(rname)
                 current_room = {
                     'id': rid, 'name': rname, 'desc': desc,
-                    'exits': {}, 'objects': [], 'handlers': {},
+                    'exits': {}, 'exit_lines': {}, 'objects': [], 'handlers': {},
+                    'line': lineno,
                 }
                 room_col = col
                 ast['rooms'].append(current_room)
@@ -385,8 +445,7 @@ _STD_ACTIONS = {
 # Known behaviour keywords — everything else after 'is' sets a boolean attribute.
 _BEHAVIOURS = {'openable', 'lockable', 'container', 'supporter'}
 
-# Friendly negation aliases: word → (canonical_attr, negated).
-# 'closed' means hasnt open; 'unlocked' means hasnt locked; etc.
+# Friendly negation aliases: word → canonical_attr (negated).
 _NEGATION = {
     'close':    'open',
     'closed':   'open',
@@ -408,7 +467,6 @@ def _i6str(s: str) -> str:
 
 
 def _i6box_line(s: str) -> str:
-    """Encode one line of a box quotation — no newline translation."""
     s = s.replace('\\t', '@@9')
     s = re.sub(r'\s+', ' ', s).strip()
     return s.replace('"', '~')
@@ -500,18 +558,16 @@ def _obj_attributes(obj: dict) -> str:
 # Statement and handler emitters
 # ---------------------------------------------------------------------------
 
-_PROP   = '         '    # 9 spaces — aligns with 'description', 'name', etc.
+_PROP   = '         '    # 9 spaces
 _ACTION = '             '  # 13 spaces
 _STMT0  = '                 '  # 17 spaces
 
 _INTERP_RE = re.compile(r'\{([^}]+)\}')
 
-# Inform 6 runtime variables that hold object references
 _I6_OBJ_VARS = {'noun', 'second', 'self', 'actor', 'location'}
 
 
 def _emit_say(w, text: str, prefix: str, known_ids: set) -> None:
-    """Emit a print statement, resolving {identifier} interpolations."""
     parts = []
     last = 0
     for m in _INTERP_RE.finditer(text):
@@ -525,7 +581,6 @@ def _emit_say(w, text: str, prefix: str, known_ids: set) -> None:
         parts = [('lit', '')]
 
     def _after_stop(idx):
-        """True if position idx follows a sentence-ending period."""
         if idx == 0:
             return False
         prev_kind, prev_val = parts[idx - 1]
@@ -556,9 +611,9 @@ def _emit_say(w, text: str, prefix: str, known_ids: set) -> None:
 
 
 def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx=None) -> None:
-    """Emit statements. Caller is responsible for adding a trailing rtrue."""
     for stmt in stmts:
-        t = stmt['type']
+        t    = stmt['type']
+        line = stmt.get('line')
         if t == 'say':
             _emit_say(w, stmt['arg'], prefix, known_ids)
         elif t == 'give':
@@ -568,17 +623,25 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx=None) -> 
             kinds_by_id, _, values_set = kinds_ctx or ({}, {}, set())
             if stmt['prop'] not in values_set:
                 raise GrueError(
-                    f"unknown value property '{stmt['prop']}' — declare with 'value {stmt['prop']}'")
+                    f"unknown value property '{stmt['prop']}'"
+                    f" — declare with 'value {stmt['prop']}'",
+                    line, 'E051')
             w(f'{prefix}{stmt["obj"]}.{stmt["prop"]} = {stmt["num"]};')
         elif t == 'kind_assign':
             kinds_by_id, _, values_set = kinds_ctx or ({}, {}, set())
             kind_id = _to_id(stmt['kind'])
             kd = kinds_by_id.get(kind_id)
             if kd is None:
-                raise GrueError(f"unknown kind '{stmt['kind']}'")
+                if stmt['kind'] in values_set:
+                    raise GrueError(
+                        f"'{stmt['kind']}' is a numeric value property"
+                        f" — assign with a number: {stmt['obj']} {stmt['kind']} = 5.",
+                        line, 'E041')
+                raise GrueError(f"unknown kind '{stmt['kind']}'", line, 'E036')
             val = stmt['val']
             if val not in kd['values']:
-                raise GrueError(f"unknown value '{val}' for kind '{stmt['kind']}'")
+                raise GrueError(
+                    f"unknown value '{val}' for kind '{stmt['kind']}'", line, 'E037')
             obj_ref = stmt['obj']
             if len(kd['values']) == 2:
                 attr_name = kd['values'][1]
@@ -595,8 +658,8 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx=None) -> 
                 w(f'{prefix}box "{encoded[0]}";')
             else:
                 w(f'{prefix}box "{encoded[0]}"')
-                for line in encoded[1:-1]:
-                    w(f'{prefix}    "{line}"')
+                for ln in encoded[1:-1]:
+                    w(f'{prefix}    "{ln}"')
                 w(f'{prefix}    "{encoded[-1]}";')
         elif t == 'if':
             inner = prefix + '    '
@@ -604,17 +667,26 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx=None) -> 
                 kinds_by_id, _, values_set = kinds_ctx or ({}, {}, set())
                 if stmt['prop'] not in values_set:
                     raise GrueError(
-                        f"unknown value property '{stmt['prop']}' — declare with 'value {stmt['prop']}'")
+                        f"unknown value property '{stmt['prop']}'"
+                        f" — declare with 'value {stmt['prop']}'",
+                        line, 'E052')
                 cond_expr = f'self.{stmt["prop"]} {stmt["op"]} {stmt["num"]}'
             elif 'kind' in stmt:
                 kinds_by_id, _, values_set = kinds_ctx or ({}, {}, set())
                 kind_id = _to_id(stmt['kind'])
                 kd = kinds_by_id.get(kind_id)
                 if kd is None:
-                    raise GrueError(f"unknown kind '{stmt['kind']}' in condition")
+                    if stmt['kind'] in values_set:
+                        raise GrueError(
+                            f"'{stmt['kind']}' is a numeric value property"
+                            f" — use a numeric comparison: if {stmt['kind']} > 0:",
+                            line, 'E042')
+                    raise GrueError(
+                        f"unknown kind '{stmt['kind']}' in condition", line, 'E038')
                 val = stmt['val']
                 if val not in kd['values']:
-                    raise GrueError(f"unknown value '{val}' for kind '{stmt['kind']}'")
+                    raise GrueError(
+                        f"unknown value '{val}' for kind '{stmt['kind']}'", line, 'E039')
                 op = stmt['op']
                 if len(kd['values']) == 2:
                     attr_name = kd['values'][1]
@@ -623,7 +695,8 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx=None) -> 
                                      else f'self hasnt {attr_name}')
                     else:
                         raise GrueError(
-                            f"operator '{op}' not valid for two-value kind '{stmt['kind']}'")
+                            f"operator '{op}' not valid for two-value kind '{stmt['kind']}'",
+                            line, 'E040')
                 else:
                     cond_expr = f'self.{kind_id} {op} {val.upper()}'
             else:
@@ -653,7 +726,6 @@ def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set,
                 if not k.startswith('after ') and k not in turn_h and k not in each_h}
     after_h  = {k: v for k, v in handlers.items() if k.startswith('after ')}
 
-    # each_turn property: fires every turn when location matches
     if turn_h or each_h:
         w(f'{_PROP}each_turn [;')
         for key, stmts in each_h.items():
@@ -706,17 +778,25 @@ def _emit_object(w, obj: dict, parent: str, verb_action_map: dict, known_ids: se
         prop_kind_id = _to_id(prop_key)
         if prop_kind_id in kinds_by_id:
             kd = kinds_by_id[prop_kind_id]
-            if len(kd['values']) >= 3:
-                val = prop_val.lower()
-                if val not in kd['values']:
-                    raise GrueError(
-                        f"unknown value '{prop_val}' for kind '{prop_key}' on '{obj['id']}'")
-                w(f'         {prop_kind_id} {val.upper()},')
+            if len(kd['values']) == 2:
+                if prop_val == 'true':
+                    continue  # set via 'is X.' — handled by the has clause
+                raise GrueError(
+                    f"kind '{prop_key}' has two values"
+                    f" — set with 'is {kd['values'][1]}.' or leave unset for '{kd['values'][0]}'",
+                    obj.get('line'), 'E035')
+            val = prop_val.lower()
+            if val not in kd['values']:
+                raise GrueError(
+                    f"unknown value '{prop_val}' for kind '{prop_key}' on '{obj['id']}'",
+                    obj.get('line'), 'E037')
+            w(f'         {prop_kind_id} {val.upper()},')
         elif prop_val.isdigit():
             if prop_key not in values_set:
                 raise GrueError(
                     f"undeclared numeric property '{prop_key}' on '{obj['id']}'"
-                    f" — declare with 'value {prop_key}'")
+                    f" — declare with 'value {prop_key}'",
+                    obj.get('line'), 'E050')
             w(f'         {prop_key} {prop_val},')
     _emit_handlers(w, obj.get('handlers', {}), verb_action_map, known_ids, kinds_ctx)
     w(f'    has {attrs};' if attrs else '    has ;')
@@ -757,7 +837,6 @@ def _emit_door(w, obj: dict, parent_rid: str, door_dir: str, dest_rid: str,
 # Inform 6 emitter
 # ---------------------------------------------------------------------------
 
-# I6 standard library attributes — no Attribute declaration needed for these.
 _I6_BUILTIN_ATTRS = {
     'open', 'locked', 'openable', 'lockable', 'container', 'supporter',
     'light', 'animate', 'female', 'proper', 'scenery', 'static', 'absent',
@@ -768,7 +847,6 @@ _I6_BUILTIN_ATTRS = {
 
 
 def _collect_user_attributes(ast: dict) -> set:
-    """Return all attribute names used in give/if/properties that need Attribute declarations."""
     attrs = set()
 
     def _scan_stmts(stmts):
@@ -795,7 +873,6 @@ def _collect_user_attributes(ast: dict) -> set:
 
 
 def _uses_plural_s(ast: dict) -> bool:
-    """Return True if any say string in the AST uses {s ...} interpolation."""
     def _scan_stmts(stmts):
         for s in stmts:
             if s['type'] == 'say' and re.search(r'\{s\s+', s['arg']):
@@ -816,7 +893,15 @@ def _uses_plural_s(ast: dict) -> bool:
 def emit_i6(ast: dict) -> str:
     rooms = ast['rooms']
     if not rooms:
-        raise GrueError('no rooms defined')
+        raise GrueError('no rooms defined', code='E001')
+
+    # Duplicate room names
+    seen_room_ids = set()
+    for r in rooms:
+        if r['id'] in seen_room_ids:
+            raise GrueError(
+                f"duplicate room name '{r['name']}'", r.get('line'), 'E011')
+        seen_room_ids.add(r['id'])
 
     lines = []
     w     = lines.append
@@ -839,13 +924,11 @@ def emit_i6(ast: dict) -> str:
     values_set  = {vd['id'] for vd in ast.get('values', [])}
     kinds_ctx   = (kinds_by_id, {}, values_set)
 
-    # Two-value kind attributes are declared here; exclude from user-attribute scan
     kind_declared_attrs = set()
     for kd in ast.get('kinds', []):
         if len(kd['values']) == 2:
             kind_declared_attrs.add(kd['values'][1])
 
-    # Emit kind declarations
     for kd in ast.get('kinds', []):
         if len(kd['values']) == 2:
             attr_name = kd['values'][1]
@@ -866,19 +949,16 @@ def emit_i6(ast: dict) -> str:
     if user_attrs:
         w('')
 
-    # Build verb_action_map: base_word → action_name
-    # verb_action_map: plain key → plain action, key+':with' → with-action
     verb_action_map = {}
     for verb in ast.get('verbs', []):
-        action     = _verb_action_name(verb)
-        base_word  = verb['words'][0].lower()
+        action    = _verb_action_name(verb)
+        base_word = verb['words'][0].lower()
         if action.endswith('With'):
             verb_action_map[base_word + ':with'] = action
         else:
             for word in verb['words']:
                 verb_action_map[word.lower()] = action
 
-    # Emit custom verb stubs and Verb declarations
     declared_verb_words: set = set()
     for verb in ast.get('verbs', []):
         action   = _verb_action_name(verb)
@@ -889,8 +969,8 @@ def emit_i6(ast: dict) -> str:
             w(f'    "{_i6str(default)}";')
         w('];')
         w('')
-        synonyms   = verb.get('synonyms', verb['words'][:1])
-        base_word  = synonyms[0].lower()
+        synonyms  = verb.get('synonyms', verb['words'][:1])
+        base_word = synonyms[0].lower()
         if base_word in declared_verb_words:
             w(f"Extend '{base_word}'")
         else:
@@ -901,28 +981,38 @@ def emit_i6(ast: dict) -> str:
             w(f'    {grammar_line} -> {action};')
         w('')
 
-    # Normalize any room reference to the canonical Inform 6 id.
+    # Normalize room references to canonical I6 ids
     room_by_norm = {}
     for r in rooms:
         room_by_norm[_to_id(r['name'])]        = r['id']
         room_by_norm[r['id']]                  = r['id']
         room_by_norm[r['id'].replace('_', '')] = r['id']
 
-    def _resolve_room(ref: str) -> str:
-        return room_by_norm.get(ref) or room_by_norm.get(_to_id(ref)) or _to_id(ref)
+    def _resolve_room(ref: str, line=None) -> str:
+        result = room_by_norm.get(ref) or room_by_norm.get(_to_id(ref))
+        if result is None:
+            raise GrueError(
+                f"exit leads to unknown room '{ref}'", line, 'E010')
+        return result
 
-    # door_id → (obj, parent_room_id, door_direction, dest_room_id)
+    # Validate and collect door info
     door_info = {}
     for room in rooms:
         for obj in room['objects']:
             if obj['kind'] == 'door':
+                found_dir = False
                 for prop_key in obj['properties']:
                     if prop_key in _DIR_MAP:
-                        dest_id = _resolve_room(obj['properties'][prop_key])
+                        dest_ref = obj['properties'][prop_key]
+                        dest_id  = _resolve_room(dest_ref, obj.get('line'))
                         door_info[obj['id']] = (obj, room['id'], prop_key, dest_id)
+                        found_dir = True
                         break
+                if not found_dir:
+                    raise GrueError(
+                        f"door '{obj['id']}' has no direction property",
+                        obj.get('line'), 'E021')
 
-    # Directions already covered in each room (explicit exits + in-room door exits)
     room_covered_dirs = {}
     for room in rooms:
         covered = set(room['exits'].keys())
@@ -931,14 +1021,12 @@ def emit_i6(ast: dict) -> str:
                 covered.add(door_info[obj['id']][2])
         room_covered_dirs[room['id']] = covered
 
-    # Auto-inject plain reverse exits for in-room doors
-    reverse_exits = {}  # dest_room_id → {opp_dir: parent_room_id}
+    reverse_exits = {}
     for did, (obj, parent_rid, door_dir, dest_rid) in door_info.items():
         opp = _OPPOSITE_DIR.get(door_dir)
         if opp and opp not in room_covered_dirs.get(dest_rid, set()):
             reverse_exits.setdefault(dest_rid, {})[opp] = parent_rid
 
-    # IDs of all named game objects — used to resolve {interpolations} in say
     known_ids: set = set()
     for r in rooms:
         known_ids.add(r['id'])
@@ -951,8 +1039,9 @@ def emit_i6(ast: dict) -> str:
         w( '    with description')
         w(f'        "{_i6str(room["desc"])}",')
         for direction, dest in room['exits'].items():
-            i6dir = _DIR_MAP.get(direction, direction + '_to')
-            w(f'         {i6dir} {_resolve_room(dest)},')
+            i6dir  = _DIR_MAP.get(direction, direction + '_to')
+            eline  = room.get('exit_lines', {}).get(direction)
+            w(f'         {i6dir} {_resolve_room(dest, eline)},')
         for obj in room['objects']:
             if obj['kind'] == 'door' and obj['id'] in door_info:
                 _, _, door_dir, _ = door_info[obj['id']]
@@ -1006,7 +1095,9 @@ def main():
         ast = parse(source)
         inf = emit_i6(ast)
     except GrueError as e:
-        print(f'grue: {e}', file=sys.stderr)
+        loc      = f'{src_path.name}:{e.line}: ' if e.line else f'{src_path.name}: '
+        code_str = f'[{e.code}] ' if e.code else ''
+        print(f'{loc}{code_str}{e}', file=sys.stderr)
         sys.exit(1)
 
     out_path.write_text(inf)

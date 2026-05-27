@@ -1,0 +1,4 @@
+# expect error: kind 'ailment' already declared
+
+kind ailment: healthy, cold, sick
+kind ailment: fine, poorly

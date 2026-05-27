@@ -119,3 +119,8 @@ Writes a `.gts` JSON file alongside the `.inf` for use by a test runner.
 
 ## Planned
 - User-defined functions — named routines callable from handlers, for shared logic
+
+
+Handlers: the instead of / on / after system works but the condition syntax (when open, subject-qualified assignments) needs more coverage in tests. How do handlers with two or more nouns work, e.g. "Tap drum with stick.". 
+Kind declarations: the bendable: straight, bent system was designed but not yet implemented in the compiler
+lib/containment.grue: should be updated to reflect the new syntax now that security/containment are gone

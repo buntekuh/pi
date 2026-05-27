@@ -1,0 +1,5 @@
+# expect error: unknown object type 'animal'
+
+room Room "A room."
+
+    animal Rabbit "A rabbit."

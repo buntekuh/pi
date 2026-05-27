@@ -1,0 +1,4 @@
+# expect error: kind value 'sick' already claimed by kind 'ailment'
+
+kind ailment: healthy, sick
+kind disease: well, sick
