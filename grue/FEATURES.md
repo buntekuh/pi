@@ -3,6 +3,18 @@
 ## Target platform
 Grue 1.0 targets the Z-machine via Inform 6. Glulx (graphics, sound, full Unicode) is deferred to a future version.
 
+## Game identity
+```
+"Passing the Brass Lantern" by Bernd Eickhoff
+```
+First line of the source file. Sets the game title and author shown in the banner:
+```
+Passing the Brass Lantern
+by Bernd Eickhoff
+Release 1 / Serial number YYMMDD / Inform v6.44 Library 6/11 SD
+```
+If omitted, the first room name is used as the title and "An Interactive Fiction" as the headline.
+
 ## Source handling
 - Multi-line quoted strings joined by preprocessor
 - Python-style indentation for all blocks (no braces or end keywords)

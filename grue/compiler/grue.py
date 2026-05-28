@@ -242,7 +242,8 @@ def parse(source: str) -> dict:
     ast = {'uses': [], 'kinds': [], 'values': [], 'vars': [], 'classes': [],
            'arrays': [],
            'rooms': [], 'verbs': [], 'tests': [], 'toplevel_objects': [],
-           'max_score': 0, 'player_desc': None, 'status_slots': None, 'seed': None}
+           'max_score': 0, 'player_desc': None, 'status_slots': None, 'seed': None,
+           'title': None, 'author': None}
 
     current_room    = None;  room_col    = -1
     current_object  = None;  obj_col     = -1
@@ -594,6 +595,12 @@ def parse(source: str) -> dict:
                 }
                 room_col = col
                 ast['rooms'].append(current_room)
+
+            elif stripped.startswith('"') and ' by ' in stripped:
+                m = re.match(r'"([^"]+)"\s+by\s+(.+)', stripped)
+                if m:
+                    ast['title']  = m.group(1)
+                    ast['author'] = m.group(2).strip()
 
             elif stripped.startswith('max score:'):
                 ast['max_score'] = int(stripped[10:].strip())
@@ -1421,10 +1428,14 @@ def emit_i6(ast: dict) -> str:
     lines = []
     w     = lines.append
 
-    title = rooms[0]['name']
+    title  = ast['title']  or rooms[0]['name']
+    author = ast['author']
 
     w(f'Constant Story "{_i6str(title)}";')
-    w( 'Constant Headline "^An Interactive Fiction^";')
+    if author:
+        w(f'Constant Headline "^by {_i6str(author)}^";')
+    else:
+        w( 'Constant Headline "^An Interactive Fiction^";')
     w(f'Constant MAX_SCORE {ast["max_score"]};')
     w('')
     w('Replace DeathMessage;')
