@@ -245,15 +245,47 @@ degree when she wrote him. On 48 kilobytes.
 `wait` — *Thorin sings about more gold. Specifically about the mountain.*
 `wait` — *Thorin has moved on to gold in general, as a concept.*
 
-Gandalf arrives eventually. He does not look pleased about the carrying
-situation. He does it anyway. He is Gandalf. He has places to be but
-he picks you up because that is what the story requires of him, and he
-is a character who understands his story.
+This is the game's Galatea moment — but inverted. Later, in the gallery,
+a marble statue will answer your questions with philosophy and interiority.
+Here, a dwarf answers every question with gold. He is pure exteriority,
+pure material desire. He is the anti-Galatea.
+
+And yet. Push him far enough and he accidentally becomes profound.
+
+`ask thorin about the dark` —
+*"The dark hides gold. One must bring a light."*
+He does not know he has just said the thesis of this game.
+
+`ask thorin about time` —
+*"Time is what passes while gold waits to be found."*
+
+`ask thorin about consciousness` —
+*"I am conscious of the gold. And of its absence. The absence is worse."*
+
+`ask thorin about eliza` —
+*"Is she carrying gold?"*
+
+`ask thorin about the lantern` —
+*Thorin eyes the brass lantern in your hands. "Brass," he says. "Hmm."*
+
+`ask thorin about legacy` —
+*"Gold does not tarnish. It is the same gold my grandfather held.*
+*His grandfather before him. It connects us across time."*
+He stops. He has said something true by accident. He looks at the
+lantern for a long moment.
+*"Brass," he says quietly. "It lasts."*
+
+The window opens.
+
+Gandalf is also here, arriving late, not pleased about the carrying
+situation. He does it anyway. He is a character who understands his story.
 
 This is the second torch-passing in the game. Not from person to person
 but from objects to characters. Before The Hobbit, NPCs waited. After
 it, they had inner lives. They wandered. They had opinions. They were
-exasperating in ways that felt true.
+exasperating in ways that felt true. Thorin's gold-obsession is not
+a flaw — it is the first fictional interiority in commercial gaming.
+A character who wanted something that had nothing to do with you.
 
 On the shelf: **Gnome Ranger** (Level 9). Three games about Ingrid,
 a gnome girl betrothed against her will to a goblin chief. The text on
@@ -267,8 +299,8 @@ A parser that understood sentences Infocom's would have rejected. A
 London studio with literary ambitions that went under when the market
 collapsed, and it still stings.
 
-**Escape:** `ask gandalf to carry me` — he sighs the sigh of a wizard
-who has been doing this for too long. You are carried through the window.
+**Escape:** `ask thorin about legacy` — he accidentally says something
+true. The window opens. Gandalf carries you through it, sighing.
 
 
 ---
@@ -389,6 +421,9 @@ The game respects the player's intelligence without demanding it.
 - Floyd: NPC in room 6, `each turn` random cheerful comments
 - Galatea: NPC in room 8, multi-response `talk to` handler
 - `else if` chains for ELIZA and Floyd random responses
-- Thorin: NPC in room 7, `each turn` gold-singing comments, ignores most commands
-- Gandalf: NPC in room 7, wanders, responds to `ask gandalf to carry me`
+- Thorin: NPC in room 7, `each turn` gold-singing comments, `ask about`
+  responses — mostly gold deflections, one legacy response that opens the
+  window; the anti-Galatea, pure exteriority vs her pure interiority
+- Gandalf: NPC in room 7, wanders via `each turn`, carries player out
+  once window is open
 - Score: one point per room escaped, max score 11
