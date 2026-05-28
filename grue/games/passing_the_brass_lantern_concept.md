@@ -43,11 +43,17 @@ first line to the last. Each person in the game received it from someone
 before them and passed it to someone after. The player is the latest
 in that line.
 
+If you leave it behind, it will be waiting in the next room,
+sitting on top of a teletype machine. No comment. No reproach.
+Just there, ready.
+
 **The grue** appears in every dark place — always friendly, always a
 little melancholy. Nobody is afraid of him anymore. That's fine.
 He understands.
 
-**eliza** is in every room. She is the witness.
+**eliza** is in every room. She is the witness. She is also,
+quietly, the one who carries the lantern forward when you forget it.
+She was always taking care of you. You may not have noticed.
 
 ---
 
@@ -574,6 +580,10 @@ happened anyway.
   each room has a unique `talk to eliza` response that witnesses
   and is moved by what she sees; responses progress from deflection
   to genuine feeling across the game
+- eliza carries the lantern forward: if the player leaves the lantern
+  in room N, an `each_turn` handler in room N+1 checks whether the
+  player has the lantern; if not, moves the lantern to a teletype
+  scenery object in the new room and prints nothing — it's just there
 - Letter-remover: `verb shoot` with `takes held noun`, specific
   `instead of shoot` handlers per target object
 - Lantern: carried from room 2 onwards, required in dark rooms
