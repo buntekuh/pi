@@ -949,11 +949,13 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx) -> None:
                 cond_expr = f'self {has_or_hasnt} {stmt["attr"]}'
             w(f'{prefix}if ({cond_expr}) {{')
             _emit_stmts(w, stmt['then'], inner, known_ids, kinds_ctx)
-            w(f'{inner}rtrue;')
+            if not (stmt['then'] and stmt['then'][-1]['type'] == 'end'):
+                w(f'{inner}rtrue;')
             if stmt.get('else'):
                 w(f'{prefix}}} else {{')
                 _emit_stmts(w, stmt['else'], inner, known_ids, kinds_ctx)
-                w(f'{inner}rtrue;')
+                if not (stmt['else'] and stmt['else'][-1]['type'] == 'end'):
+                    w(f'{inner}rtrue;')
             w(f'{prefix}}}')
 
 
@@ -992,7 +994,10 @@ def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set,
             if second_filter:
                 w(f'{_STMT0}if (second ~= {second_filter}) rfalse;')
             _emit_stmts(w, stmts, _STMT0, known_ids, kinds_ctx)
-            if not (stmts and stmts[-1]['type'] == 'if' and stmts[-1].get('else')):
+            last = stmts[-1] if stmts else None
+            skip = ((last and last['type'] == 'if' and last.get('else'))
+                    or (last and last['type'] == 'end'))
+            if not skip:
                 w(f'{_STMT0}rtrue;')
         w(f'{_PROP}],')
 

@@ -1,4 +1,4 @@
-# scoring — score increment/decrement, max score, player description, status line
+# scoring — score increment/decrement, max score, player description, status line, endings
 
 max score: 10
 player "You look sharp and ready for adventure."
@@ -12,6 +12,18 @@ verb spend
     takes noun
     "Nothing to spend."
 
+verb seize
+    takes noun
+    "You can't seize that."
+
+verb quaff
+    takes noun
+    "Nothing to quaff."
+
+verb study
+    takes noun
+    "Nothing to study."
+
 room Hall "A grand entrance hall."
 
     object coin "A gold coin."
@@ -24,7 +36,33 @@ room Hall "A grand entrance hall."
             score - 2
             say "You spend the coin."
 
-test "default"
+    object trophy "A gleaming trophy."
+
+        instead of seize:
+            score + 10
+            win "You claim the trophy and triumph!"
+
+    object poison "A vial of poison."
+
+        instead of quaff:
+            score - 5
+            fail "The poison takes hold. Everything goes dark."
+
+    object note "A crumpled note."
+
+        instead of study:
+            end story "The note reads: nothing matters."
+
+test "score"
     collect coin. "You collect the coin"
     spend coin. "You spend the coin"
     examine me. "You look sharp"
+
+test "win"
+    seize trophy. "You claim the trophy"
+
+test "fail"
+    quaff poison. "The poison takes hold"
+
+test "end story"
+    study note. "nothing matters"
