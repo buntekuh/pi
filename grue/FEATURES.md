@@ -259,6 +259,8 @@ seed: 42
 
 Top-level declaration that fixes the random seed at startup, making all `random` calls produce a deterministic sequence. Use this in test files to pin expected values; omit it in shipped games for genuine randomness.
 
+Note: the Z-machine spec does not mandate a specific RNG algorithm, so the same seed may produce different sequences on different interpreters. Pinned test values are only guaranteed stable when running under the same interpreter (the test runner always uses `dfrotz`).
+
 ## Scoring
 
 ```
