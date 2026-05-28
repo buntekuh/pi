@@ -94,6 +94,9 @@ def _append_stmt(stmts: list, stripped: str, lineno: int) -> None:
         stmts.append({'type': 'say', 'arg': _extract_string(stripped[4:]), 'line': lineno})
     elif stripped.startswith('go '):
         stmts.append({'type': 'go', 'arg': stripped[3:].strip().strip('"'), 'line': lineno})
+    elif re.match(r'score\s*[+-]\s*\d+$', stripped):
+        ms = re.match(r'score\s*([+-])\s*(\d+)$', stripped)
+        stmts.append({'type': 'score', 'op': ms.group(1), 'n': int(ms.group(2)), 'line': lineno})
     elif re.match(r'win\s*(".*")?$', stripped):
         msg = _extract_string(stripped[3:].strip()) if '"' in stripped else None
         stmts.append({'type': 'end', 'outcome': 'win', 'msg': msg, 'line': lineno})
@@ -153,7 +156,8 @@ _ROOM_KEYWORDS = {'is', 'instead', 'on', 'after', 'each'}
 def parse(source: str) -> dict:
     source = _preprocess(source)
     ast = {'uses': [], 'kinds': [], 'values': [], 'vars': [], 'classes': [],
-           'rooms': [], 'verbs': [], 'tests': [], 'toplevel_objects': []}
+           'rooms': [], 'verbs': [], 'tests': [], 'toplevel_objects': [],
+           'max_score': 0, 'player_desc': None, 'status_slots': None}
 
     current_room    = None;  room_col    = -1
     current_object  = None;  obj_col     = -1
@@ -531,6 +535,16 @@ def parse(source: str) -> dict:
                 room_col = col
                 ast['rooms'].append(current_room)
 
+            elif stripped.startswith('max score:'):
+                ast['max_score'] = int(stripped[10:].strip())
+
+            elif stripped.startswith('player ') and '"' in stripped:
+                ast['player_desc'] = _extract_string(stripped[7:].strip())
+
+            elif stripped.startswith('status '):
+                slots = [s.strip() for s in stripped[7:].split(',')]
+                ast['status_slots'] = slots
+
             elif stripped.startswith('test '):
                 m = re.match(r'test\s+"([^"]*)"', stripped)
                 if m:
@@ -833,6 +847,8 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx) -> None:
                 w(f'{prefix}give {obj_ref} {tilde}{attr_name};')
             else:
                 w(f'{prefix}{obj_ref}.{kind_id} = {val.upper()};')
+        elif t == 'score':
+            w(f'{prefix}score = score {stmt["op"]} {stmt["n"]};')
         elif t == 'end':
             outcome = stmt['outcome']
             msg     = stmt.get('msg')
@@ -1210,6 +1226,44 @@ def _uses_plural_s(ast: dict) -> bool:
     return False
 
 
+def _emit_draw_status_line(w, status_slots):
+    slots = status_slots if status_slots is not None else ['score', 'moves']
+    parts = []
+    for slot in slots:
+        s = slot.strip()
+        if s == 'score':
+            parts.append('"Score: ", score')
+        elif s in ('moves', 'turns'):
+            parts.append('"Moves: ", turns')
+        elif s == 'time':
+            parts.append('"Time: ", turns')
+        else:
+            parts.append(f'"{s.capitalize()}: ", {s}')
+    def _slot_width(s):
+        if s == 'score':               return 9    # "Score: 99"
+        if s in ('moves', 'turns'):    return 10   # "Moves: 999"
+        if s == 'time':                return 9    # "Time: 99"
+        return len(s) + 1 + 4                      # "Name: 999"
+    right_width = (sum(_slot_width(sl.strip()) for sl in slots)
+                   + 2 * max(len(slots) - 1, 0))
+    right_expr  = ', "  ", '.join(parts)
+    w('[ DrawStatusLine width right_start;')
+    w('    @split_window 1;')
+    w('    @set_window 1;')
+    w('    width = 0-->33;')
+    w('    @set_cursor 1 1;')
+    w('    spaces width;')
+    w('    @set_cursor 1 1;')
+    w('    print (name) location;')
+    w(f'    right_start = width - {right_width};')
+    w('    if (right_start < 1) right_start = 1;')
+    w('    @set_cursor 1 right_start;')
+    w(f'    print {right_expr};')
+    w('    @set_window 0;')
+    w('];')
+    w('')
+
+
 def emit_i6(ast: dict) -> str:
     rooms = ast['rooms']
     if not rooms:
@@ -1230,9 +1284,10 @@ def emit_i6(ast: dict) -> str:
 
     w(f'Constant Story "{_i6str(title)}";')
     w( 'Constant Headline "^An Interactive Fiction^";')
-    w( 'Constant MAX_SCORE 0;')
+    w(f'Constant MAX_SCORE {ast["max_score"]};')
     w('')
     w('Replace DeathMessage;')
+    w('Replace DrawStatusLine;')
     w('')
     w('Include "Parser";')
     w('Include "VerbLib";')
@@ -1416,10 +1471,13 @@ def emit_i6(ast: dict) -> str:
     w('    if (_grue_ending ~= 0) print (string) _grue_ending;')
     w('];')
     w('')
+    _emit_draw_status_line(w, ast.get('status_slots'))
     w('Include "Grammar";')
     w('')
     w('[ Initialise;')
     w(f'    location = {rooms[0]["id"]};')
+    if ast.get('player_desc'):
+        w(f'    selfobj.description = "{_i6str(ast["player_desc"])}";')
     w(f'    print "^^{_i6str(title)}^^^";')
     w('];')
 

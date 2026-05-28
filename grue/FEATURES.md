@@ -233,13 +233,51 @@ end story "Years later, no one remembered the incident."
 - `end story` — neutral ending; displays the message inside `*** ... ***` with no win/fail judgement
 - The message is optional for `win` and `fail`; `end story` without a message shows `*** ***`
 
+## Scoring
+
+```
+max score: 10
+```
+
+Declares the maximum possible score for the game. Defaults to 0 (unscored).
+
+```
+score + 5
+score - 2
+```
+
+Increment or decrement the score from any handler.
+
+## Player description
+
+```
+player "You look sharp and ready for adventure."
+```
+
+Sets the description shown when the player types `examine me`.
+
+## Status line
+
+```
+status score, moves
+```
+
+Configures the right side of the status bar. Built-in slot names:
+
+| Slot | Displays |
+|---|---|
+| `score` | `Score: N` |
+| `moves` | `Moves: N` |
+| `time` | `Time: N` |
+| *any var name* | `Varname: N` |
+
+The left side always shows the current room name. Default (when `status` is omitted) shows `Score: N  Moves: N`.
+
 ## Planned
 - User-defined functions — named routines callable from handlers, for shared logic
 - Class possessions — child objects automatically created per instance
 - Multiple source files — `uses` directive (reserved but not yet emitted)
-- Scoring — increment and display score
-- Inventory — list of carried objects; customisable formatting
+- Inventory — customisable formatting of carried objects list
 - Text styles — `bold`, `italic`, `reverse` for emphasis in `say` output
-- Status line — configurable top or bottom bar; built-in slots (`score`, `moves`, `time`) and arbitrary game variables
 - Multi-line strings — review the preprocessor join behaviour in detail; confirm edge cases and document clearly
 - Articles — audit `{a obj}`, `{an obj}`, `{the obj}` in detail: I6's `(a)` routine handles "a"/"an" automatically based on the object name, but Grue currently only recognises `a` and `the` as article keywords in interpolation, not `an`; also review how initial articles in object display names interact with I6's article system

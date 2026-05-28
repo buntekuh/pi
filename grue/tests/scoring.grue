@@ -1,0 +1,30 @@
+# scoring — score increment/decrement, max score, player description, status line
+
+max score: 10
+player "You look sharp and ready for adventure."
+status score, moves
+
+verb collect
+    takes noun
+    "Nothing to collect."
+
+verb spend
+    takes noun
+    "Nothing to spend."
+
+room Hall "A grand entrance hall."
+
+    object coin "A gold coin."
+
+        instead of collect:
+            score + 5
+            say "You collect the coin."
+
+        instead of spend:
+            score - 2
+            say "You spend the coin."
+
+test "default"
+    collect coin. "You collect the coin"
+    spend coin. "You spend the coin"
+    examine me. "You look sharp"
