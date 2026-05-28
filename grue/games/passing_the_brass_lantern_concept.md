@@ -200,7 +200,80 @@ he has to stay. He accepts this with dignity. The lift arrives.
 
 ---
 
-### 7. The Flat — Oxford, 1993
+### 7. A Bedroom — Britain, 1982
+*Philip Mitchell, Veronika Megler — Melbourne House*
+*Mike, Nick & Pete Austin — Level 9*
+*Magnetic Scrolls*
+
+A child's bedroom. A ZX Spectrum on a desk connected to a cassette
+recorder. A small portable television. Brown carpet. A shelf of
+cassette cases with hand-drawn labels. It is 1982 and the torch has
+crossed the Atlantic.
+
+America had universities and venture capital and mainframes. Britain
+had bedrooms. Brothers working from a house in Weston-super-Mare.
+A graduate student in Melbourne finishing her dissertation while writing
+a parser. Small studios above shops in London with literary ambitions
+and no money. The constraints produced invention.
+
+A cassette tape labelled **THE HOBBIT** is on the desk.
+
+`load tape` — the screen fills with Tolkien's illustration. Four minutes
+pass. The tape deck clicks. Then:
+
+> You are in a room. Thorin is here.
+
+Something happened here that had never happened before. Not in Crowther's
+cave, not in the Zork dungeons, not in any Infocom game yet shipped.
+Thorin was not waiting for you. Thorin had his own agenda. He wandered.
+He sat down. He sang about gold at the worst possible moments —
+mid-puzzle, mid-crisis, with complete indifference to your needs.
+He was the first NPC with genuine agency: a character who did not
+exist to serve the player but to be himself.
+
+Veronika Megler was twenty-two years old and finishing a computer science
+degree when she wrote him. On 48 kilobytes.
+
+`examine thorin` —
+*He is a dwarf of considerable dignity, currently sitting down and*
+*singing about gold. He has strong feelings about gold.*
+
+`ask thorin about gandalf` —
+*"Gold," says Thorin. He appears to be composing a new verse.*
+
+`wait` — *Thorin sings about gold.*
+`wait` — *Thorin sings about more gold. Specifically about the mountain.*
+`wait` — *Thorin has moved on to gold in general, as a concept.*
+
+Gandalf arrives eventually. He does not look pleased about the carrying
+situation. He does it anyway. He is Gandalf. He has places to be but
+he picks you up because that is what the story requires of him, and he
+is a character who understands his story.
+
+This is the second torch-passing in the game. Not from person to person
+but from objects to characters. Before The Hobbit, NPCs waited. After
+it, they had inner lives. They wandered. They had opinions. They were
+exasperating in ways that felt true.
+
+On the shelf: **Gnome Ranger** (Level 9). Three games about Ingrid,
+a gnome girl betrothed against her will to a goblin chief. The text on
+the spine is printed in magenta on a dark background. It is nearly
+unreadable. The Austin brothers, working from a house in Weston-super-
+Mare, invented their own compression scheme to fit their enormous
+ambitions into tiny machines.
+
+Also on the shelf: **The Pawn** (Magnetic Scrolls). Beautiful graphics.
+A parser that understood sentences Infocom's would have rejected. A
+London studio with literary ambitions that went under when the market
+collapsed, and it still stings.
+
+**Escape:** `ask gandalf to carry me` — he sighs the sigh of a wizard
+who has been doing this for too long. You are carried through the window.
+
+
+---
+
+### 9. The Flat — Oxford, 1993
 *Graham Nelson*
 
 A small flat. Books everywhere — Victorian literature, linguistics,
@@ -221,7 +294,7 @@ about language that happens to contain a programming language.
 
 ---
 
-### 8. The Gallery — 2000
+### 10. The Gallery — 2000
 *Emily Short*
 
 A single room. A marble statue on a plinth, lit from above.
@@ -248,7 +321,7 @@ The door was never locked.
 
 ---
 
-### 9. The Modern Wing — 2009–present
+### 11. The Modern Wing — 2009–present
 *Twine, ink, Porpentine, Sam Barlow, many others*
 
 A bright room. Many paths leading out in many directions. Signs pointing
@@ -266,7 +339,7 @@ It is a bonfire.
 
 ---
 
-### 10. The Workshop — today
+### 12. The Workshop — today
 *You*
 
 A small room. A workbench. A Raspberry Pi. Some half-written code on
@@ -288,6 +361,8 @@ out of words.
 > With thanks to: Joseph Weizenbaum. Will Crowther. Don Woods.
 > Tim Anderson, Marc Blank, Bruce Daniels, Dave Lebling.
 > Steve Meretzky. Brian Moriarty. Douglas Adams. Amy Briggs.
+> Veronika Megler. Philip Mitchell.
+> Mike, Nick and Pete Austin. The people at Magnetic Scrolls.
 > Graham Nelson. Emily Short. Andrew Plotkin. Chris Klimas.
 > Porpentine. Sam Barlow. And everyone who ever typed a command
 > into the dark and waited to see what came back.
@@ -314,4 +389,6 @@ The game respects the player's intelligence without demanding it.
 - Floyd: NPC in room 6, `each turn` random cheerful comments
 - Galatea: NPC in room 8, multi-response `talk to` handler
 - `else if` chains for ELIZA and Floyd random responses
-- Score: one point per room escaped, max score 9
+- Thorin: NPC in room 7, `each turn` gold-singing comments, ignores most commands
+- Gandalf: NPC in room 7, wanders, responds to `ask gandalf to carry me`
+- Score: one point per room escaped, max score 11
