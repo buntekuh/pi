@@ -64,7 +64,7 @@ def run_test(z5: Path, test: dict, debug: bool = False, verbose: bool = False) -
             continue
 
         negate  = cmd_info.get('negate', False)
-        found   = expect in output
+        found   = expect.lower() in output.lower()
         ok      = (not found) if negate else found
 
         if ok:

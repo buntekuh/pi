@@ -95,9 +95,10 @@ def _parse_keywords(rest: str) -> tuple:
         inline_desc = ''
     keywords = [w.strip().strip(',') for w in kw_part.split() if w.strip().strip(',')]
     proper   = bool(keywords) and keywords[0][0].isupper()
-    if ',' in kw_part and keywords:
-        display = keywords[0] if proper else keywords[0].lower()
-        obj_id  = _to_id(keywords[0])
+    if ',' in kw_part:
+        primary_words = kw_part.split(',')[0].strip().split()
+        display = ' '.join(primary_words) if proper else ' '.join(w.lower() for w in primary_words)
+        obj_id  = '_'.join(w.lower() for w in primary_words)
     else:
         display = ' '.join(keywords) if proper else ' '.join(k.lower() for k in keywords) if keywords else ''
         obj_id  = '_'.join(k.lower() for k in keywords) if keywords else _to_id(inline_desc)
@@ -113,8 +114,8 @@ def _append_stmt(stmts: list, stripped: str, lineno: int) -> None:
         m = re.match(r'move\s+(.+?)\s+to\s+(.+)$', stripped)
         if not m:
             raise GrueError("expected 'move <object> to <destination>'", lineno, 'E080')
-        stmts.append({'type': 'move', 'obj': m.group(1).strip(),
-                      'to': m.group(2).strip(), 'line': lineno})
+        stmts.append({'type': 'move', 'obj': m.group(1).strip().rstrip('.'),
+                      'to': m.group(2).strip().rstrip('.'), 'line': lineno})
     elif re.match(r'score\s*[+-]\s*\d+$', stripped):
         ms = re.match(r'score\s*([+-])\s*(\d+)$', stripped)
         stmts.append({'type': 'score', 'op': ms.group(1), 'n': int(ms.group(2)), 'line': lineno})
@@ -797,7 +798,7 @@ def _parse_handler_key(key: str, verb_action_map: dict) -> tuple:
     if 'with' in words:
         wi = words.index('with')
         if wi + 1 < len(words):
-            second = _to_id(words[wi + 1])
+            second = _to_id(' '.join(words[wi + 1:]))
 
     has_with = 'with' in words
     if base in _STD_ACTIONS:
@@ -840,7 +841,9 @@ def _obj_attributes(obj: dict) -> str:
         if val == 'true':
             attrs.append(key)
 
-    return ' '.join(attrs)
+    seen = set()
+    deduped = [a for a in attrs if not (a in seen or seen.add(a))]
+    return ' '.join(deduped)
 
 
 # ---------------------------------------------------------------------------
@@ -1096,7 +1099,19 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx) -> None:
             w(f'{prefix}}}')
 
 
-_ON_TURN_RE = re.compile(r'^on turn (\d+)$')
+_ON_TURN_RE = re.compile(r'^on turn (\d+(?:-\d*)?|-\d+)$')
+
+
+def _turn_condition(spec: str) -> str:
+    """'5' → turns==5, '5-7' → turns>=5&&turns<=7, '5-' → turns>=5, '-3' → turns<=3"""
+    if '-' not in spec:
+        return f'turns == {spec}'
+    if spec.startswith('-'):
+        return f'turns <= {spec[1:]}'
+    lo, _, hi = spec.partition('-')
+    if not hi:
+        return f'turns >= {lo}'
+    return f'turns >= {lo} && turns <= {hi}'
 
 
 def _all_branches_end(stmts: list) -> bool:
@@ -1117,25 +1132,39 @@ def _maybe_rtrue(w, stmts: list) -> None:
         w(f'{_STMT0}rtrue;')
 
 
+_NPC_KINDS = {'man', 'woman', 'robot'}
+
 def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set,
-                   kinds_ctx) -> None:
+                   kinds_ctx, obj_kind=None) -> None:
     if not handlers:
         return
 
-    turn_h   = {k: v for k, v in handlers.items() if _ON_TURN_RE.match(k)}
+    def _is_give(k):
+        return (k.startswith('on give') or k.startswith('after give')) and \
+               not k.startswith('instead of')
+
+    turn_h   = {k: v for k, v in handlers.items()
+                if _ON_TURN_RE.match(k) and _ON_TURN_RE.match(k).group(1) != '0'}
     each_h   = {k: v for k, v in handlers.items() if k == 'each turn'}
     order_h  = {k: v for k, v in handlers.items() if k.startswith('order:')}
-    after_h  = {k: v for k, v in handlers.items() if k.startswith('after ')}
+    # on give: on NPCs goes to life property, not after
+    life_h   = {k: v for k, v in handlers.items()
+                if obj_kind in _NPC_KINDS and _is_give(k)}
+    after_h  = {k: v for k, v in handlers.items()
+                if (k.startswith('after ') or
+                    (k.startswith('on ') and not _ON_TURN_RE.match(k) and k != 'each turn'))
+                and k not in life_h}
     before_h = {k: v for k, v in handlers.items()
-                if k.startswith('instead of ') or k.startswith('on ')}
+                if k.startswith('instead of ')}
 
     if turn_h or each_h:
         w(f'{_PROP}each_turn [;')
         for key, stmts in each_h.items():
             _emit_stmts(w, stmts, _ACTION, known_ids, kinds_ctx)
         for key, stmts in turn_h.items():
-            n = _ON_TURN_RE.match(key).group(1)
-            w(f'{_ACTION}if (turns == {n}) {{')
+            spec = _ON_TURN_RE.match(key).group(1)
+            w(f'{_ACTION}if ({_turn_condition(spec)}) {{')
+            w(f'{_STMT0}print "^";')
             _emit_stmts(w, stmts, _STMT0, known_ids, kinds_ctx)
             w(f'{_ACTION}}}')
         w(f'{_PROP}],')
@@ -1146,6 +1175,19 @@ def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set,
             verb_word = key[6:]          # strip 'order:'
             action, _ = _parse_handler_key(f'on {verb_word}', verb_action_map)
             w(f'{_ACTION}{action}:')
+            _emit_stmts(w, stmts, _STMT0, known_ids, kinds_ctx)
+            _maybe_rtrue(w, stmts)
+        w(f'{_ACTION}default: rfalse;')
+        w(f'{_PROP}],')
+
+    if life_h:
+        w(f'{_PROP}life [;')
+        for key, stmts in life_h.items():
+            _, noun_filter = _parse_handler_key(key, verb_action_map)
+            w(f'{_ACTION}Give:')
+            if noun_filter:
+                w(f'{_STMT0}if (noun ~= {noun_filter}) rfalse;')
+            w(f'{_STMT0}move noun to self;')
             _emit_stmts(w, stmts, _STMT0, known_ids, kinds_ctx)
             _maybe_rtrue(w, stmts)
         w(f'{_ACTION}default: rfalse;')
@@ -1245,7 +1287,8 @@ def _emit_object(w, obj: dict, parent: str, verb_action_map: dict, known_ids: se
                     f"'{prop_key}' is a value of kind '{kd['name']}'"
                     f" — use '{kd['id']}: {prop_key}.' to set an initial value",
                     obj.get('line'), 'E035')
-    _emit_handlers(w, obj.get('handlers', {}), verb_action_map, known_ids, kinds_ctx)
+    _emit_handlers(w, obj.get('handlers', {}), verb_action_map, known_ids, kinds_ctx,
+                   obj_kind=obj.get('kind'))
     w(f'    has {attrs};' if attrs else '    has ;')
     w('')
 
@@ -1649,6 +1692,19 @@ def emit_i6(ast: dict) -> str:
             elif obj['kind'] != 'door':
                 _emit_object(w, obj, rid, verb_action_map, known_ids, kinds_ctx,
                              classes_by_id)
+
+    turn0_rooms = [(r['id'], r['handlers']['on turn 0'])
+                   for r in rooms if 'on turn 0' in r.get('handlers', {})]
+    if turn0_rooms:
+        w('[ BeforeParsing;')
+        w('    if (turns ~= 0) return;')
+        for rid, stmts in turn0_rooms:
+            w(f'    if (location == {rid}) {{')
+            w(f'        print "^";')
+            _emit_stmts(w, stmts, '        ', known_ids, kinds_ctx)
+            w('    }')
+        w('];')
+        w('')
 
     w('[ DeathMessage;')
     w('    if (deadflag == 1) { print "You have died"; return; }')

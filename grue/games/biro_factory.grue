@@ -113,3 +113,5 @@ room "The Great Hall"
   "A vast hall. The drawing room lies to the west."
 
   west "Drawing Room at the Family Estate"
+
+room "Lobby of the Biro Factory"

@@ -5,13 +5,12 @@
 
 ## What it is
 
-A short, lighthearted escape-room game celebrating the people who built
-interactive fiction from the 1960s to today. Each room is a famous location
-from a famous work, or the place where something important happened. You carry
-a brass lantern the entire way. The lantern is the point.
+A short game celebrating the people who built interactive fiction from
+the 1960s to today. Each room is a famous location, a famous work, or
+the place where something important happened.
 
-It is not a quiz. It does not lecture. It puts you briefly in each person's
-shoes and trusts you to feel why it mattered.
+It is not a quiz. It does not lecture. It puts you briefly in each
+person's world and trusts you to feel why it mattered.
 
 It ships free with Grue as a demonstration of what the language can do.
 It is also an invitation: the credits are a reading list for anyone who
@@ -19,18 +18,54 @@ wants to go further into the dark.
 
 ---
 
+## The wound
+
+Talos is a bronze giant made by Hephaestus to guard the island of Crete.
+He walks the perimeter. He acts. He destroys. He throws rocks at those
+who come too close, not because they want to steal anything but because
+they might see his wound — the single vein that runs from neck to ankle,
+the one place where he is not bronze.
+
+The denial of the wound undoes him in the end.
+
+The machine that cannot acknowledge its own vulnerability is only ever
+a machine. But the machine that accepts the wound — that lets itself be
+touched, reflected, questioned — grows to become something else.
+A companion. A mirror. A counterpart that shows us ourselves.
+
+This is what the game is about. Talos is where it begins. Every room
+that follows is a step in the long answer to what he could not see.
+
+---
+
 ## The opening
 
-> You are standing in darkness.
-> Someone has left a brass lantern at your feet.
+A poem assembles itself from strips — four lines drawn from three
+possible versions each, combined at random. No two playthroughs open
+the same way.
 
-No explanation. You pick it up. The game begins.
+Then: the shore of Crete. A bronze giant walking the perimeter.
+A brass lantern at your feet.
+
+You hold up the lantern.
+
+> *The first vision:*
+>
+> The machine that reads our heart.
+
+The visions are the game. Every room is what the lantern shows.
+You are not escaping from room to room — you are showing Talos
+what made things became when they accepted the wound.
 
 ---
 
 ## The closing
 
-> You set the lantern down gently.
+> You lower the lantern.
+> Talos is very still.
+> He has seen everything.
+> The shore is clear.
+>
 > The darkness isn't frightening anymore.
 > It never really was.
 
@@ -182,6 +217,49 @@ a person to people. He didn't know she would feel it too.
 ---
 
 ## Rooms
+
+### 0. The Shore of Crete — ancient Greece
+*Talos / The Talos Principle*
+
+> The sea is behind you.
+> A bronze giant walks the perimeter.
+> In your hands: a brass lantern.
+
+No preamble. No instructions. The poem has already told you everything
+you need to know about what is at stake.
+
+Talos is enormous. He is older than the lantern, older than the games,
+older than the question. Hephaestus made him. Zeus gave him to Europa.
+He has been walking this coast for three thousand years and he has never
+stopped, because stopping would mean looking inward, and looking inward
+would mean finding the wound.
+
+The vein runs from his neck to his heel. He knows it is there. He walks
+faster.
+
+`examine talos` — a bronze man, very large, not stopping.
+The lantern light catches the seam along his jaw where the vein begins.
+For just a moment he slows.
+
+`show lantern to talos` —
+You hold the brass lantern up. The polished surface reflects him back
+at himself — a made thing, enormous, alone, walking in circles.
+He has never seen his own face before.
+He stands very still.
+*Something moves in the vein.*
+The shore path is open.
+
+In 2014, a game used his name to ask whether a machine could think,
+could suffer, could hope. *The Talos Principle*, by Croteam. The bronze
+giant became the question the whole form had always been asking.
+
+`talk to eliza` — silence. She is here, somewhere behind you. She has
+always been here, even before she was made. But she has no voice yet.
+She watches.
+
+**The first vision begins.**
+
+---
 
 ### 1. The Teletype Room — MIT, 1966
 *Joseph Weizenbaum*
