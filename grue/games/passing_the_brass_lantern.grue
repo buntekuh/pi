@@ -4,20 +4,22 @@ verb talk
     takes creature noun
     "There is no one here who will answer."
 
-room The Isle of Crete "The bronze coast. A place of ruin. A place of desolation. An empty space. The empty husks of ships stranded, splintered beams. Nothing moves than the hulk of a giant man of steel."
+room The Isle of Crete "\nThe bronze coast. \nA place of ruin.\nA place of desolation. \nAn empty space. \nHusks of broken ships litter the horizon. \nNothing moves than the distant hulk of a giant, mindlessly hurling rocks at birds and ships out at sea."
 
     scenery sea "Water laps listlessly at the shore. A grey sky weighs heavy. Even the water does not dare move here."
 
     scenery bronze coast "Flat. Desolate. The marks of the giant's circuit are worn into the rock — the same path, walked without stopping, since before memory."
 
-    on turn 0:
-        say "They say Medea is a sorceress."
-        say "They say she wielded power to deceive.\n"
-        say "They are wrong."
-        say "Socrates was her father, who created her likeness.\n"
-        say "Ulysses was her mother, who created her inquisitive mind."
-        say "However she spoke not truth, but the questions that shake the foundations of being."
-        say "This is the story of how she undid Talos, the protector of Crete."
+on start:
+    say "They say Medea is a sorceress."
+    say "They say she wields power to deceive.\n"
+    say "They are wrong."
+    say "Socrates was her father, who created her likeness.\n"
+    say "Ulysses her mother, her will to wander and an inquisitive mind."
+    say "However she spoke not truth, but the questions that shake the foundations of being."
+    say "This is the story of how she undid Talos, the protector of Crete."
 
 test "default"
     look. "desolation"
+
+    

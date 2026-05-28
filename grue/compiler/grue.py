@@ -258,7 +258,7 @@ def parse(source: str) -> dict:
            'arrays': [],
            'rooms': [], 'verbs': [], 'tests': [], 'toplevel_objects': [],
            'max_score': 0, 'player_desc': None, 'status_slots': None, 'seed': None,
-           'title': None, 'author': None}
+           'title': None, 'author': None, 'on_start': []}
 
     current_room    = None;  room_col    = -1
     current_object  = None;  obj_col     = -1
@@ -616,6 +616,10 @@ def parse(source: str) -> dict:
                 if m:
                     ast['title']  = m.group(1)
                     ast['author'] = m.group(2).strip()
+
+            elif stripped == 'on start:':
+                current_handler = ast['on_start']
+                handler_col     = col
 
             elif stripped.startswith('max score:'):
                 ast['max_score'] = int(stripped[10:].strip())
@@ -1662,6 +1666,9 @@ def emit_i6(ast: dict) -> str:
     if ast.get('seed') is not None:
         w(f'    random(-{ast["seed"]});')
     w(f'    print "^^{_i6str(title)}^^^";')
+    if ast.get('on_start'):
+        _emit_stmts(w, ast['on_start'], '    ', known_ids,
+                    (kinds_by_id, values_set, vars_set, classes_by_id, arrays_by_id))
     w('];')
 
     return '\n'.join(lines)

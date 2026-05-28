@@ -332,6 +332,17 @@ score - 2
 
 Increment or decrement the score from any handler.
 
+## Startup handler
+
+```
+on start:
+    say "The year is 1936. You arrive by train."
+```
+
+Runs at game start, before the first room description and prompt. Use for
+opening narration, character introductions, or atmosphere. Distinct from
+`on turn 0:` which fires after the player's first command.
+
 ## Player description
 
 ```
