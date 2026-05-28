@@ -30,6 +30,21 @@ class GrueError(Exception):
 # Preprocessor — join multi-line quoted strings onto one line
 # ---------------------------------------------------------------------------
 
+def _count_unescaped_quotes(s: str) -> int:
+    """Count unescaped double-quote characters (skip \\" sequences)."""
+    count = 0
+    i = 0
+    while i < len(s):
+        if s[i] == '\\':
+            i += 2
+        elif s[i] == '"':
+            count += 1
+            i += 1
+        else:
+            i += 1
+    return count
+
+
 def _preprocess(source: str) -> str:
     lines = source.splitlines()
     out = []
@@ -41,14 +56,14 @@ def _preprocess(source: str) -> str:
             out.append(line)
             i += 1
             continue
-        if stripped.count('"') % 2 == 1:
+        if _count_unescaped_quotes(stripped) % 2 == 1:
             joined = line.rstrip()
             i += 1
             while i < len(lines):
                 cont = lines[i].strip()
                 joined += ' ' + cont
                 i += 1
-                if joined.count('"') % 2 == 0:
+                if _count_unescaped_quotes(joined) % 2 == 0:
                     break
             out.append(joined)
         else:
@@ -718,6 +733,7 @@ def _to_id(name: str) -> str:
 
 
 def _i6str(s: str) -> str:
+    s = s.replace('\\"', '~')
     s = s.replace('\\n', '^').replace('\\t', '@@9')
     s = re.sub(r'\s+', ' ', s).strip()
     return s.replace('"', '~')
@@ -849,7 +865,7 @@ def _emit_say(w, text: str, prefix: str, known_ids: set) -> None:
     for i, (kind, val) in enumerate(parts):
         is_last = (i == len(parts) - 1)
         if kind == 'lit':
-            escaped = re.sub(r'\s+', ' ', val.replace('\\n', '^').replace('\\t', '@@9')).replace('"', '~')
+            escaped = re.sub(r'\s+', ' ', val.replace('\\"', '~').replace('\\n', '^').replace('\\t', '@@9')).replace('"', '~')
             items.append('"' + escaped + ('^' if is_last else '') + '"')
         else:
             article, _, ident = val.partition(' ')
