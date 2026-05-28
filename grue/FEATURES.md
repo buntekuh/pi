@@ -245,6 +245,23 @@ end story "Years later, no one remembered the incident."
 - `end story` — neutral ending; displays the message inside `*** ... ***` with no win/fail judgement
 - The message is optional for `win` and `fail`; `end story` without a message shows `*** ***`
 
+## NPC ordering
+
+```
+man robot "A helpful robot."
+    is animate.
+
+    on order take:
+        move noun to self
+        say "The robot picks up {noun}."
+
+    on order drop:
+        move noun to location
+        say "The robot sets down {noun}."
+```
+
+`on order <verb>:` handles player commands directed at the NPC (`robot, take flask`). The verb matches the same names as `instead of` handlers. `noun` is the object the player named. Unrecognised orders are silently ignored.
+
 ## Moving objects
 
 ```

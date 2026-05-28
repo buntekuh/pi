@@ -1,0 +1,21 @@
+# npc_order — robot, take / robot, drop via on order handlers
+
+room Lab "A laboratory."
+
+    man robot "A helpful robot."
+        is animate.
+
+        on order take:
+            move noun to self
+            say "The robot picks up {noun}."
+
+        on order drop:
+            move noun to location
+            say "The robot sets down {noun}."
+
+    object flask "A glass flask."
+
+test "default"
+    robot, take flask. "robot picks up"
+    robot, drop flask. "robot sets down"
+    examine flask. "glass flask"

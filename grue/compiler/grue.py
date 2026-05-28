@@ -291,7 +291,14 @@ def parse(source: str) -> dict:
                 _append_stmt(current_handler, stripped, lineno)
 
         elif current_object is not None:
-            if re.match(r'(instead of|on|after|each)\s+', stripped):
+            if re.match(r'on order\s+\w', stripped):
+                m = re.match(r'on order\s+(\S+):?$', stripped)
+                if m:
+                    key = f'order:{m.group(1).rstrip(":")}'
+                    current_handler = []
+                    handler_col = col
+                    current_object['handlers'][key] = current_handler
+            elif re.match(r'(instead of|on|after|each)\s+', stripped):
                 key = stripped.rstrip(':')
                 current_handler = []
                 handler_col = col
@@ -991,8 +998,10 @@ def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set,
 
     turn_h   = {k: v for k, v in handlers.items() if _ON_TURN_RE.match(k)}
     each_h   = {k: v for k, v in handlers.items() if k == 'each turn'}
+    order_h  = {k: v for k, v in handlers.items() if k.startswith('order:')}
     before_h = {k: v for k, v in handlers.items()
-                if not k.startswith('after ') and k not in turn_h and k not in each_h}
+                if not k.startswith('after ') and k not in turn_h
+                and k not in each_h and k not in order_h}
     after_h  = {k: v for k, v in handlers.items() if k.startswith('after ')}
 
     if turn_h or each_h:
@@ -1004,6 +1013,21 @@ def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set,
             w(f'{_ACTION}if (turns == {n}) {{')
             _emit_stmts(w, stmts, _STMT0, known_ids, kinds_ctx)
             w(f'{_ACTION}}}')
+        w(f'{_PROP}],')
+
+    if order_h:
+        w(f'{_PROP}orders [;')
+        for key, stmts in order_h.items():
+            verb_word = key[6:]          # strip 'order:'
+            action, _ = _parse_handler_key(f'on {verb_word}', verb_action_map)
+            w(f'{_ACTION}{action}:')
+            _emit_stmts(w, stmts, _STMT0, known_ids, kinds_ctx)
+            last = stmts[-1] if stmts else None
+            skip = ((last and last['type'] == 'if' and last.get('else'))
+                    or (last and last['type'] == 'end'))
+            if not skip:
+                w(f'{_STMT0}rtrue;')
+        w(f'{_ACTION}default: rfalse;')
         w(f'{_PROP}],')
 
     for prop, hmap in (('before', before_h), ('after', after_h)):
