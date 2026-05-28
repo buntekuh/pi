@@ -4,18 +4,25 @@ room Room "A room."
 
     object coin "A gold coin."
 
-    object bag "A leather bag."
+    object leather bag "A leather bag."
         is openable.
         is container.
 
+    object gold coin "A gold coin."
+        inside: leather bag.
+
 test "default"
-    put coin in bag. "You need to be holding the coin before you can put it into something else."
+    put coin in leather bag. "You need to be holding the coin"
     take coin. "Taken"
-    close bag.
-    put coin in bag. "You put the coin into the bag."
-    open bag.
-    put coin in bag. "You put the coin into the bag."
-    close bag.
+    close leather bag.
+    put coin in leather bag. "You put the coin into the leather bag."
+    open leather bag.
+    put coin in leather bag. "You put the coin into the leather bag."
+    close leather bag.
     take coin. "You can't see any such thing."
-    open bag.
+    open leather bag.
     take coin. "Taken"
+
+test "multi-word inside"
+    open leather bag.
+    take gold coin. "Taken"

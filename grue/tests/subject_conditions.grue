@@ -69,6 +69,9 @@ room Lab "A laboratory."
         open: true.
         inside: murderer.
 
+    object silver coin "A silver coin."
+        inside: satchel.
+
     object gem "A glittering gem."
         inside: satchel.
 
@@ -82,6 +85,12 @@ room Lab "A laboratory."
                     say "The murderer has the satchel but no gem."
             else:
                 say "The murderer has no satchel."
+
+    object receipt "A receipt."
+
+        instead of inspect:
+            if satchel has silver coin:
+                say "The satchel has a silver coin."
 
     object towel "A damp towel."
         is wet.
@@ -112,6 +121,7 @@ test "default"
     examine android. "Android is low"
     inspect coin. "The coin is in the bag"
     inspect key. "The key is not in the bag"
+    inspect receipt. "The satchel has a silver coin"
     inspect clue. "The murderer has the gem in the satchel"
     examine towel. "You are dry"
     take towel. "You pick up the towel and get wet"

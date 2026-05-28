@@ -127,7 +127,8 @@ instead of prying with crowbar:
 - Timing: `instead of`, `on`, `after`
 - Action matched by base verb form (`instead of pry`); gerund form also accepted for compatibility
 - Second-noun filter: `with crowbar` → `if (second ~= crowbar) rfalse;`
-- Conditionals: `if locked:` / `if not locked:` / `if closed:` / `else:` — any I6 attribute name
+- Self conditions: `if locked:` / `if not locked:` / `if closed:` / `else:` — any I6 attribute name
+- Subject conditions: `if SUBJ is VAL:` / `if SUBJ is not VAL:` / `if SUBJ has OBJ:` / `if SUBJ has not OBJ:` — see *Subject-qualified conditions* below
 - Statements: `say "..."`, `locked.`, `not locked.`, `the noun is bent.`, `go room`, `box "..."`
 - `after` handlers emit to Inform 6 `after` property; all others to `before`
 - `on turn N:` fires on a specific turn count via `each_turn` with `turns == N` guard
@@ -153,9 +154,77 @@ test "default"
 ```
 Writes a `.gts` JSON file alongside the `.inf` for use by a test runner.
 
+## Manual and examples
+
+The test files in `tests/` are intended to be published alongside the language manual as living examples. Each test file:
+
+- Opens with a `#` comment naming the feature it demonstrates
+- Shows the minimal Grue source needed to exercise that feature
+- Is guaranteed correct because the build enforces it
+
+When writing the manual, each chapter should have a short prose explanation followed by the verbatim test file for that feature. Readers can run the examples themselves with `build.sh -bt tests/<feature>.grue`.
+
+## Classes
+
+Define a shared type with default properties, required properties, and shared handlers:
+
+```
+class Wolf
+    ferocity: 5
+    speed: required
+    is animate.
+
+    instead of hunt:
+        say "The wolf gives chase."
+```
+
+Instantiate inside a room block using the class name as the type keyword:
+
+```
+room Forest "A dark forest."
+
+    Wolf gray "A gray wolf"
+        speed: 6
+
+    Wolf Fenrir "Fenrir"
+        speed: 9
+        ferocity: 10
+
+        instead of hunt:
+            say "Fenrir howls and lunges."
+```
+
+- Class properties become I6 `Class with` properties; instances inherit them automatically
+- `required` marks a property that every instance must supply — omitting it is a compile error (E071)
+- Instance handlers override the class handler for that action on that instance only
+- Boolean and kind properties work the same as on plain objects (`charge: full.`, `is animate.`)
+
+## Subject-qualified conditions
+
+Conditions can test attributes or containment on an arbitrary named object, not just `self`:
+
+```
+if murderer is wet:          ! murderer has wet
+if robot is not full:        ! robot hasnt full  (two-value kind)
+if android is low:           ! android.charge == LOW  (three-value kind)
+if bag has coin:             ! coin in bag
+if bag has not key:          ! ~~(key in bag)
+```
+
+`player` works as a subject with no extra syntax:
+
+```
+if player is wet:
+if player has trophy:
+```
+
 ## Planned
 - User-defined functions — named routines callable from handlers, for shared logic
-
-
-Handlers: subject-qualified conditions (`if murderer is wet:`, `if bag has gun:`) not yet implemented.
-Kind declarations: the `bendable: straight, bent` system was designed but not yet implemented in the compiler.
+- Class possessions — child objects automatically created per instance
+- Multiple source files — `uses` directive (reserved but not yet emitted)
+- End conditions — winning (`end the story`), losing (`die`), and scoring
+- Inventory — list of carried objects; customisable formatting
+- Text styles — `bold`, `italic`, `reverse` for emphasis in `say` output
+- Status line — configurable top or bottom bar; built-in slots (`score`, `moves`, `time`) and arbitrary game variables
+- Multi-line strings — review the preprocessor join behaviour in detail; confirm edge cases and document clearly
+- Articles — audit `{a obj}`, `{an obj}`, `{the obj}` in detail: I6's `(a)` routine handles "a"/"an" automatically based on the object name, but Grue currently only recognises `a` and `the` as article keywords in interpolation, not `an`; also review how initial articles in object display names interact with I6's article system

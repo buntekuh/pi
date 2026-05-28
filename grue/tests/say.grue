@@ -1,4 +1,4 @@
-# say — string interpolation: {obj}, {the obj}, {a obj}
+# say — string interpolation: {obj}, {the obj}, {a obj}; multi-word objects; escape sequences \n \t
 
 room Room "A room."
 
@@ -6,6 +6,27 @@ room Room "A room."
         after examine:
             say "You study {the lantern} carefully. {a lantern} indeed."
 
-test "default"
+    object brass key "A brass key."
+        after examine:
+            say "You see {the brass key}."
+
+    object sign "A wooden sign."
+        instead of examine:
+            say "Line one.\nLine two."
+
+    object plaque "A brass plaque."
+        instead of examine:
+            say "Column one.\tColumn two."
+
+test "interpolation"
     examine lantern. "the lantern"
     examine lantern. "A lantern indeed"
+    examine brass key. "the brass key"
+
+test "newline"
+    examine sign. "Line one."
+    examine sign. "Line two"
+
+test "tab"
+    examine plaque. "Column one."
+    examine plaque. "Column two"

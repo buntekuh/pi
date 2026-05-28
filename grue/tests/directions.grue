@@ -1,0 +1,87 @@
+# directions — all compass directions, up/down, in/out, and go room
+
+verb prod
+    takes noun
+    "Nothing to prod."
+
+room Hub "The hub."
+    north: North Room
+    northeast: Northeast Room
+    east: East Room
+    southeast: Southeast Room
+    south: South Room
+    southwest: Southwest Room
+    west: West Room
+    northwest: Northwest Room
+    up: Upper Room
+    down: Lower Room
+    in: Inner Room
+
+    object button "A button."
+
+        instead of prod:
+            go Inner Room
+
+room North Room "The north room."
+    south: Hub
+
+room Northeast Room "The northeast room."
+    southwest: Hub
+
+room East Room "The east room."
+    west: Hub
+
+room Southeast Room "The southeast room."
+    northwest: Hub
+
+room South Room "The south room."
+    north: Hub
+
+room Southwest Room "The southwest room."
+    northeast: Hub
+
+room West Room "The west room."
+    east: Hub
+
+room Northwest Room "The northwest room."
+    southeast: Hub
+
+room Upper Room "The upper room."
+    down: Hub
+
+room Lower Room "The lower room."
+    up: Hub
+
+room Inner Room "The inner room."
+    out: Hub
+
+test "compass"
+    north. "The north room"
+    south. "The hub"
+    northeast. "The northeast room"
+    sw. "The hub"
+    east. "The east room"
+    west. "The hub"
+    southeast. "The southeast room"
+    nw. "The hub"
+    south. "The south room"
+    north. "The hub"
+    southwest. "The southwest room"
+    ne. "The hub"
+    west. "The west room"
+    east. "The hub"
+    northwest. "The northwest room"
+    se. "The hub"
+
+test "vertical"
+    up. "The upper room"
+    down. "The hub"
+    down. "The lower room"
+    up. "The hub"
+
+test "in out"
+    in. "The inner room"
+    out. "The hub"
+
+test "go room"
+    prod button. "The inner room"

@@ -144,7 +144,7 @@ _ROOM_KEYWORDS = {'is', 'instead', 'on', 'after', 'each'}
 def parse(source: str) -> dict:
     source = _preprocess(source)
     ast = {'uses': [], 'kinds': [], 'values': [], 'vars': [], 'classes': [],
-           'rooms': [], 'verbs': [], 'tests': []}
+           'rooms': [], 'verbs': [], 'tests': [], 'toplevel_objects': []}
 
     current_room    = None;  room_col    = -1
     current_object  = None;  obj_col     = -1
@@ -226,13 +226,14 @@ def parse(source: str) -> dict:
             _append_stmt(branch, stripped, lineno)
 
         elif current_handler is not None:
-            ms_has  = re.match(r'if\s+(\w+)\s+has\s+(not\s+)?(\w+)\s*:', stripped)
+            ms_has  = re.match(r'if\s+(\w+)\s+has\s+(not\s+)?(.+?)\s*:', stripped)
             ms_isn  = re.match(r'if\s+(\w+)\s+is\s+not\s+(\w+)\s*:', stripped)
             mk      = re.match(r'if\s+(\w+)\s+(==?|is|<=?|>=?)\s+(\w+)\s*:', stripped)
             m       = re.match(r'if\s+(not\s+)?(\w+)\s*:', stripped)
             if ms_has:
                 current_if = {'type': 'if',
-                               'subj': ms_has.group(1), 'contains': ms_has.group(3),
+                               'subj': ms_has.group(1),
+                               'contains': _to_id(ms_has.group(3)),
                                'neg': bool(ms_has.group(2)),
                                'then': [], 'else': None, 'line': lineno}
                 if_col = col; if_branch = 'then'
@@ -295,18 +296,18 @@ def parse(source: str) -> dict:
             if stripped.startswith('"'):
                 current_room['desc'] = _extract_string(stripped)
 
-            elif re.match(r'(north|south|east|west|up|down|ne|nw|se|sw):?\s+"', stripped, re.I):
+            elif re.match(r'(northeast|northwest|southeast|southwest|north|south|east|west|up|down|ne|nw|se|sw|in|out):?\s+"', stripped, re.I):
                 m = re.match(r'(\w+):?\s+"([^"]*)"', stripped)
                 if m:
                     d = m.group(1).lower()
                     current_room['exits'][d]      = m.group(2)
                     current_room['exit_lines'][d] = lineno
 
-            elif re.match(r'(north|south|east|west|up|down|ne|nw|se|sw):?\s+\w+\s*$', stripped, re.I):
-                m = re.match(r'(\w+):?\s+(\w+)', stripped)
+            elif re.match(r'(northeast|northwest|southeast|southwest|north|south|east|west|up|down|ne|nw|se|sw|in|out):?\s+\S', stripped, re.I):
+                m = re.match(r'(\w+):?\s+(.+)', stripped)
                 if m:
                     d = m.group(1).lower()
-                    current_room['exits'][d]      = m.group(2)
+                    current_room['exits'][d]      = m.group(2).strip()
                     current_room['exit_lines'][d] = lineno
 
             elif re.match(r'(object|scenery|man|woman|robot|door)\s+', stripped):
@@ -466,6 +467,33 @@ def parse(source: str) -> dict:
                 ast['classes'].append(current_class)
                 class_ids[class_id] = current_class
 
+            elif re.match(r'(object|scenery|man|woman|robot)\s+', stripped):
+                kind = stripped.split()[0]
+                keywords, display, obj_id, inline_desc = _parse_keywords(stripped[len(kind):].strip())
+                current_object = {
+                    'id': obj_id, 'keywords': keywords, 'name': display,
+                    'desc': inline_desc, 'behaviours': [], 'properties': {},
+                    'kind': kind, 'handlers': {}, 'line': lineno,
+                }
+                obj_col = col
+                ast['toplevel_objects'].append(current_object)
+
+            elif _to_id(stripped.split()[0]) in class_ids and '"' in stripped:
+                cls_kw  = stripped.split()[0]
+                cls_id  = _to_id(cls_kw)
+                cls     = class_ids[cls_id]
+                rest    = stripped[len(cls_kw):].strip()
+                keywords, display, obj_id, inline_desc = _parse_keywords(rest)
+                current_object = {
+                    'id': obj_id, 'keywords': keywords, 'name': display,
+                    'desc': inline_desc, 'behaviours': [], 'properties': {},
+                    'kind': 'class_instance', 'class_id': cls_id,
+                    'class_name': cls['name'],
+                    'handlers': {}, 'line': lineno,
+                }
+                obj_col = col
+                ast['toplevel_objects'].append(current_object)
+
             elif stripped.startswith('verb '):
                 words_part = stripped[5:].rstrip('.')
                 words = [w.strip().strip(',') for w in words_part.split() if w.strip().strip(',')]
@@ -513,15 +541,20 @@ def parse(source: str) -> dict:
 # ---------------------------------------------------------------------------
 
 _DIR_MAP = {
-    'north': 'n_to', 'south': 's_to', 'east':  'e_to', 'west':  'w_to',
-    'up':    'u_to', 'down':  'd_to',
-    'ne': 'ne_to',   'nw': 'nw_to',   'se': 'se_to',   'sw': 'sw_to',
+    'north': 'n_to',         'south': 's_to',         'east': 'e_to',  'west': 'w_to',
+    'up':    'u_to',         'down':  'd_to',
+    'ne': 'ne_to',           'nw': 'nw_to',           'se': 'se_to',   'sw': 'sw_to',
+    'northeast': 'ne_to',    'northwest': 'nw_to',
+    'southeast': 'se_to',    'southwest': 'sw_to',
+    'in': 'in_to',           'out': 'out_to',
 }
 
 _OPPOSITE_DIR = {
-    'north': 'south', 'south': 'north', 'east': 'west',  'west': 'east',
+    'north': 'south', 'south': 'north', 'east': 'west',     'west': 'east',
     'up':    'down',  'down':  'up',
-    'ne': 'sw', 'sw': 'ne', 'nw': 'se', 'se': 'nw',
+    'ne': 'sw',       'sw': 'ne',       'nw': 'se',         'se': 'nw',
+    'northeast': 'sw', 'northwest': 'se', 'southeast': 'nw', 'southwest': 'ne',
+    'in': 'out',      'out': 'in',
 }
 
 _STD_ACTIONS = {
@@ -728,13 +761,17 @@ def _emit_say(w, text: str, prefix: str, known_ids: set) -> None:
         else:
             article, _, ident = val.partition(' ')
             obj_ids = known_ids | _I6_OBJ_VARS
+            ident_id = _to_id(ident)
+            val_id   = _to_id(val)
             if article == 's' and ident:
                 items.append(f'(Grue_s) {ident}')
-            elif article in ('the', 'a') and ident in obj_ids:
+            elif article in ('the', 'a') and (ident in obj_ids or ident_id in obj_ids):
+                resolved = ident if ident in obj_ids else ident_id
                 cap = _after_stop(i)
-                items.append(f'({article.capitalize() if cap else article}) {ident}')
-            elif val in obj_ids:
-                items.append(f'(name) {val}')
+                items.append(f'({article.capitalize() if cap else article}) {resolved}')
+            elif val in obj_ids or val_id in obj_ids:
+                resolved = val if val in obj_ids else val_id
+                items.append(f'(name) {resolved}')
             else:
                 items.append(val)
             if is_last:
@@ -744,7 +781,7 @@ def _emit_say(w, text: str, prefix: str, known_ids: set) -> None:
 
 
 def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx) -> None:
-    kinds_by_id, values_set, vars_set = kinds_ctx
+    kinds_by_id, values_set, vars_set, classes_by_id = kinds_ctx
     for stmt in stmts:
         t    = stmt['type']
         line = stmt.get('line')
@@ -861,6 +898,10 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx) -> None:
                         else:
                             op2 = '~=' if neg else '=='
                             cond_expr = f'{subj}.{kd2["id"]} {op2} {word.upper()}'
+                    elif _to_id(word) in classes_by_id:
+                        cls_name = classes_by_id[_to_id(word)]['name']
+                        cond_expr = (f'~~({subj} ofclass {cls_name})' if neg
+                                     else f'{subj} ofclass {cls_name}')
                     else:
                         attr  = _NEGATION.get(word, word)
                         is_neg = neg ^ (word in _NEGATION)
@@ -924,11 +965,12 @@ def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set,
 
 def _emit_object(w, obj: dict, parent: str, verb_action_map: dict, known_ids: set,
                  kinds_ctx, classes_by_id: dict = None):
-    kinds_by_id, values_set, vars_set = kinds_ctx
+    kinds_by_id, values_set, vars_set, _ = kinds_ctx
     oid   = obj['id']
     attrs = _obj_attributes(obj)
     kws   = ' '.join(f"'{k}'" for k in obj['keywords']) if obj['keywords'] else ''
-    loc   = obj['properties'].get('inside', parent)
+    _inside = obj['properties'].get('inside')
+    loc = _to_id(_inside) if _inside else parent
 
     # Class instance: validate required properties then emit with class name
     cls = (classes_by_id or {}).get(obj.get('class_id'))
@@ -943,7 +985,10 @@ def _emit_object(w, obj: dict, parent: str, verb_action_map: dict, known_ids: se
     else:
         type_word = 'Object'
 
-    w(f'{type_word} {oid} "{_i6str(obj["name"])}" {loc}')
+    if loc:
+        w(f'{type_word} {oid} "{_i6str(obj["name"])}" {loc}')
+    else:
+        w(f'{type_word} {oid} "{_i6str(obj["name"])}"')
     if kws:
         w(f'    with name {kws},')
         w(f'         description "{_i6str(obj["desc"])}",')
@@ -1000,7 +1045,7 @@ def _emit_object(w, obj: dict, parent: str, verb_action_map: dict, known_ids: se
 
 
 def _emit_class(w, cls: dict, verb_action_map: dict, known_ids: set, kinds_ctx):
-    kinds_by_id, values_set, vars_set = kinds_ctx
+    kinds_by_id, values_set, vars_set, _ = kinds_ctx
     cls_name = cls['name']
 
     # Build with-clause lines (numeric/kind properties; booleans go in has)
@@ -1187,7 +1232,7 @@ def emit_i6(ast: dict) -> str:
                     and prop_key not in values_set):
                 values_set.add(prop_key)
 
-    kinds_ctx = (kinds_by_id, values_set, vars_set)
+    kinds_ctx = (kinds_by_id, values_set, vars_set, classes_by_id)
 
     kind_declared_attrs = set()
     for kd in ast.get('kinds', []):
@@ -1222,6 +1267,8 @@ def emit_i6(ast: dict) -> str:
         known_ids.add(r['id'])
         for obj in r['objects']:
             known_ids.add(obj['id'])
+    for obj in ast.get('toplevel_objects', []):
+        known_ids.add(obj['id'])
 
     verb_action_map = {}
     for verb in ast.get('verbs', []):
@@ -1257,6 +1304,10 @@ def emit_i6(ast: dict) -> str:
 
     for cls in ast.get('classes', []):
         _emit_class(w, cls, verb_action_map, known_ids, kinds_ctx)
+
+    for obj in ast.get('toplevel_objects', []):
+        _emit_object(w, obj, None, verb_action_map, known_ids, kinds_ctx, classes_by_id)
+        w('')
 
     # Normalize room references to canonical I6 ids
     room_by_norm = {}
