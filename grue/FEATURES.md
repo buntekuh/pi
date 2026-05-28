@@ -128,6 +128,7 @@ instead of prying with crowbar:
 - Action matched by base verb form (`instead of pry`); gerund form also accepted for compatibility
 - Second-noun filter: `with crowbar` → `if (second ~= crowbar) rfalse;`
 - Self conditions: `if locked:` / `if not locked:` / `if closed:` / `else:` — any I6 attribute name
+- Chained conditions: `else if <cond>:` after any `if` branch — compiles to nested I6 `if/else`
 - Subject conditions: `if SUBJ is VAL:` / `if SUBJ is not VAL:` / `if SUBJ has OBJ:` / `if SUBJ has not OBJ:` — see *Subject-qualified conditions* below
 - Statements: `say "..."`, `locked.`, `not locked.`, `the noun is bent.`, `go room`, `box "..."`
 - `after` handlers emit to Inform 6 `after` property; all others to `before`
@@ -345,10 +346,28 @@ Configures the right side of the status bar. Built-in slot names:
 The left side always shows the current room name. Default (when `status` is omitted) shows `Score: N  Moves: N`.
 
 ## Planned
-- User-defined functions — named routines callable from handlers, for shared logic
+
+### Language completeness
+- User-defined functions — named routines callable from handlers, for shared logic (`func greet: say "Hello."`)
+- Loops — `while <cond>:` and `each <obj> in <container>:` (maps to I6 `objectloop`)
+- General arithmetic — full expressions in assignments and conditions (`x = a + b * 2`)
+- Object iteration — `each <var> in <container>:` walks child objects at runtime
+
+### Object model
 - Class possessions — child objects automatically created per instance
+- Containment queries — `count of <container>`, `first in <container>` as expressions
+
+### Source organisation
 - Multiple source files — `uses` directive (reserved but not yet emitted)
+- Library imports — standard verb/class packs shared across games
+
+### Output and presentation
 - Inventory — customisable formatting of carried objects list
 - Text styles — `bold`, `italic`, `reverse` for emphasis in `say` output
+- Conversation topics — `ask about` / `tell about` with topic tables
+- String variables — named text slots, assignable and interpolatable
+
+### Tooling and quality
 - Multi-line strings — review the preprocessor join behaviour in detail; confirm edge cases and document clearly
 - Articles — audit `{a obj}`, `{an obj}`, `{the obj}` in detail: I6's `(a)` routine handles "a"/"an" automatically based on the object name, but Grue currently only recognises `a` and `the` as article keywords in interpolation, not `an`; also review how initial articles in object display names interact with I6's article system
+- `on order` validation — emit a compile error when `on order` appears on a non-animate object
