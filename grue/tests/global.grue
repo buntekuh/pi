@@ -1,0 +1,24 @@
+# toplevel — top-level objects as state singletons with no room parent
+
+kind game_state: fresh, started
+
+object world_state "state"
+
+verb crank
+    takes noun
+    "Nothing to crank."
+
+room Foyer "A grand foyer."
+
+    object lever "A lever."
+
+        instead of crank:
+            if world_state is fresh:
+                the world_state is started.
+                say "You crank the lever. The mechanism engages."
+            else:
+                say "Already cranked."
+
+test "default"
+    crank lever. "You crank the lever"
+    crank lever. "Already cranked"

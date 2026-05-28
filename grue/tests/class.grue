@@ -1,0 +1,48 @@
+# ofclass — class handlers and if noun is ClassName: type check
+
+kind living: alive, dead
+
+verb shoot
+    takes noun
+    "Nothing to shoot."
+
+class Person
+    is animate.
+
+    instead of examine:
+        if dead:
+            say "The person is dead."
+        else:
+            say "The person is alive."
+
+class Animal
+    is animate.
+
+    instead of examine:
+        say "It looks like an animal."
+
+room Yard "A stone yard."
+
+    instead of shoot:
+        if noun is person:
+            the noun is dead.
+            say "The person falls."
+        if noun is not person:
+            say "That can't be shot."
+
+    Person guard "A guard."
+
+    Person prisoner "A prisoner."
+
+    Animal dog "A dog."
+
+test "class handlers"
+    examine guard. "The person is alive"
+    examine prisoner. "The person is alive"
+    examine dog. "It looks like an animal"
+
+test "ofclass"
+    shoot guard. "The person falls"
+    examine guard. "The person is dead"
+    shoot prisoner. "The person falls"
+    shoot dog. "That can't be shot"
