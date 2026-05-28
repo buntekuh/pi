@@ -185,6 +185,47 @@ def _parse_is_stmt(target: dict, stripped: str) -> None:
         target['properties'][attr] = 'false' if word in _NEGATION else 'true'
 
 
+def _parse_if_node(stripped: str, lineno: int):
+    """Parse 'if <cond>:' or 'elif <cond>:' into an AST if-node, or return None."""
+    if stripped.startswith('else if '):
+        s = 'if ' + stripped[8:]
+    elif stripped.startswith('if '):
+        s = stripped
+    else:
+        return None
+    ms_has = re.match(r'if\s+(\w+)\s+has\s+(not\s+)?(.+?)\s*:', s)
+    ms_isn = re.match(r'if\s+(\w+)\s+is\s+not\s+(\w+)\s*:', s)
+    mk     = re.match(r'if\s+(\w+)\s+(==?|is|<=?|>=?)\s+(\w+)\s*:', s)
+    m      = re.match(r'if\s+(not\s+)?(\w+)\s*:', s)
+    if ms_has:
+        return {'type': 'if',
+                'subj': ms_has.group(1), 'contains': _to_id(ms_has.group(3)),
+                'neg': bool(ms_has.group(2)), 'then': [], 'else': None, 'line': lineno}
+    if ms_isn:
+        return {'type': 'if',
+                'kind': ms_isn.group(1).lower(), 'val': ms_isn.group(2).lower(),
+                'neg': True, 'op': 'is', 'then': [], 'else': None, 'line': lineno}
+    if mk:
+        op = mk.group(2)
+        val_str = mk.group(3)
+        if op in ('is', '='):
+            op = '=='
+        if val_str.isdigit():
+            return {'type': 'if', 'prop': mk.group(1).lower(),
+                    'op': op, 'num': int(val_str), 'then': [], 'else': None, 'line': lineno}
+        return {'type': 'if', 'kind': mk.group(1).lower(),
+                'neg': False, 'op': op, 'val': val_str.lower(),
+                'then': [], 'else': None, 'line': lineno}
+    if m:
+        neg_kw   = bool(m.group(1))
+        raw_attr = m.group(2)
+        attr     = _NEGATION.get(raw_attr, raw_attr)
+        neg      = neg_kw or raw_attr in _NEGATION
+        return {'type': 'if', 'attr': attr, 'neg': neg,
+                'then': [], 'else': None, 'line': lineno}
+    return None
+
+
 def _match_class_prefix(stripped: str, class_ids: dict):
     """Return (cls_id, rest) if stripped starts with a known class name, else (None, None)."""
     words = stripped.split()
@@ -206,7 +247,7 @@ def parse(source: str) -> dict:
     current_room    = None;  room_col    = -1
     current_object  = None;  obj_col     = -1
     current_handler = None;  handler_col = -1
-    current_if      = None;  if_col      = -1;  if_branch = 'then'
+    current_if      = None;  if_col      = -1;  if_branch = 'then';  if_root = None
     current_test    = None;  test_col    = -1
     current_verb    = None;  verb_col    = -1
     current_class   = None;  class_col   = -1
@@ -228,9 +269,16 @@ def parse(source: str) -> dict:
                 current_if['else'] = []
                 if_branch = 'else'
                 continue
+            if stripped.startswith('else if ') and if_branch == 'then':
+                new_if = _parse_if_node(stripped, lineno)
+                if new_if:
+                    current_if['else'] = [new_if]
+                    current_if = new_if
+                    if_branch = 'then'
+                    continue
             if current_handler is not None:
-                current_handler.append(current_if)
-            current_if = None; if_col = -1; if_branch = 'then'
+                current_handler.append(if_root)
+            current_if = None; if_root = None; if_col = -1; if_branch = 'then'
 
         if current_handler is not None and col <= handler_col:
             current_handler = None
@@ -283,44 +331,10 @@ def parse(source: str) -> dict:
             _append_stmt(branch, stripped, lineno)
 
         elif current_handler is not None:
-            ms_has  = re.match(r'if\s+(\w+)\s+has\s+(not\s+)?(.+?)\s*:', stripped)
-            ms_isn  = re.match(r'if\s+(\w+)\s+is\s+not\s+(\w+)\s*:', stripped)
-            mk      = re.match(r'if\s+(\w+)\s+(==?|is|<=?|>=?)\s+(\w+)\s*:', stripped)
-            m       = re.match(r'if\s+(not\s+)?(\w+)\s*:', stripped)
-            if ms_has:
-                current_if = {'type': 'if',
-                               'subj': ms_has.group(1),
-                               'contains': _to_id(ms_has.group(3)),
-                               'neg': bool(ms_has.group(2)),
-                               'then': [], 'else': None, 'line': lineno}
-                if_col = col; if_branch = 'then'
-            elif ms_isn:
-                current_if = {'type': 'if',
-                               'kind': ms_isn.group(1).lower(), 'val': ms_isn.group(2).lower(),
-                               'neg': True, 'op': 'is',
-                               'then': [], 'else': None, 'line': lineno}
-                if_col = col; if_branch = 'then'
-            elif mk:
-                op      = mk.group(2)
-                val_str = mk.group(3)
-                if op in ('is', '='):
-                    op = '=='
-                if val_str.isdigit():
-                    current_if = {'type': 'if', 'prop': mk.group(1).lower(),
-                                   'op': op, 'num': int(val_str),
-                                   'then': [], 'else': None, 'line': lineno}
-                else:
-                    current_if = {'type': 'if', 'kind': mk.group(1).lower(),
-                                   'neg': False, 'op': op, 'val': val_str.lower(),
-                                   'then': [], 'else': None, 'line': lineno}
-                if_col = col; if_branch = 'then'
-            elif m:
-                neg_kw   = bool(m.group(1))
-                raw_attr = m.group(2)
-                attr     = _NEGATION.get(raw_attr, raw_attr)
-                neg      = neg_kw or raw_attr in _NEGATION
-                current_if = {'type': 'if', 'attr': attr, 'neg': neg,
-                               'then': [], 'else': None, 'line': lineno}
+            new_if = _parse_if_node(stripped, lineno) if stripped.startswith('if ') else None
+            if new_if:
+                current_if = new_if
+                if_root    = new_if
                 if_col = col; if_branch = 'then'
             else:
                 _append_stmt(current_handler, stripped, lineno)
@@ -604,7 +618,7 @@ def parse(source: str) -> dict:
 
     # Flush a trailing if block never closed by an outdented line.
     if current_if is not None and current_handler is not None:
-        current_handler.append(current_if)
+        current_handler.append(if_root)
 
     return ast
 
@@ -1039,23 +1053,30 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx) -> None:
                 cond_expr = f'self {has_or_hasnt} {stmt["attr"]}'
             w(f'{prefix}if ({cond_expr}) {{')
             _emit_stmts(w, stmt['then'], inner, known_ids, kinds_ctx)
-            if not (stmt['then'] and stmt['then'][-1]['type'] == 'end'):
-                w(f'{inner}rtrue;')
-            if stmt.get('else'):
+            if stmt.get('else') is not None:
                 w(f'{prefix}}} else {{')
                 _emit_stmts(w, stmt['else'], inner, known_ids, kinds_ctx)
-                if not (stmt['else'] and stmt['else'][-1]['type'] == 'end'):
-                    w(f'{inner}rtrue;')
             w(f'{prefix}}}')
 
 
 _ON_TURN_RE = re.compile(r'^on turn (\d+)$')
 
 
+def _all_branches_end(stmts: list) -> bool:
+    """True if every execution path through stmts ends with an 'end' statement."""
+    if not stmts:
+        return False
+    last = stmts[-1]
+    if last['type'] == 'end':
+        return True
+    if last['type'] == 'if' and last.get('else') is not None:
+        return (_all_branches_end(last['then'])
+                and _all_branches_end(last['else']))
+    return False
+
+
 def _maybe_rtrue(w, stmts: list) -> None:
-    last = stmts[-1] if stmts else None
-    if not ((last and last['type'] == 'if' and last.get('else'))
-            or (last and last['type'] == 'end')):
+    if not _all_branches_end(stmts):
         w(f'{_STMT0}rtrue;')
 
 

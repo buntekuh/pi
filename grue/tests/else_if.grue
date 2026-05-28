@@ -1,0 +1,44 @@
+# else if — chained conditions without nesting
+
+kind charge: empty, low, full
+
+verb inspect
+    takes noun
+    "Nothing to inspect."
+
+verb drain
+    takes noun
+    "Nothing to drain."
+
+room Lab "A laboratory."
+
+    object battery "A battery."
+        charge: full
+
+        instead of inspect:
+            if charge == empty:
+                say "The battery is dead."
+            else if charge == low:
+                say "The battery is running low."
+            else if charge == full:
+                say "The battery is fully charged."
+            else:
+                say "The battery state is unknown."
+
+        instead of drain:
+            if charge == full:
+                battery charge = low
+                say "The battery drains to low."
+            else if charge == low:
+                battery charge = empty
+                say "The battery is now dead."
+            else:
+                say "Already dead."
+
+test "default"
+    inspect battery. "fully charged"
+    drain battery. "drains to low"
+    inspect battery. "running low"
+    drain battery. "now dead"
+    inspect battery. "battery is dead"
+    drain battery. "Already dead"
