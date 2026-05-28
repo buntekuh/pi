@@ -5,19 +5,17 @@
   "fileTypes": ["grue"],
   "patterns": [
     { "include": "#comment" },
-    { "include": "#room_decl" },
-    { "include": "#player_decl" },
-    { "include": "#kind_decl" },
+    { "include": "#title_decl" },
+    { "include": "#toplevel_decl" },
+    { "include": "#object_decl" },
+    { "include": "#exit_decl" },
     { "include": "#handler_header" },
+    { "include": "#stmt_keyword" },
+    { "include": "#is_stmt" },
+    { "include": "#property_line" },
     { "include": "#string" },
-    { "include": "#direction" },
-    { "include": "#action_keyword" },
-    { "include": "#structure_keyword" },
-    { "include": "#scenery_object" },
-    { "include": "#set_statement" },
-    { "include": "#color_decl" },
-    { "include": "#color_tag" },
-    { "include": "#number" }
+    { "include": "#number" },
+    { "include": "#direction_kw" }
   ],
   "repository": {
 
@@ -37,108 +35,124 @@
       "match": "\\b[0-9]+\\b"
     },
 
-    "direction": {
+    "title_decl": {
+      "comment": "\"Title\" by Author — first line identity declaration",
+      "match": "^(\"[^\"]+\")\\s+(by)\\s+(.+)$",
+      "captures": {
+        "1": { "name": "string.quoted.double.grue" },
+        "2": { "name": "keyword.other.grue" },
+        "3": { "name": "entity.name.type.grue" }
+      }
+    },
+
+    "toplevel_decl": {
+      "comment": "room, verb, class, test, array, kind at start of line",
+      "match": "^(room|verb|class|test manually|test|array|kind|max score|seed|status|player)\\b",
+      "captures": {
+        "1": { "name": "keyword.other.grue" }
+      }
+    },
+
+    "object_decl": {
+      "comment": "object/scenery/man/woman/robot/door — may be indented",
+      "match": "^\\s+(object|scenery|man|woman|robot|door)\\b",
+      "captures": {
+        "1": { "name": "keyword.other.grue" }
+      }
+    },
+
+    "exit_decl": {
+      "comment": "north: east: etc. as property keys inside a room block",
+      "match": "^\\s+(north|south|east|west|up|down|northeast|northwest|southeast|southwest|ne|nw|se|sw)\\s*:",
+      "captures": {
+        "1": { "name": "variable.language.direction.grue" }
+      }
+    },
+
+    "direction_kw": {
+      "comment": "direction words used as go arguments",
       "name": "variable.language.direction.grue",
-      "match": "\\b(north|south|east|west|up|down|northeast|northwest|southeast|southwest|n|s|e|w|ne|nw|se|sw)\\b"
-    },
-
-    "room_decl": {
-      "comment": "room \"Train Station\"  or  room alias \"Train Station\" (alias optional)",
-      "match": "^(room)\\s+(?:([\\w-]+)\\s+)?(\"[^\"]*\")",
-      "captures": {
-        "1": { "name": "keyword.other.room.grue" },
-        "2": { "name": "entity.name.type.room.grue" },
-        "3": { "name": "string.quoted.double.grue" }
-      }
-    },
-
-    "player_decl": {
-      "comment": "player \"name\":",
-      "match": "^(player)\\b",
-      "captures": {
-        "1": { "name": "keyword.other.player.grue" }
-      }
-    },
-
-    "kind_decl": {
-      "comment": "kind mood: lost afraid rooted hopeful",
-      "match": "^(kind)\\s+([\\w-]+)\\s*(:)?",
-      "captures": {
-        "1": { "name": "keyword.other.kind.grue" },
-        "2": { "name": "entity.name.type.kind.grue" },
-        "3": { "name": "punctuation.separator.grue" }
-      }
+      "match": "\\b(north|south|east|west|up|down|northeast|northwest|southeast|southwest|ne|nw|se|sw)\\b"
     },
 
     "handler_header": {
-      "comment": "on arrive:  /  on turn:  /  instead of go:",
+      "comment": "instead of verb: / on turn N: / each turn: / after verb: / on start: / on order verb:",
       "patterns": [
         {
-          "match": "^\\s+(instead)\\s+(of)\\s+([\\w-]+)\\s*(:)",
+          "match": "^\\s+(instead)\\s+(of)\\s+([\\w ]+?)\\s*(:)\\s*$",
           "captures": {
-            "1": { "name": "keyword.control.instead.grue" },
-            "2": { "name": "keyword.control.of.grue" },
+            "1": { "name": "keyword.control.grue" },
+            "2": { "name": "keyword.control.grue" },
             "3": { "name": "support.function.action.grue" },
             "4": { "name": "punctuation.separator.grue" }
           }
         },
         {
-          "match": "^\\s+(on)\\s+([\\w-]+)\\s*(:)",
+          "match": "^\\s+(on)\\s+(turn)\\s+([0-9]+)\\s*(:)\\s*$",
           "captures": {
-            "1": { "name": "keyword.control.on.grue" },
-            "2": { "name": "entity.name.function.event.grue" },
+            "1": { "name": "keyword.control.grue" },
+            "2": { "name": "keyword.control.grue" },
+            "3": { "name": "constant.numeric.grue" },
+            "4": { "name": "punctuation.separator.grue" }
+          }
+        },
+        {
+          "match": "^\\s+(each)\\s+(turn)\\s*(:)\\s*$",
+          "captures": {
+            "1": { "name": "keyword.control.grue" },
+            "2": { "name": "keyword.control.grue" },
+            "3": { "name": "punctuation.separator.grue" }
+          }
+        },
+        {
+          "match": "^\\s*(on)\\s+(start)\\s*(:)\\s*$",
+          "captures": {
+            "1": { "name": "keyword.control.grue" },
+            "2": { "name": "keyword.control.grue" },
+            "3": { "name": "punctuation.separator.grue" }
+          }
+        },
+        {
+          "match": "^\\s+(on)\\s+(order)\\s+([\\w]+)\\s*(:)\\s*$",
+          "captures": {
+            "1": { "name": "keyword.control.grue" },
+            "2": { "name": "keyword.control.grue" },
+            "3": { "name": "support.function.action.grue" },
+            "4": { "name": "punctuation.separator.grue" }
+          }
+        },
+        {
+          "match": "^\\s+(after)\\s+([\\w ]+?)\\s*(:)\\s*$",
+          "captures": {
+            "1": { "name": "keyword.control.grue" },
+            "2": { "name": "support.function.action.grue" },
             "3": { "name": "punctuation.separator.grue" }
           }
         }
       ]
     },
 
-    "action_keyword": {
-      "comment": "go say take drop examine talk end color",
-      "name": "support.function.action.grue",
-      "match": "\\b(go|say|take|drop|examine|talk|to|with|end|color|draw)\\b"
-    },
-
-    "structure_keyword": {
-      "comment": "on instead of turn set",
-      "name": "keyword.control.grue",
-      "match": "\\b(on|instead|of|turn|set)\\b"
-    },
-
-    "scenery_object": {
-      "comment": "object / scenery declarations",
-      "match": "^\\s+(object|scenery)\\s+([\\w-]+)",
+    "stmt_keyword": {
+      "comment": "Statement-level control and action keywords",
+      "match": "\\b(if|else if|else|say|go|move|to|win|fail|end story|score|roll|random|locked|not locked|open|closed)\\b",
       "captures": {
-        "1": { "name": "keyword.other.object.grue" },
-        "2": { "name": "variable.other.object.grue" }
+        "1": { "name": "keyword.control.grue" }
       }
     },
 
-    "color_decl": {
-      "comment": "color \"feeling\" 29",
-      "match": "^(color)\\s+(\"[^\"]*\")\\s+([0-9]+)",
+    "is_stmt": {
+      "comment": "is / is not / is animate etc. attribute and behaviour declarations",
+      "match": "\\b(is not|is)\\b",
       "captures": {
-        "1": { "name": "keyword.other.color.grue" },
-        "2": { "name": "string.quoted.double.grue" },
-        "3": { "name": "constant.numeric.grue" }
+        "1": { "name": "keyword.operator.grue" }
       }
     },
 
-    "color_tag": {
-      "comment": "[feeling] and [/feeling] inline markup inside strings",
-      "match": "\\[/?\\w+\\]",
-      "name": "punctuation.definition.tag.grue"
-    },
-
-    "set_statement": {
-      "comment": "set player mood: rooted",
-      "match": "^\\s+(set)\\s+(player)\\s+([\\w-]+)\\s*(:)\\s*([\\w-]+)?",
+    "property_line": {
+      "comment": "property: value lines inside object blocks",
+      "match": "^\\s+(locked|open|key|inside|leads|takes|holds|creature|held|multi|required)\\s*:",
       "captures": {
-        "1": { "name": "keyword.control.set.grue" },
-        "2": { "name": "keyword.other.player.grue" },
-        "3": { "name": "variable.other.property.grue" },
-        "4": { "name": "punctuation.separator.grue" },
-        "5": { "name": "constant.language.value.grue" }
+        "1": { "name": "keyword.other.property.grue" }
       }
     }
   }
