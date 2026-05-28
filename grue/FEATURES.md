@@ -156,13 +156,13 @@ test "default"
 Each `test` block is a named sequence of commands with expected output substrings. The test runner (`runner.py`) runs them automatically and reports pass/fail.
 
 ```
-test manual "chest puzzle"
+test manually "chest puzzle"
     north. east.
     unlock chest with brass key. "Click."
     open chest. "The chest swings open."
 ```
 
-`test manual` marks a test as skipped by the automated runner — it requires specific game state to be set up first (navigation to the right location, prior actions, etc.). Manual tests are still recorded in the `.gts` file and can be run with `runner.py --all`, or the developer can replay the commands by hand.
+`test manually` marks a test as skipped by the automated runner — it requires specific game state to be set up first (navigation to the right location, prior actions, etc.). Manual tests are still recorded in the `.gts` file and can be run with `runner.py --all`, or the developer can replay the commands by hand.
 
 The `.gts` file records all tests alongside the compiled `.inf`; the runner only skips those explicitly marked `manual`.
 
@@ -244,6 +244,20 @@ end story "Years later, no one remembered the incident."
 - `fail` — negative ending; displays the message then `*** You have died ***`
 - `end story` — neutral ending; displays the message inside `*** ... ***` with no win/fail judgement
 - The message is optional for `win` and `fail`; `end story` without a message shows `*** ***`
+
+## Random numbers
+
+```
+roll = random 6
+```
+
+Assigns a random integer from 1 to N (inclusive) to a variable. Equivalent to rolling an N-sided die.
+
+```
+seed: 42
+```
+
+Top-level declaration that fixes the random seed at startup, making all `random` calls produce a deterministic sequence. Use this in test files to pin expected values; omit it in shipped games for genuine randomness.
 
 ## Scoring
 

@@ -97,6 +97,10 @@ def _append_stmt(stmts: list, stripped: str, lineno: int) -> None:
     elif re.match(r'score\s*[+-]\s*\d+$', stripped):
         ms = re.match(r'score\s*([+-])\s*(\d+)$', stripped)
         stmts.append({'type': 'score', 'op': ms.group(1), 'n': int(ms.group(2)), 'line': lineno})
+    elif re.match(r'(\w+)\s*=\s*random\s+\d+$', stripped):
+        mr = re.match(r'(\w+)\s*=\s*random\s+(\d+)$', stripped)
+        stmts.append({'type': 'random', 'var': mr.group(1), 'n': int(mr.group(2)),
+                      'line': lineno})
     elif re.match(r'win\s*(".*")?$', stripped):
         msg = _extract_string(stripped[3:].strip()) if '"' in stripped else None
         stmts.append({'type': 'end', 'outcome': 'win', 'msg': msg, 'line': lineno})
@@ -157,7 +161,7 @@ def parse(source: str) -> dict:
     source = _preprocess(source)
     ast = {'uses': [], 'kinds': [], 'values': [], 'vars': [], 'classes': [],
            'rooms': [], 'verbs': [], 'tests': [], 'toplevel_objects': [],
-           'max_score': 0, 'player_desc': None, 'status_slots': None}
+           'max_score': 0, 'player_desc': None, 'status_slots': None, 'seed': None}
 
     current_room    = None;  room_col    = -1
     current_object  = None;  obj_col     = -1
@@ -538,6 +542,9 @@ def parse(source: str) -> dict:
             elif stripped.startswith('max score:'):
                 ast['max_score'] = int(stripped[10:].strip())
 
+            elif stripped.startswith('seed:'):
+                ast['seed'] = int(stripped[5:].strip())
+
             elif stripped.startswith('player ') and '"' in stripped:
                 ast['player_desc'] = _extract_string(stripped[7:].strip())
 
@@ -546,7 +553,7 @@ def parse(source: str) -> dict:
                 ast['status_slots'] = slots
 
             elif stripped.startswith('test '):
-                m = re.match(r'test\s+(manual\s+)?"([^"]*)"', stripped)
+                m = re.match(r'test\s+(manually\s+)?"([^"]*)"', stripped)
                 if m:
                     current_test = {'name': m.group(2), 'manual': bool(m.group(1)),
                                     'commands': []}
@@ -850,6 +857,8 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx) -> None:
                 w(f'{prefix}{obj_ref}.{kind_id} = {val.upper()};')
         elif t == 'score':
             w(f'{prefix}score = score {stmt["op"]} {stmt["n"]};')
+        elif t == 'random':
+            w(f'{prefix}{stmt["var"]} = random({stmt["n"]});')
         elif t == 'end':
             outcome = stmt['outcome']
             msg     = stmt.get('msg')
@@ -1484,6 +1493,8 @@ def emit_i6(ast: dict) -> str:
     w(f'    location = {rooms[0]["id"]};')
     if ast.get('player_desc'):
         w(f'    selfobj.description = "{_i6str(ast["player_desc"])}";')
+    if ast.get('seed') is not None:
+        w(f'    random(-{ast["seed"]});')
     w(f'    print "^^{_i6str(title)}^^^";')
     w('];')
 

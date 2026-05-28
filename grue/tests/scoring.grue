@@ -58,11 +58,11 @@ test "default"
     spend coin. "You spend the coin"
     examine me. "You look sharp"
 
-test manual "win"
+test manually "win"
     seize trophy. "You claim the trophy"
 
-test manual "fail"
+test manually "fail"
     quaff poison. "The poison takes hold"
 
-test manual "end story"
+test manually "end story"
     study note. "nothing matters"
