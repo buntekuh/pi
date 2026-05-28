@@ -245,6 +245,16 @@ end story "Years later, no one remembered the incident."
 - `end story` — neutral ending; displays the message inside `*** ... ***` with no win/fail judgement
 - The message is optional for `win` and `fail`; `end story` without a message shows `*** ***`
 
+## Moving objects
+
+```
+move crate to assembly
+move self to workshop
+move parcel to basket
+```
+
+Moves an object to a room, another object, or a container. Works in any handler. `self` refers to the object whose handler is running — useful for NPCs that move themselves between rooms.
+
 ## Random numbers
 
 ```

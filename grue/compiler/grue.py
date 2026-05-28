@@ -94,6 +94,11 @@ def _append_stmt(stmts: list, stripped: str, lineno: int) -> None:
         stmts.append({'type': 'say', 'arg': _extract_string(stripped[4:]), 'line': lineno})
     elif stripped.startswith('go '):
         stmts.append({'type': 'go', 'arg': stripped[3:].strip().strip('"'), 'line': lineno})
+    elif re.match(r'move\s+\S', stripped):
+        m = re.match(r'move\s+(.+?)\s+to\s+(.+)$', stripped)
+        if m:
+            stmts.append({'type': 'move', 'obj': m.group(1).strip(),
+                          'to': m.group(2).strip(), 'line': lineno})
     elif re.match(r'score\s*[+-]\s*\d+$', stripped):
         ms = re.match(r'score\s*([+-])\s*(\d+)$', stripped)
         stmts.append({'type': 'score', 'op': ms.group(1), 'n': int(ms.group(2)), 'line': lineno})
@@ -855,6 +860,13 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx) -> None:
                 w(f'{prefix}give {obj_ref} {tilde}{attr_name};')
             else:
                 w(f'{prefix}{obj_ref}.{kind_id} = {val.upper()};')
+        elif t == 'move':
+            _RT = {'self', 'noun', 'second', 'actor', 'location', 'player'}
+            obj = stmt['obj']
+            to  = stmt['to']
+            obj_i6 = obj if obj in _RT else _to_id(obj)
+            to_i6  = to  if to  in _RT else _to_id(to)
+            w(f'{prefix}move {obj_i6} to {to_i6};')
         elif t == 'score':
             w(f'{prefix}score = score {stmt["op"]} {stmt["n"]};')
         elif t == 'random':

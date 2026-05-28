@@ -1,0 +1,49 @@
+# move — move obj to room, move self to room, move obj to NPC
+
+verb dispatch
+    takes noun
+    "Nothing to dispatch."
+
+verb load
+    takes noun
+    "Nothing to load."
+
+room Storage "A storage room."
+    east Assembly
+
+    object crate "A wooden crate."
+
+        instead of dispatch:
+            move crate to assembly
+            say "The crate slides through the hatch."
+
+    man porter "A porter robot."
+        is animate.
+
+        instead of dispatch:
+            move self to assembly
+            say "The porter trundles off to assembly."
+
+    object basket "A wicker basket."
+        is container.
+        is openable.
+        open: true.
+
+    object parcel "A small parcel."
+
+        instead of load:
+            move parcel to basket
+            say "The parcel drops into the basket."
+
+room Assembly "An assembly room."
+    west Storage
+
+test "default"
+    dispatch crate. "slides through the hatch"
+    east. examine crate. "wooden crate"
+    west.
+    dispatch porter. "trundles off to assembly"
+    east. examine porter. "porter robot"
+    west.
+    load parcel. "drops into the basket"
+    look in basket. "parcel"
