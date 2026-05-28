@@ -1,0 +1,12 @@
+# expect error: expected 'move <object> to <destination>'
+
+verb dispatch
+    takes noun
+    "Nothing."
+
+room Store "A store room."
+
+    object crate "A crate."
+        instead of dispatch:
+            move crate
+            say "Gone."

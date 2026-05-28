@@ -1,0 +1,12 @@
+# expect error: unknown destination 'void'
+
+verb dispatch
+    takes noun
+    "Nothing."
+
+room Store "A store room."
+
+    object crate "A crate."
+        instead of dispatch:
+            move crate to void
+            say "Gone."

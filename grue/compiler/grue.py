@@ -96,9 +96,10 @@ def _append_stmt(stmts: list, stripped: str, lineno: int) -> None:
         stmts.append({'type': 'go', 'arg': stripped[3:].strip().strip('"'), 'line': lineno})
     elif re.match(r'move\s+\S', stripped):
         m = re.match(r'move\s+(.+?)\s+to\s+(.+)$', stripped)
-        if m:
-            stmts.append({'type': 'move', 'obj': m.group(1).strip(),
-                          'to': m.group(2).strip(), 'line': lineno})
+        if not m:
+            raise GrueError("expected 'move <object> to <destination>'", lineno, 'E080')
+        stmts.append({'type': 'move', 'obj': m.group(1).strip(),
+                      'to': m.group(2).strip(), 'line': lineno})
     elif re.match(r'score\s*[+-]\s*\d+$', stripped):
         ms = re.match(r'score\s*([+-])\s*(\d+)$', stripped)
         stmts.append({'type': 'score', 'op': ms.group(1), 'n': int(ms.group(2)), 'line': lineno})
@@ -108,14 +109,16 @@ def _append_stmt(stmts: list, stripped: str, lineno: int) -> None:
                       'line': lineno})
     elif re.match(r'\w+\s*\[\s*\d+\s*\]\s*=', stripped):
         ma = re.match(r'(\w+)\s*\[\s*(\d+)\s*\]\s*=\s*(.+)$', stripped)
-        if ma:
-            stmts.append({'type': 'arr_set', 'arr': ma.group(1), 'idx': int(ma.group(2)),
-                          'val': ma.group(3).strip(), 'line': lineno})
+        if not ma:
+            raise GrueError("expected 'array[index] = value'", lineno, 'E081')
+        stmts.append({'type': 'arr_set', 'arr': ma.group(1), 'idx': int(ma.group(2)),
+                      'val': ma.group(3).strip(), 'line': lineno})
     elif re.match(r'\w+\s*=\s*\w+\s*\[\s*\d+\s*\]', stripped):
         ma = re.match(r'(\w+)\s*=\s*(\w+)\s*\[\s*(\d+)\s*\]$', stripped)
-        if ma:
-            stmts.append({'type': 'arr_get', 'var': ma.group(1), 'arr': ma.group(2),
-                          'idx': int(ma.group(3)), 'line': lineno})
+        if not ma:
+            raise GrueError("expected 'var = array[index]'", lineno, 'E082')
+        stmts.append({'type': 'arr_get', 'var': ma.group(1), 'arr': ma.group(2),
+                      'idx': int(ma.group(3)), 'line': lineno})
     elif re.match(r'win\s*(".*")?$', stripped):
         msg = _extract_string(stripped[3:].strip()) if '"' in stripped else None
         stmts.append({'type': 'end', 'outcome': 'win', 'msg': msg, 'line': lineno})
@@ -170,6 +173,27 @@ def _append_stmt(stmts: list, stripped: str, lineno: int) -> None:
 
 _OBJ_TYPES    = {'object', 'scenery', 'man', 'woman', 'robot', 'door'}
 _ROOM_KEYWORDS = {'is', 'instead', 'on', 'after', 'each'}
+
+
+def _parse_is_stmt(target: dict, stripped: str) -> None:
+    """Apply 'is <word>.' to target's behaviours/properties."""
+    word = stripped[3:].rstrip('.').strip()
+    if word in _BEHAVIOURS:
+        target['behaviours'].append(word)
+    else:
+        attr = _NEGATION.get(word, word)
+        target['properties'][attr] = 'false' if word in _NEGATION else 'true'
+
+
+def _match_class_prefix(stripped: str, class_ids: dict):
+    """Return (cls_id, rest) if stripped starts with a known class name, else (None, None)."""
+    words = stripped.split()
+    for n in range(min(len(words), 4), 0, -1):
+        candidate = _to_id(' '.join(words[:n]))
+        if candidate in class_ids:
+            rest = stripped[len(' '.join(words[:n])):].strip()
+            return candidate, rest
+    return None, None
 
 
 def parse(source: str) -> dict:
@@ -317,12 +341,7 @@ def parse(source: str) -> dict:
             elif stripped.startswith('"'):
                 current_object['desc'] = _extract_string(stripped)
             elif stripped.startswith('is '):
-                word = stripped[3:].rstrip('.').strip()
-                if word in _BEHAVIOURS:
-                    current_object['behaviours'].append(word)
-                else:
-                    attr = _NEGATION.get(word, word)
-                    current_object['properties'][attr] = 'false' if word in _NEGATION else 'true'
+                _parse_is_stmt(current_object, stripped)
             elif re.match(r'\w+:\s+\S', stripped):
                 m = re.match(r'(\w+):\s+(.+)', stripped)
                 if m:
@@ -361,11 +380,9 @@ def parse(source: str) -> dict:
                 obj_col = col
                 current_room['objects'].append(current_object)
 
-            elif _to_id(stripped.split()[0]) in class_ids and '"' in stripped:
-                cls_kw  = stripped.split()[0]
-                cls_id  = _to_id(cls_kw)
-                cls     = class_ids[cls_id]
-                rest    = stripped[len(cls_kw):].strip()
+            elif _match_class_prefix(stripped, class_ids)[0] and '"' in stripped:
+                cls_id, rest = _match_class_prefix(stripped, class_ids)
+                cls  = class_ids[cls_id]
                 keywords, display, obj_id, inline_desc = _parse_keywords(rest)
                 current_object = {
                     'id': obj_id, 'keywords': keywords, 'name': display,
@@ -409,12 +426,7 @@ def parse(source: str) -> dict:
                 handler_col = col
                 current_class['handlers'][key] = current_handler
             elif stripped.startswith('is '):
-                word = stripped[3:].rstrip('.').strip()
-                if word in _BEHAVIOURS:
-                    current_class['behaviours'].append(word)
-                else:
-                    attr = _NEGATION.get(word, word)
-                    current_class['properties'][attr] = 'false' if word in _NEGATION else 'true'
+                _parse_is_stmt(current_class, stripped)
             elif re.match(r'\w+:\s+\S', stripped):
                 m = re.match(r'(\w+):\s+(.+)', stripped)
                 if m:
@@ -527,11 +539,9 @@ def parse(source: str) -> dict:
                 obj_col = col
                 ast['toplevel_objects'].append(current_object)
 
-            elif _to_id(stripped.split()[0]) in class_ids and '"' in stripped:
-                cls_kw  = stripped.split()[0]
-                cls_id  = _to_id(cls_kw)
-                cls     = class_ids[cls_id]
-                rest    = stripped[len(cls_kw):].strip()
+            elif _match_class_prefix(stripped, class_ids)[0] and '"' in stripped:
+                cls_id, rest = _match_class_prefix(stripped, class_ids)
+                cls  = class_ids[cls_id]
                 keywords, display, obj_id, inline_desc = _parse_keywords(rest)
                 current_object = {
                     'id': obj_id, 'keywords': keywords, 'name': display,
@@ -740,8 +750,7 @@ def _parse_handler_key(key: str, verb_action_map: dict) -> tuple:
 
     has_with = 'with' in words
     if base in _STD_ACTIONS:
-        action = _STD_ACTIONS.get(base + ':with' if has_with else base) or _STD_ACTIONS[base]
-        return (action, second)
+        return (_STD_ACTIONS[base], second)
     with_key = base + ':with'
     if has_with and with_key in verb_action_map:
         return (verb_action_map[with_key], second)
@@ -844,7 +853,7 @@ def _emit_say(w, text: str, prefix: str, known_ids: set) -> None:
 
 
 def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx) -> None:
-    kinds_by_id, values_set, vars_set, classes_by_id = kinds_ctx
+    kinds_by_id, values_set, vars_set, classes_by_id, arrays_by_id = kinds_ctx
     for stmt in stmts:
         t    = stmt['type']
         line = stmt.get('line')
@@ -893,15 +902,43 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx) -> None:
             to  = stmt['to']
             obj_i6 = obj if obj in _RT else _to_id(obj)
             to_i6  = to  if to  in _RT else _to_id(to)
+            if obj not in _RT and obj_i6 not in known_ids:
+                raise GrueError(
+                    f"unknown object '{obj}' in move statement"
+                    f" — check spelling or declare the object", line, 'E083')
+            if to not in _RT and to_i6 not in known_ids:
+                raise GrueError(
+                    f"unknown destination '{to}' in move statement"
+                    f" — check spelling or declare the room/object", line, 'E084')
             w(f'{prefix}move {obj_i6} to {to_i6};')
         elif t == 'score':
             w(f'{prefix}score = score {stmt["op"]} {stmt["n"]};')
         elif t == 'random':
             w(f'{prefix}{stmt["var"]} = random({stmt["n"]});')
         elif t == 'arr_set':
-            w(f'{prefix}{stmt["arr"]}-->{stmt["idx"]} = {stmt["val"]};')
+            arr_id = stmt['arr']
+            idx    = stmt['idx']
+            if arr_id not in arrays_by_id:
+                raise GrueError(
+                    f"unknown array '{arr_id}' — declare with 'array {arr_id} N'",
+                    line, 'E085')
+            if idx >= arrays_by_id[arr_id]['size']:
+                raise GrueError(
+                    f"array '{arr_id}' index {idx} out of range"
+                    f" (size {arrays_by_id[arr_id]['size']})", line, 'E086')
+            w(f'{prefix}{arr_id}-->{idx} = {stmt["val"]};')
         elif t == 'arr_get':
-            w(f'{prefix}{stmt["var"]} = {stmt["arr"]}-->{stmt["idx"]};')
+            arr_id = stmt['arr']
+            idx    = stmt['idx']
+            if arr_id not in arrays_by_id:
+                raise GrueError(
+                    f"unknown array '{arr_id}' — declare with 'array {arr_id} N'",
+                    line, 'E085')
+            if idx >= arrays_by_id[arr_id]['size']:
+                raise GrueError(
+                    f"array '{arr_id}' index {idx} out of range"
+                    f" (size {arrays_by_id[arr_id]['size']})", line, 'E086')
+            w(f'{prefix}{stmt["var"]} = {arr_id}-->{idx};')
         elif t == 'end':
             outcome = stmt['outcome']
             msg     = stmt.get('msg')
@@ -1015,6 +1052,13 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx) -> None:
 _ON_TURN_RE = re.compile(r'^on turn (\d+)$')
 
 
+def _maybe_rtrue(w, stmts: list) -> None:
+    last = stmts[-1] if stmts else None
+    if not ((last and last['type'] == 'if' and last.get('else'))
+            or (last and last['type'] == 'end')):
+        w(f'{_STMT0}rtrue;')
+
+
 def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set,
                    kinds_ctx) -> None:
     if not handlers:
@@ -1023,10 +1067,9 @@ def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set,
     turn_h   = {k: v for k, v in handlers.items() if _ON_TURN_RE.match(k)}
     each_h   = {k: v for k, v in handlers.items() if k == 'each turn'}
     order_h  = {k: v for k, v in handlers.items() if k.startswith('order:')}
-    before_h = {k: v for k, v in handlers.items()
-                if not k.startswith('after ') and k not in turn_h
-                and k not in each_h and k not in order_h}
     after_h  = {k: v for k, v in handlers.items() if k.startswith('after ')}
+    before_h = {k: v for k, v in handlers.items()
+                if k.startswith('instead of ') or k.startswith('on ')}
 
     if turn_h or each_h:
         w(f'{_PROP}each_turn [;')
@@ -1046,11 +1089,7 @@ def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set,
             action, _ = _parse_handler_key(f'on {verb_word}', verb_action_map)
             w(f'{_ACTION}{action}:')
             _emit_stmts(w, stmts, _STMT0, known_ids, kinds_ctx)
-            last = stmts[-1] if stmts else None
-            skip = ((last and last['type'] == 'if' and last.get('else'))
-                    or (last and last['type'] == 'end'))
-            if not skip:
-                w(f'{_STMT0}rtrue;')
+            _maybe_rtrue(w, stmts)
         w(f'{_ACTION}default: rfalse;')
         w(f'{_PROP}],')
 
@@ -1064,11 +1103,7 @@ def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set,
             if second_filter:
                 w(f'{_STMT0}if (second ~= {second_filter}) rfalse;')
             _emit_stmts(w, stmts, _STMT0, known_ids, kinds_ctx)
-            last = stmts[-1] if stmts else None
-            skip = ((last and last['type'] == 'if' and last.get('else'))
-                    or (last and last['type'] == 'end'))
-            if not skip:
-                w(f'{_STMT0}rtrue;')
+            _maybe_rtrue(w, stmts)
         w(f'{_PROP}],')
 
 
@@ -1078,7 +1113,7 @@ def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set,
 
 def _emit_object(w, obj: dict, parent: str, verb_action_map: dict, known_ids: set,
                  kinds_ctx, classes_by_id: dict = None):
-    kinds_by_id, values_set, vars_set, _ = kinds_ctx
+    kinds_by_id, values_set, vars_set, _, _arrays = kinds_ctx
     oid   = obj['id']
     attrs = _obj_attributes(obj)
     kws   = ' '.join(f"'{k}'" for k in obj['keywords']) if obj['keywords'] else ''
@@ -1158,7 +1193,7 @@ def _emit_object(w, obj: dict, parent: str, verb_action_map: dict, known_ids: se
 
 
 def _emit_class(w, cls: dict, verb_action_map: dict, known_ids: set, kinds_ctx):
-    kinds_by_id, values_set, vars_set, _ = kinds_ctx
+    kinds_by_id, values_set, vars_set, _, _arrays = kinds_ctx
     cls_name = cls['name']
 
     # Build with-clause lines (numeric/kind properties; booleans go in has)
@@ -1277,6 +1312,13 @@ def _collect_user_attributes(ast: dict) -> set:
             for stmts in obj.get('handlers', {}).values():
                 _scan_stmts(stmts)
 
+    for obj in ast.get('toplevel_objects', []):
+        for key, val in obj.get('properties', {}).items():
+            if val == 'true':
+                attrs.add(key)
+        for stmts in obj.get('handlers', {}).values():
+            _scan_stmts(stmts)
+
     return attrs - _I6_BUILTIN_ATTRS
 
 
@@ -1298,6 +1340,9 @@ def _uses_plural_s(ast: dict) -> bool:
         for obj in room.get('objects', []):
             for stmts in obj.get('handlers', {}).values():
                 if _scan_stmts(stmts): return True
+    for obj in ast.get('toplevel_objects', []):
+        for stmts in obj.get('handlers', {}).values():
+            if _scan_stmts(stmts): return True
     return False
 
 
@@ -1386,7 +1431,8 @@ def emit_i6(ast: dict) -> str:
                     and prop_key not in values_set):
                 values_set.add(prop_key)
 
-    kinds_ctx = (kinds_by_id, values_set, vars_set, classes_by_id)
+    arrays_by_id = {ad['id']: ad for ad in ast.get('arrays', [])}
+    kinds_ctx = (kinds_by_id, values_set, vars_set, classes_by_id, arrays_by_id)
 
     kind_declared_attrs = set()
     for kd in ast.get('kinds', []):

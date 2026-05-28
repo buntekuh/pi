@@ -1,0 +1,12 @@
+# expect error: unknown array 'log'
+
+verb record
+    takes noun
+    "Nothing."
+
+room Archive "A quiet archive."
+
+    object ledger "A ledger."
+        instead of record:
+            log[0] = 10
+            say "Recorded."

@@ -1,0 +1,12 @@
+# expect error: unknown object 'widget'
+
+verb dispatch
+    takes noun
+    "Nothing."
+
+room Store "A store room."
+
+    object crate "A crate."
+        instead of dispatch:
+            move widget to store
+            say "Gone."

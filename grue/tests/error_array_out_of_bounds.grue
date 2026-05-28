@@ -1,0 +1,14 @@
+# expect error: array 'log' index 4 out of range
+
+array log 4
+
+verb record
+    takes noun
+    "Nothing."
+
+room Archive "A quiet archive."
+
+    object ledger "A ledger."
+        instead of record:
+            log[4] = 10
+            say "Recorded."
