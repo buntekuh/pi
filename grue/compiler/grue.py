@@ -106,6 +106,16 @@ def _append_stmt(stmts: list, stripped: str, lineno: int) -> None:
         mr = re.match(r'(\w+)\s*=\s*random\s+(\d+)$', stripped)
         stmts.append({'type': 'random', 'var': mr.group(1), 'n': int(mr.group(2)),
                       'line': lineno})
+    elif re.match(r'\w+\s*\[\s*\d+\s*\]\s*=', stripped):
+        ma = re.match(r'(\w+)\s*\[\s*(\d+)\s*\]\s*=\s*(.+)$', stripped)
+        if ma:
+            stmts.append({'type': 'arr_set', 'arr': ma.group(1), 'idx': int(ma.group(2)),
+                          'val': ma.group(3).strip(), 'line': lineno})
+    elif re.match(r'\w+\s*=\s*\w+\s*\[\s*\d+\s*\]', stripped):
+        ma = re.match(r'(\w+)\s*=\s*(\w+)\s*\[\s*(\d+)\s*\]$', stripped)
+        if ma:
+            stmts.append({'type': 'arr_get', 'var': ma.group(1), 'arr': ma.group(2),
+                          'idx': int(ma.group(3)), 'line': lineno})
     elif re.match(r'win\s*(".*")?$', stripped):
         msg = _extract_string(stripped[3:].strip()) if '"' in stripped else None
         stmts.append({'type': 'end', 'outcome': 'win', 'msg': msg, 'line': lineno})
@@ -165,6 +175,7 @@ _ROOM_KEYWORDS = {'is', 'instead', 'on', 'after', 'each'}
 def parse(source: str) -> dict:
     source = _preprocess(source)
     ast = {'uses': [], 'kinds': [], 'values': [], 'vars': [], 'classes': [],
+           'arrays': [],
            'rooms': [], 'verbs': [], 'tests': [], 'toplevel_objects': [],
            'max_score': 0, 'player_desc': None, 'status_slots': None, 'seed': None}
 
@@ -463,6 +474,15 @@ def parse(source: str) -> dict:
                         f"'{val_name}' already declared as a kind",
                         lineno, 'E034')
                 ast['values'].append({'name': val_name, 'id': v_id, 'line': lineno})
+
+            elif re.match(r'array\s+\w', stripped):
+                m = re.match(r'array\s+(.+?)\s+(\d+)$', stripped)
+                if m:
+                    arr_name = m.group(1).strip()
+                    arr_id   = _to_id(arr_name)
+                    arr_size = int(m.group(2))
+                    ast['arrays'].append({'name': arr_name, 'id': arr_id,
+                                          'size': arr_size, 'line': lineno})
 
             elif stripped.startswith('var '):
                 var_name = stripped[4:].rstrip('.')
@@ -878,6 +898,10 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx) -> None:
             w(f'{prefix}score = score {stmt["op"]} {stmt["n"]};')
         elif t == 'random':
             w(f'{prefix}{stmt["var"]} = random({stmt["n"]});')
+        elif t == 'arr_set':
+            w(f'{prefix}{stmt["arr"]}-->{stmt["idx"]} = {stmt["val"]};')
+        elif t == 'arr_get':
+            w(f'{prefix}{stmt["var"]} = {stmt["arr"]}-->{stmt["idx"]};')
         elif t == 'end':
             outcome = stmt['outcome']
             msg     = stmt.get('msg')
@@ -1382,8 +1406,10 @@ def emit_i6(ast: dict) -> str:
         w(f'Property {vd["id"]} 0;')
     for vd in ast.get('vars', []):
         w(f'Global {vd["id"]} 0;')
+    for ad in ast.get('arrays', []):
+        w(f'Array {ad["id"]} --> {ad["size"]};')
     w('Global _grue_ending = 0;')
-    if ast.get('kinds') or ast.get('values') or ast.get('vars'):
+    if ast.get('kinds') or ast.get('values') or ast.get('vars') or ast.get('arrays'):
         w('')
 
     user_attrs = _collect_user_attributes(ast) - kind_declared_attrs

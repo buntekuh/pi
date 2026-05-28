@@ -1,0 +1,30 @@
+# arrays — fixed-size word arrays with index read/write
+
+array log 4
+var entry
+
+verb record
+    takes noun
+    "Nothing to record."
+
+verb recall
+    takes noun
+    "Nothing to recall."
+
+room Archive "A quiet archive."
+
+    object ledger "A leather ledger."
+
+        instead of record:
+            log[0] = 10
+            log[1] = 20
+            log[2] = 30
+            say "Three entries recorded."
+
+        instead of recall:
+            entry = log[1]
+            say "Entry 1 is {entry}."
+
+test "default"
+    record ledger. "Three entries recorded"
+    recall ledger. "Entry 1 is 20"

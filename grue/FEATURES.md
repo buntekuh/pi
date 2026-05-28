@@ -272,6 +272,22 @@ move parcel to basket
 
 Moves an object to a room, another object, or a container. Works in any handler. `self` refers to the object whose handler is running — useful for NPCs that move themselves between rooms.
 
+## Arrays
+
+```
+array program 4
+```
+
+Declares a fixed-size word array of N elements, zero-initialised. Elements are read and written by index:
+
+```
+program[0] = 10
+program[1] = 20
+entry = program[0]
+```
+
+Indices start at 0. Use with `var` to hold the read value. Arrays are global — they persist for the entire game.
+
 ## Random numbers
 
 ```
