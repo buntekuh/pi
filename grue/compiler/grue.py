@@ -680,6 +680,16 @@ _STD_ACTIONS = {
     'pull': 'Pull', 'pulling': 'Pull',
     'turn': 'Turn', 'turning': 'Turn',
     'attack': 'Attack', 'attacking': 'Attack',
+    'say':    'Answer', 'saying':   'Answer',
+    'answer': 'Answer', 'answering':'Answer',
+    'tell':   'TellTo', 'telling':  'TellTo',
+    'ask':    'AskFor', 'asking':   'AskFor',
+    'show':   'Show',   'showing':  'Show',
+    'give':   'Give',   'giving':   'Give',
+    'wait':   'Wait',   'waiting':  'Wait',
+    'go':     'Go',     'going':    'Go',
+    'enter':  'Enter',  'entering': 'Enter',
+    'exit':   'Exit',   'exiting':  'Exit',
 }
 
 # Known behaviour keywords — everything else after 'is' sets a boolean attribute.
