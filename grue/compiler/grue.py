@@ -94,6 +94,15 @@ def _append_stmt(stmts: list, stripped: str, lineno: int) -> None:
         stmts.append({'type': 'say', 'arg': _extract_string(stripped[4:]), 'line': lineno})
     elif stripped.startswith('go '):
         stmts.append({'type': 'go', 'arg': stripped[3:].strip().strip('"'), 'line': lineno})
+    elif re.match(r'win\s*(".*")?$', stripped):
+        msg = _extract_string(stripped[3:].strip()) if '"' in stripped else None
+        stmts.append({'type': 'end', 'outcome': 'win', 'msg': msg, 'line': lineno})
+    elif re.match(r'fail\s*(".*")?$', stripped):
+        msg = _extract_string(stripped[4:].strip()) if '"' in stripped else None
+        stmts.append({'type': 'end', 'outcome': 'fail', 'msg': msg, 'line': lineno})
+    elif re.match(r'end story\s*(".*")?$', stripped):
+        msg = _extract_string(stripped[9:].strip()) if '"' in stripped else None
+        stmts.append({'type': 'end', 'outcome': 'story', 'msg': msg, 'line': lineno})
     elif stripped.startswith('box '):
         stmts.append({'type': 'box', 'arg': _extract_string(stripped[4:]), 'line': lineno})
     else:
@@ -824,6 +833,19 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx) -> None:
                 w(f'{prefix}give {obj_ref} {tilde}{attr_name};')
             else:
                 w(f'{prefix}{obj_ref}.{kind_id} = {val.upper()};')
+        elif t == 'end':
+            outcome = stmt['outcome']
+            msg     = stmt.get('msg')
+            if outcome == 'story':
+                if msg:
+                    w(f'{prefix}_grue_ending = "{_i6str(msg)}";')
+                w(f'{prefix}deadflag = 3;')
+            else:
+                flag = '2' if outcome == 'win' else '1'
+                if msg:
+                    _emit_say(w, msg, prefix, known_ids)
+                w(f'{prefix}deadflag = {flag};')
+            w(f'{prefix}rtrue;')
         elif t == 'go':
             w(f'{prefix}PlayerTo({_to_id(stmt["arg"])});')
         elif t == 'box':
@@ -1210,6 +1232,8 @@ def emit_i6(ast: dict) -> str:
     w( 'Constant Headline "^An Interactive Fiction^";')
     w( 'Constant MAX_SCORE 0;')
     w('')
+    w('Replace DeathMessage;')
+    w('')
     w('Include "Parser";')
     w('Include "VerbLib";')
     w('')
@@ -1252,6 +1276,7 @@ def emit_i6(ast: dict) -> str:
         w(f'Property {vd["id"]} 0;')
     for vd in ast.get('vars', []):
         w(f'Global {vd["id"]} 0;')
+    w('Global _grue_ending = 0;')
     if ast.get('kinds') or ast.get('values') or ast.get('vars'):
         w('')
 
@@ -1385,6 +1410,12 @@ def emit_i6(ast: dict) -> str:
                 _emit_object(w, obj, rid, verb_action_map, known_ids, kinds_ctx,
                              classes_by_id)
 
+    w('[ DeathMessage;')
+    w('    if (deadflag == 1) { print "You have died"; return; }')
+    w('    if (deadflag == 2) { print "You have won"; return; }')
+    w('    if (_grue_ending ~= 0) print (string) _grue_ending;')
+    w('];')
+    w('')
     w('Include "Grammar";')
     w('')
     w('[ Initialise;')

@@ -218,11 +218,26 @@ if player is wet:
 if player has trophy:
 ```
 
+## End conditions
+
+Three statements end the game from any handler:
+
+```
+win "You seize the trophy and claim victory!"
+fail "The poison takes hold. Everything goes dark."
+end story "Years later, no one remembered the incident."
+```
+
+- `win` — positive ending; displays the message then `*** You have won ***`
+- `fail` — negative ending; displays the message then `*** You have died ***`
+- `end story` — neutral ending; displays the message inside `*** ... ***` with no win/fail judgement
+- The message is optional for `win` and `fail`; `end story` without a message shows `*** ***`
+
 ## Planned
 - User-defined functions — named routines callable from handlers, for shared logic
 - Class possessions — child objects automatically created per instance
 - Multiple source files — `uses` directive (reserved but not yet emitted)
-- End conditions — winning (`end the story`), losing (`die`), and scoring
+- Scoring — increment and display score
 - Inventory — list of carried objects; customisable formatting
 - Text styles — `bold`, `italic`, `reverse` for emphasis in `say` output
 - Status line — configurable top or bottom bar; built-in slots (`score`, `moves`, `time`) and arbitrary game variables

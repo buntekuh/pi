@@ -1,0 +1,39 @@
+# endings — win, fail, and end story conditions
+
+verb seize
+    takes noun
+    "You can't seize that."
+
+verb quaff
+    takes noun
+    "Nothing to quaff."
+
+verb study
+    takes noun
+    "Nothing to study."
+
+room Tavern "A dusty tavern."
+
+    object trophy "A golden trophy."
+
+        instead of seize:
+            win "You seize the trophy and claim victory!"
+
+    object poison "A vial of poison."
+
+        instead of quaff:
+            fail "The poison takes hold. Everything goes dark."
+
+    object note "A crumpled note."
+
+        instead of study:
+            end story "The note reads: this story has no ending."
+
+test "win"
+    seize trophy. "You seize the trophy"
+
+test "fail"
+    quaff poison. "The poison takes hold"
+
+test "end story"
+    study note. "this story has no ending"
