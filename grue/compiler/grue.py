@@ -546,9 +546,10 @@ def parse(source: str) -> dict:
                 ast['status_slots'] = slots
 
             elif stripped.startswith('test '):
-                m = re.match(r'test\s+"([^"]*)"', stripped)
+                m = re.match(r'test\s+(manual\s+)?"([^"]*)"', stripped)
                 if m:
-                    current_test = {'name': m.group(1), 'commands': []}
+                    current_test = {'name': m.group(2), 'manual': bool(m.group(1)),
+                                    'commands': []}
                     test_col = col
                     ast['tests'].append(current_test)
 
@@ -1519,14 +1520,22 @@ def main():
 
     out_path.write_text(inf)
 
-    tests = ast['tests']
+    tests   = ast['tests']
+    rooms_s = f'{len(ast["rooms"])} rooms'
     if tests:
-        gts_path = out_path.with_suffix('.gts')
-        gts_path.write_text(json.dumps(tests, indent=2))
+        gts_tests = [dict(t, skip=bool(t.get('manual'))) for t in tests]
+        gts_path  = out_path.with_suffix('.gts')
+        gts_path.write_text(json.dumps(gts_tests, indent=2))
+        n_auto   = sum(1 for t in tests if not t.get('manual'))
+        n_manual = len(tests) - n_auto
+        parts    = [f'{n_auto} test{"s" if n_auto != 1 else ""}']
+        if n_manual:
+            names = ', '.join(f'"{t["name"]}"' for t in tests if t.get('manual'))
+            parts.append(f'{n_manual} manual: {names}')
         print(f'compiled {src_path.name} → {out_path}  '
-              f'({len(ast["rooms"])} rooms, {len(tests)} tests → {gts_path.name})')
+              f'({rooms_s}, {"; ".join(parts)} → {gts_path.name})')
     else:
-        print(f'compiled {src_path.name} → {out_path}  ({len(ast["rooms"])} rooms)')
+        print(f'compiled {src_path.name} → {out_path}  ({rooms_s})')
 
 
 if __name__ == '__main__':

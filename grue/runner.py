@@ -84,16 +84,19 @@ def run_test(z5: Path, test: dict, debug: bool = False, verbose: bool = False) -
 def main():
     debug   = False
     verbose = False
+    run_all = False
     args    = sys.argv[1:]
     while args and args[0].startswith('-'):
         if args[0] == '--debug':
             debug = True
         elif args[0] in ('--verbose', '-v'):
             verbose = True
+        elif args[0] == '--all':
+            run_all = True
         args = args[1:]
 
     if not args:
-        print('usage: runner.py [--debug] <game.z5> [game.gts]', file=sys.stderr)
+        print('usage: runner.py [--debug] [--all] <game.z5> [game.gts]', file=sys.stderr)
         sys.exit(1)
 
     z5  = Path(args[0])
@@ -107,15 +110,21 @@ def main():
         sys.exit(1)
 
     tests      = json.loads(gts.read_text())
-    total_pass = total_fail = 0
+    total_pass = total_fail = total_skip = 0
 
     for test in tests:
+        if test.get('skip') and not run_all:
+            total_skip += 1
+            continue
         print(f'\ntest: {test["name"]!r}')
         p, f = run_test(z5, test, debug=debug, verbose=verbose)
         total_pass += p
         total_fail += f
 
-    print(f'\n{total_pass} passed, {total_fail} failed')
+    parts = [f'{total_pass} passed', f'{total_fail} failed']
+    if total_skip:
+        parts.append(f'{total_skip} skipped (run with --all)')
+    print(f'\n{", ".join(parts)}')
     sys.exit(1 if total_fail else 0)
 
 

@@ -53,16 +53,16 @@ room Hall "A grand entrance hall."
         instead of study:
             end story "The note reads: nothing matters."
 
-test "score"
+test "default"
     collect coin. "You collect the coin"
     spend coin. "You spend the coin"
     examine me. "You look sharp"
 
-test "win"
+test manual "win"
     seize trophy. "You claim the trophy"
 
-test "fail"
+test manual "fail"
     quaff poison. "The poison takes hold"
 
-test "end story"
+test manual "end story"
     study note. "nothing matters"

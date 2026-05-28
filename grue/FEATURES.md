@@ -152,7 +152,19 @@ test "default"
     take crowbar. "Taken."
     east. "Inside"
 ```
-Writes a `.gts` JSON file alongside the `.inf` for use by a test runner.
+
+Each `test` block is a named sequence of commands with expected output substrings. The test runner (`runner.py`) runs them automatically and reports pass/fail.
+
+```
+test manual "chest puzzle"
+    north. east.
+    unlock chest with brass key. "Click."
+    open chest. "The chest swings open."
+```
+
+`test manual` marks a test as skipped by the automated runner — it requires specific game state to be set up first (navigation to the right location, prior actions, etc.). Manual tests are still recorded in the `.gts` file and can be run with `runner.py --all`, or the developer can replay the commands by hand.
+
+The `.gts` file records all tests alongside the compiled `.inf`; the runner only skips those explicitly marked `manual`.
 
 ## Manual and examples
 

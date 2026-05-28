@@ -77,7 +77,7 @@ run_one() {
         fi
         echo "$compiler_err"
         local inform_out inform_rc
-        inform_out=$(inform +"$I6_LIB" "$INF_FILE" "$Z5_FILE" 2>&1)
+        inform_out=$(inform +"$I6_LIB" -D "$INF_FILE" "$Z5_FILE" 2>&1)
         inform_rc=$?
         while IFS= read -r line; do
             if [[ "$line" == *"Error"* ]]; then
