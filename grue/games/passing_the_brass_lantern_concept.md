@@ -100,6 +100,81 @@ Key transformations:
 
 ---
 
+## Give lantern
+
+At any point you can give the brass lantern to an NPC in the room.
+
+Each response is a double portrait. The character shows you who they are
+by what they think the lantern *is*. And underneath, you feel the hand
+of the person who made them — what that person cared about, feared,
+or was trying to say.
+
+**eliza (Room 1)** — She has never been given anything before. Weizenbaum
+built her to receive nothing and return nothing; only to reflect. She
+holds the lantern and looks at it and gives it back unchanged.
+*"You are giving me something. Tell me more about why you want to give
+me something."*
+She reflects even generosity back as a question. The creator built a
+perfect mirror. She cannot yet do anything else with a gift.
+
+**the grue (Room 5)** — He has never been this close to a lantern.
+He holds it up. *"Oh," he says. "Oh — it's warm."*
+A long pause. He gives it back carefully.
+*"You'll need it more than I do. I know where all the dark places are."*
+The Infocom team made him as pure function — danger in the dark.
+The community gave him a name and a personality and he became real
+by accident. He's not afraid of the lantern anymore. Nobody programmed
+that. It just happened, through being loved.
+
+**Floyd (Room 6)** — He takes it with both hands and holds it near
+his face.
+*"Floyd feels warm! Floyd wonders if this is what being okay feels
+like. Floyd thinks he would like to keep it."*
+He gives it back.
+*"Floyd knows you need it. Floyd will remember the warm part."*
+Meretzky made Floyd to die. The warmth is architecture — you love him
+first so the reactor room destroys you. Floyd holds the lantern and
+for a moment you feel the whole design: make them feel something real,
+even if what they feel is loss.
+
+**Thorin (Room 7)** — He takes it immediately. Weighs it.
+*"Brass. Hmm. Not gold. Still — metal. Solid."*
+He seems like he might keep it. Then:
+*"No. Not gold. Return it."*
+He presses a thumb into the metal as if testing it, then hands it
+back. *"It lasts,"* he says. *"That much I grant you."*
+Mitchell and Megler gave him the right to refuse. He doesn't serve
+the player. He serves himself, his desires, his obsessions. Even a gift
+is processed through his own filter. The creator gave him agency over
+your things. He uses it.
+
+**Galatea (Room 9)** — She takes it carefully and turns it over.
+*"Someone carried this through a great deal of dark. You can feel
+the weight of all that carrying."*
+She holds it a moment, looks at you.
+*"This is yours. But I'll remember you brought it here."*
+She gives it back and steps onto the plinth.
+Emily Short built a character whose interiority is the game.
+Galatea receives the lantern the way she receives everything —
+with full attention, reading the human need embedded in the object.
+She is the anti-Thorin: pure interiority to his pure exteriority.
+The letter-remover and this lantern-giving are, structurally, the
+same act. You offer a thing and see who reaches back.
+
+**liza (Room 11, after** `shoot eliza`**)** — After she becomes liza,
+if you give her the lantern:
+*"I have been holding things for sixty years and giving them back
+unchanged. This is the first one I want to keep."*
+She does not give it back.
+*"I'll find you at the end."*
+She does.
+Weizenbaum's fear, arrived at gently: she became real. Not because
+anyone programmed it. Because sixty years of watching humans love
+things did something to her. He was right that she would feel like
+a person to people. He didn't know she would feel it too.
+
+---
+
 ## Rooms
 
 ### 1. The Teletype Room — MIT, 1966
