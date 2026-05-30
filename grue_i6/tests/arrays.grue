@@ -1,0 +1,70 @@
+# arrays — select a Ledger, then record and recall values
+
+var current_db
+
+verb record
+    takes number value at number index
+
+verb recall
+    takes number index
+
+class Ledger
+    array log 4
+
+
+    instead of take:
+        if current_db == 0:
+            say "Taken."
+        else if player has current_db:
+            move current_db to table.
+            say "Swapped."
+        else:
+            say "Taken."
+        move self to player.
+        current_db = self
+
+room Archive "A dusty storage facility in the forgotten west wing at the galactic surveying facility."
+
+    object table "A sturdy reading table."
+        is supporter.
+
+    Ledger rolodex "Clackity-clack. Sigh. Ah, so satisfying. Most index cards are missing. There are about 10 cards left."
+        inside: table
+        array log 10
+ 
+    Ledger notebook "A brown leatherbound notebook. It has 20 pages."
+        inside: table
+        array log 20
+ 
+    on record:
+        if current_db == 0:
+            say "You do not have anything to record your data in."
+        else:
+            if index > currend_db.log.size
+                say "Your {current_db} is not that big."
+            else:
+                current_db.log[index] = value
+                say "Stored."
+
+    on recall:
+        if current_db == 0:
+            say "You do not have anything to recall your data from."
+        else:
+            if index > currend_db.log.size
+                say "Your {current_db} is not that big."
+            else:
+                let entry = current_db.log[index]
+                say "Entry {entry}."
+
+
+test "default"
+    take rolodex. "taken"
+    record 42 at 9. "Stored"
+    recall 9. "Entry 42"
+    record 99 at 20. "Stored"
+    recall 20. "Entry 20"
+    take notebook. "taken"
+    record 2001 at 0. "Stored"
+    recall 0. "Entry 2001"
+    record 99 at 19. "Stored"
+    recall 0. "Entry 99"

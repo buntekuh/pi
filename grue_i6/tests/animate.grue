@@ -1,6 +1,12 @@
-# animate — man, woman, robot kinds
+# animate — man, woman kinds and class-based NPCs
 # Lowercase first keyword: treated as common noun, article applied.
 # Uppercase first keyword: has proper, printed without article.
+
+class Cleaner
+    is animate.
+
+class Gruffalo
+    is animate.
 
 room Room "A room."
 
@@ -8,7 +14,9 @@ room Room "A room."
 
     woman Lady Gaga "The one and only."
 
-    robot cleaner "A humming cleaner."
+    Cleaner floor cleaner "A humming cleaner."
+
+    Gruffalo monster "blanches."
 
 test "default"
     look. "Lady Gaga"

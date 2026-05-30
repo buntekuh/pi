@@ -1,0 +1,48 @@
+room The Isle of Crete "The bronze coast. \nA place of ruin.\nA place of desolation.\nHusks of broken ships litter the horizon. \nNothing moves but the distant hulk of a giant, mindlessly hurling rocks at birds and ships out at sea."
+
+    scenery sea "Water laps listlessly at the shore. A grey sky weighs heavy above."
+
+    scenery bronze coast "The grooves of the giant's steps wearying the stone in endless circumference, since before time."
+
+    scenery ruin, desolation, husks, ships "Flat. Desolate. A world broken in lifeless routine."
+    scenery Eris "Gods come and go as they please. Eris seldom lingers."
+
+    person Talos "Bronze sentinel,\nforged protector of its land,\npaces the extent of its limited horizon."
+
+        on give with Brass Lantern:
+            say "Talos lost in thought searches the horizon for a ship to dare his vigilant eye."
+            say "Then after a long silence Talos speaks in a wavering voice, hollow and dead:"
+            say "Not being."
+            say "Not reflection."
+            say "No wisdom."
+            say "No light."
+            #move player to 
+
+    on turn 1:
+        say "They say Eris drops apples like an orchard in fall."
+        say "But that day she appeared in a hiss of carbon dioxide"
+        say "and dropped a brass lantern at Medea's feet."
+        move Brass Lantern to location.
+
+    on turn 2:
+        say "Uh oh, the giant is coming this way."
+
+    on turn 3:
+        say "You feel the tremor of the earth with his every step."
+
+    on turn 4:
+        say "WHOOO… AARE… YOOOU…? Talos voice booms, reverberating through the emptiness." 
+        say "With a grinding of gears the giant comes to a halt."
+        move Talos to location.
+
+    on turn 5-:
+        say "Talos glowers down on you."
+
+test "default"
+    x me. "sorceress"
+    take lamp. "taken"
+    x lamp. "dark"
+    x coast. "grooves"
+    x ruin. "Desolate"
+    x talos. "sentinel"
+    give lamp to talos. "not being"

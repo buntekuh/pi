@@ -45,6 +45,27 @@ def _count_unescaped_quotes(s: str) -> int:
     return count
 
 
+def _resolve_includes(source: str, base_dir, seen: frozenset = frozenset()) -> str:
+    lines = []
+    for line in source.splitlines():
+        m = re.match(r'^\s*uses\s+"([^"]+)"', line) or re.match(r'^\s*uses\s+(\S+)', line)
+        if not m:
+            lines.append(line)
+            continue
+        filename = m.group(1)
+        if not filename.endswith('.grue'):
+            filename += '.grue'
+        path = (Path(base_dir) / filename).resolve()
+        if path in seen:
+            raise GrueError(f"circular include: {filename}")
+        try:
+            included = path.read_text(encoding='utf-8')
+        except OSError:
+            raise GrueError(f"uses: file not found: {filename}")
+        lines.append(_resolve_includes(included, path.parent, seen | {path}))
+    return '\n'.join(lines)
+
+
 def _preprocess(source: str) -> str:
     lines = source.splitlines()
     out = []
@@ -106,6 +127,12 @@ def _parse_keywords(rest: str) -> tuple:
 
 
 def _append_stmt(stmts: list, stripped: str, lineno: int) -> None:
+    if re.match(r'let\s+\w+\s*=', stripped):
+        m = re.match(r'let\s+(\w+)\s*=\s*(.+)$', stripped)
+        if m:
+            stmts.append({'type': 'let', 'var': m.group(1),
+                          'expr': m.group(2).strip().rstrip('.'), 'line': lineno})
+        return
     if stripped.startswith('say '):
         stmts.append({'type': 'say', 'arg': _extract_string(stripped[4:]), 'line': lineno})
     elif stripped.startswith('go '):
@@ -123,18 +150,30 @@ def _append_stmt(stmts: list, stripped: str, lineno: int) -> None:
         mr = re.match(r'(\w+)\s*=\s*random\s+(\d+)$', stripped)
         stmts.append({'type': 'random', 'var': mr.group(1), 'n': int(mr.group(2)),
                       'line': lineno})
-    elif re.match(r'\w+\s*\[\s*\d+\s*\]\s*=', stripped):
-        ma = re.match(r'(\w+)\s*\[\s*(\d+)\s*\]\s*=\s*(.+)$', stripped)
+    elif re.match(r'\w+\.\w+\s*\[\s*\w+\s*\]\s*=', stripped):
+        ma = re.match(r'(\w+)\.(\w+)\s*\[\s*(\w+)\s*\]\s*=\s*(.+)$', stripped)
+        if not ma:
+            raise GrueError("expected 'obj.prop[index] = value'", lineno, 'E081')
+        stmts.append({'type': 'obj_arr_set', 'obj': ma.group(1), 'prop': ma.group(2),
+                      'idx': ma.group(3), 'val': ma.group(4).strip(), 'line': lineno})
+    elif re.match(r'\w+\s*=\s*\w+\.\w+\s*\[\s*\w+\s*\]', stripped):
+        ma = re.match(r'(\w+)\s*=\s*(\w+)\.(\w+)\s*\[\s*(\w+)\s*\]$', stripped)
+        if not ma:
+            raise GrueError("expected 'var = obj.prop[index]'", lineno, 'E082')
+        stmts.append({'type': 'obj_arr_get', 'var': ma.group(1), 'obj': ma.group(2),
+                      'prop': ma.group(3), 'idx': ma.group(4), 'line': lineno})
+    elif re.match(r'\w+\s*\[\s*\w+\s*\]\s*=', stripped):
+        ma = re.match(r'(\w+)\s*\[\s*(\w+)\s*\]\s*=\s*(.+)$', stripped)
         if not ma:
             raise GrueError("expected 'array[index] = value'", lineno, 'E081')
-        stmts.append({'type': 'arr_set', 'arr': ma.group(1), 'idx': int(ma.group(2)),
+        stmts.append({'type': 'arr_set', 'arr': ma.group(1), 'idx': ma.group(2),
                       'val': ma.group(3).strip(), 'line': lineno})
-    elif re.match(r'\w+\s*=\s*\w+\s*\[\s*\d+\s*\]', stripped):
-        ma = re.match(r'(\w+)\s*=\s*(\w+)\s*\[\s*(\d+)\s*\]$', stripped)
+    elif re.match(r'\w+\s*=\s*\w+\s*\[\s*\w+\s*\]', stripped):
+        ma = re.match(r'(\w+)\s*=\s*(\w+)\s*\[\s*(\w+)\s*\]$', stripped)
         if not ma:
             raise GrueError("expected 'var = array[index]'", lineno, 'E082')
         stmts.append({'type': 'arr_get', 'var': ma.group(1), 'arr': ma.group(2),
-                      'idx': int(ma.group(3)), 'line': lineno})
+                      'idx': ma.group(3), 'line': lineno})
     elif re.match(r'win\s*(".*")?$', stripped):
         msg = _extract_string(stripped[3:].strip()) if '"' in stripped else None
         stmts.append({'type': 'end', 'outcome': 'win', 'msg': msg, 'line': lineno})
@@ -187,7 +226,7 @@ def _append_stmt(stmts: list, stripped: str, lineno: int) -> None:
             stmts.append({'type': 'give', 'subj': 'self', 'attr': attr, 'neg': neg, 'line': lineno})
 
 
-_OBJ_TYPES    = {'object', 'scenery', 'man', 'woman', 'robot', 'door'}
+_OBJ_TYPES    = {'object', 'scenery', 'man', 'woman', 'person', 'animal', 'door'}
 _ROOM_KEYWORDS = {'is', 'instead', 'on', 'after', 'each'}
 
 
@@ -253,7 +292,9 @@ def _match_class_prefix(stripped: str, class_ids: dict):
     return None, None
 
 
-def parse(source: str) -> dict:
+def parse(source: str, source_path=None) -> dict:
+    if source_path is not None:
+        source = _resolve_includes(source, Path(source_path).parent, frozenset({Path(source_path).resolve()}))
     source = _preprocess(source)
     ast = {'uses': [], 'kinds': [], 'values': [], 'vars': [], 'classes': [],
            'arrays': [],
@@ -268,9 +309,11 @@ def parse(source: str) -> dict:
     current_test    = None;  test_col    = -1
     current_verb    = None;  verb_col    = -1
     current_class   = None;  class_col   = -1
+    current_params  = {}     # active param alias map for current handler
 
     kind_val_map = {}   # value_name → kind_name that claimed it
     class_ids    = {}   # class_id   → class dict (for room-level lookup)
+    verb_params  = {}   # verb_word  → {alias: i6_var} built as verbs are parsed
 
     for lineno, raw in enumerate(source.splitlines(), 1):
         stripped = raw.strip()
@@ -299,6 +342,7 @@ def parse(source: str) -> dict:
 
         if current_handler is not None and col <= handler_col:
             current_handler = None
+            current_params  = {}
 
         if current_object is not None and col <= obj_col:
             current_object = None
@@ -345,6 +389,9 @@ def parse(source: str) -> dict:
             branch = current_if[if_branch]
             if branch is None:
                 branch = current_if['then']
+            if current_params:
+                for alias, i6var in current_params.items():
+                    stripped = re.sub(rf'\b{re.escape(alias)}\b', i6var, stripped)
             _append_stmt(branch, stripped, lineno)
 
         elif current_handler is not None:
@@ -354,6 +401,9 @@ def parse(source: str) -> dict:
                 if_root    = new_if
                 if_col = col; if_branch = 'then'
             else:
+                if current_params:
+                    for alias, i6var in current_params.items():
+                        stripped = re.sub(rf'\b{re.escape(alias)}\b', i6var, stripped)
                 _append_stmt(current_handler, stripped, lineno)
 
         elif current_object is not None:
@@ -369,6 +419,15 @@ def parse(source: str) -> dict:
                 current_handler = []
                 handler_col = col
                 current_object['handlers'][key] = current_handler
+                _krest = key
+                for _pfx in ('instead of ', 'after ', 'on ', 'each '):
+                    if _krest.startswith(_pfx):
+                        _krest = _krest[len(_pfx):]
+                        break
+                current_params = verb_params.get(_degerund(_krest.split()[0]), {})
+            elif re.match(r'array\s+\w+\s+\d+', stripped):
+                ma = re.match(r'array\s+(\w+)\s+(\d+)', stripped)
+                current_object['properties'][ma.group(1)] = ' '.join(['0'] * int(ma.group(2)))
             elif stripped.startswith('"'):
                 current_object['desc'] = _extract_string(stripped)
             elif stripped.startswith('is '):
@@ -400,7 +459,7 @@ def parse(source: str) -> dict:
                     current_room['exits'][d]      = m.group(2).strip()
                     current_room['exit_lines'][d] = lineno
 
-            elif re.match(r'(object|scenery|man|woman|robot|door)\s+', stripped):
+            elif re.match(r'(object|scenery|man|woman|person|animal|door)\s+', stripped):
                 kind = stripped.split()[0]
                 keywords, display, obj_id, inline_desc = _parse_keywords(stripped[len(kind):].strip())
                 current_object = {
@@ -430,6 +489,12 @@ def parse(source: str) -> dict:
                 current_handler = []
                 handler_col = col
                 current_room['handlers'][key] = current_handler
+                _krest = key
+                for _pfx in ('instead of ', 'after ', 'on ', 'each '):
+                    if _krest.startswith(_pfx):
+                        _krest = _krest[len(_pfx):]
+                        break
+                current_params = verb_params.get(_degerund(_krest.split()[0]), {})
 
             else:
                 # Unknown line in room context — catch likely misspelled object types.
@@ -441,12 +506,15 @@ def parse(source: str) -> dict:
                         '"' in stripped):
                     raise GrueError(
                         f"unknown object type '{first_word}'"
-                        f" — use object, scenery, man, woman, robot, or door",
+                        f" — use object, scenery, man, woman, person, animal, door, or a class name",
                         lineno, 'E020')
 
         elif current_verb is not None:
             if stripped.startswith('*') or stripped.startswith('takes '):
-                current_verb['grammar'].append(_translate_grammar(stripped.rstrip('.')))
+                g, pmap, obj_slots = _translate_grammar(stripped.rstrip('.'))
+                current_verb['grammar'].append(g)
+                current_verb['params'].update(pmap)
+                current_verb['obj_slots'] = obj_slots
             elif stripped.startswith('"'):
                 current_verb['default'] = _extract_string(stripped)
 
@@ -456,6 +524,16 @@ def parse(source: str) -> dict:
                 current_handler = []
                 handler_col = col
                 current_class['handlers'][key] = current_handler
+                _krest = key
+                for _pfx in ('instead of ', 'after ', 'on ', 'each '):
+                    if _krest.startswith(_pfx):
+                        _krest = _krest[len(_pfx):]
+                        break
+                current_params = verb_params.get(_degerund(_krest.split()[0]), {})
+            elif re.match(r'array\s+\w+\s+\d+', stripped):
+                ma = re.match(r'array\s+(\w+)\s+(\d+)', stripped)
+                current_class['obj_arrays'].append(
+                    {'name': ma.group(1), 'size': int(ma.group(2))})
             elif stripped.startswith('is '):
                 _parse_is_stmt(current_class, stripped)
             elif re.match(r'\w+:\s+\S', stripped):
@@ -553,13 +631,13 @@ def parse(source: str) -> dict:
                 current_class = {
                     'name': class_name, 'id': class_id,
                     'properties': {}, 'behaviours': [], 'handlers': {},
-                    'line': lineno,
+                    'obj_arrays': [], 'line': lineno,
                 }
                 class_col = col
                 ast['classes'].append(current_class)
                 class_ids[class_id] = current_class
 
-            elif re.match(r'(object|scenery|man|woman|robot)\s+', stripped):
+            elif re.match(r'(object|scenery|man|woman|person|animal)\s+', stripped):
                 kind = stripped.split()[0]
                 keywords, display, obj_id, inline_desc = _parse_keywords(stripped[len(kind):].strip())
                 current_object = {
@@ -590,9 +668,11 @@ def parse(source: str) -> dict:
                 synonyms = [w.strip() for w in words_part.split(',') if w.strip()]
                 synonyms = [synonyms[0].split()[0]] + [s.strip() for s in synonyms[1:]] if synonyms else words[:1]
                 current_verb = {'words': words, 'synonyms': synonyms,
-                                'grammar': [], 'default': '', 'line': lineno}
+                                'grammar': [], 'default': '', 'params': {}, 'line': lineno}
                 verb_col = col
                 ast['verbs'].append(current_verb)
+                for w in words:
+                    verb_params[w.lower()] = current_verb['params']
 
             elif stripped.startswith('room '):
                 rest = stripped[5:]
@@ -710,35 +790,60 @@ _NEGATION = {
 
 
 _GRAMMAR_QUALIFIERS = {'held', 'creature', 'visible'}
+_STANDARD_NOUN_TOKENS = {'noun', 'multi', 'held', 'multiheld', 'creature', 'visible', 'number'}
 
 
 def _parse_noun_slot(tokens: list) -> tuple:
-    """Consume [qualifier] (noun|multi) from tokens; return (i6_token, remaining)."""
+    """Consume [qualifier] (noun|multi|number|name) from tokens.
+    Returns (i6_token, remaining, alias_or_None).
+    A custom name (not a standard token) becomes alias→noun/second."""
     if not tokens:
-        return 'noun', []
+        return 'noun', [], None
     if tokens[0] in _GRAMMAR_QUALIFIERS:
         qual, rest = tokens[0], tokens[1:]
-        target = rest[0] if rest else 'noun'
-        rest   = rest[1:] if rest else []
+        raw_target = rest[0] if rest else 'noun'
+        rest = rest[1:] if rest else []
+        alias = None if raw_target in _STANDARD_NOUN_TOKENS else raw_target
+        target = raw_target if raw_target in _STANDARD_NOUN_TOKENS else 'noun'
         if qual == 'visible':
-            return target, rest
+            return target, rest, alias
         if target == 'multi':
-            return {'held': 'multiheld'}.get(qual, target), rest
-        return qual, rest        # held noun → held, creature noun → creature
-    return tokens[0], tokens[1:]
+            return {'held': 'multiheld'}.get(qual, target), rest, alias
+        return qual, rest, alias
+    if tokens[0] == 'number':
+        rest = tokens[1:]
+        # alias when trailing (last slot) or followed by prep+slot (len>=3)
+        if len(rest) == 1 and rest[0] not in _STANDARD_NOUN_TOKENS:
+            return 'number', [], rest[0]
+        if len(rest) >= 3 and rest[0] not in _STANDARD_NOUN_TOKENS:
+            return 'number', rest[1:], rest[0]
+        return 'number', rest, None
+    raw = tokens[0]
+    alias = None if raw in _STANDARD_NOUN_TOKENS else raw
+    i6_tok = raw if raw in _STANDARD_NOUN_TOKENS else 'noun'
+    return i6_tok, tokens[1:], alias
 
 
-def _translate_grammar(line: str) -> str:
-    """Translate 'takes ...' to I6 '* ...' form; pass through raw '* ...' unchanged."""
+def _translate_grammar(line: str) -> tuple:
+    """Translate 'takes ...' to (i6_grammar_string, param_map, obj_slots).
+    param_map maps custom alias names → I6 runtime vars (noun/second).
+    obj_slots is a list of bools: True = object noun, False = number."""
     if line.startswith('*') or not line.startswith('takes '):
-        return line
+        return line, {}, [True]
     tokens = line[6:].strip().split()
-    first, tokens = _parse_noun_slot(tokens)
+    first, tokens, first_alias = _parse_noun_slot(tokens)
+    param_map = {}
+    if first_alias:
+        param_map[first_alias] = 'noun'
+    obj_slots = [first != 'number']
     if not tokens:
-        return f'* {first}'
-    prep   = tokens[0]
-    second, _ = _parse_noun_slot(tokens[1:])
-    return f"* {first} '{prep}' {second}"
+        return f'* {first}', param_map, obj_slots
+    prep = tokens[0]
+    second, _, second_alias = _parse_noun_slot(tokens[1:])
+    if second_alias:
+        param_map[second_alias] = 'second'
+    obj_slots.append(second != 'number')
+    return f"* {first} '{prep}' {second}", param_map, obj_slots
 
 
 def _to_id(name: str) -> str:
@@ -747,7 +852,31 @@ def _to_id(name: str) -> str:
     return ('o_' + s) if s and s[0].isdigit() else (s or 'unnamed')
 
 
+_UNICODE_TO_ASCII = {
+    '…': '...',   # ellipsis
+    '–': '-',     # en dash
+    '—': '--',    # em dash (already works via @@151 but this is cleaner)
+    '‘': "'",     # left single quote
+    '’': "'",     # right single quote
+    '“': '~',     # left double quote  → I6 string quote
+    '”': '~',     # right double quote → I6 string quote
+    ' ': ' ',     # non-breaking space
+}
+
 def _i6str(s: str) -> str:
+    for ch, rep in _UNICODE_TO_ASCII.items():
+        s = s.replace(ch, rep)
+    # ISO 8859-1 (0x80–0xFF) → @@decimal
+    result = []
+    for ch in s:
+        cp = ord(ch)
+        if cp > 127:
+            if cp <= 255:
+                result.append(f'@@{cp}')
+            # else: silently drop characters above ISO 8859-1
+        else:
+            result.append(ch)
+    s = ''.join(result)
     s = s.replace('\\"', '~')
     s = s.replace('\\n', '^').replace('\\t', '@@9')
     s = re.sub(r'\s+', ' ', s).strip()
@@ -772,12 +901,11 @@ def _degerund(word: str) -> str:
 
 
 def _verb_action_name(verb: dict) -> str:
-    first = verb['words'][0].capitalize()
-    for g in verb['grammar']:
-        tokens = g.split()
-        if 'held' in tokens or "'with'" in tokens:
-            return first + 'With'
-    return first
+    words = verb['words']
+    action = words[0].capitalize()
+    if len(words) > 1:
+        action += words[1].capitalize()
+    return action
 
 
 def _parse_handler_key(key: str, verb_action_map: dict) -> tuple:
@@ -819,12 +947,14 @@ def _obj_attributes(obj: dict) -> str:
 
     if kind == 'scenery':
         attrs.append('scenery')
-    if kind in ('man', 'woman', 'robot'):
+    if kind in ('man', 'woman', 'person', 'animal'):
         attrs.append('animate')
         if obj.get('keywords') and obj['keywords'][0][0].isupper():
             attrs.append('proper')
     if kind == 'woman':
         attrs.append('female')
+    if kind == 'animal':
+        attrs.append('neuter')
     if kind == 'class_instance':
         if obj.get('keywords') and obj['keywords'][0][0].isupper():
             attrs.append('proper')
@@ -882,7 +1012,8 @@ def _emit_say(w, text: str, prefix: str, known_ids: set) -> None:
     for i, (kind, val) in enumerate(parts):
         is_last = (i == len(parts) - 1)
         if kind == 'lit':
-            escaped = re.sub(r'\s+', ' ', val.replace('\\"', '~').replace('\\n', '^').replace('\\t', '@@9')).replace('"', '~')
+            trailing_space = ' ' if val and val[-1] == ' ' else ''
+            escaped = _i6str(val) + trailing_space
             items.append('"' + escaped + ('^' if is_last else '') + '"')
         else:
             article, _, ident = val.partition(' ')
@@ -911,7 +1042,15 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx) -> None:
     for stmt in stmts:
         t    = stmt['type']
         line = stmt.get('line')
-        if t == 'say':
+        if t == 'let':
+            expr = stmt['expr']
+            m_oag = re.match(r'(\w+)\.(\w+)\[(\w+)\]$', expr)
+            if m_oag:
+                obj, prop, idx = m_oag.groups()
+                w(f'{prefix}{stmt["var"]} = {obj}.&{prop}-->{idx};')
+            else:
+                w(f'{prefix}{stmt["var"]} = {expr};')
+        elif t == 'say':
             _emit_say(w, stmt['arg'], prefix, known_ids)
         elif t == 'give':
             tilde = '~' if stmt['neg'] else ''
@@ -956,11 +1095,11 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx) -> None:
             to  = stmt['to']
             obj_i6 = obj if obj in _RT else _to_id(obj)
             to_i6  = to  if to  in _RT else _to_id(to)
-            if obj not in _RT and obj_i6 not in known_ids:
+            if obj not in _RT and obj_i6 not in known_ids and obj not in vars_set:
                 raise GrueError(
                     f"unknown object '{obj}' in move statement"
                     f" — check spelling or declare the object", line, 'E083')
-            if to not in _RT and to_i6 not in known_ids:
+            if to not in _RT and to_i6 not in known_ids and to not in vars_set:
                 raise GrueError(
                     f"unknown destination '{to}' in move statement"
                     f" — check spelling or declare the room/object", line, 'E084')
@@ -976,7 +1115,7 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx) -> None:
                 raise GrueError(
                     f"unknown array '{arr_id}' — declare with 'array {arr_id} N'",
                     line, 'E085')
-            if idx >= arrays_by_id[arr_id]['size']:
+            if idx.isdigit() and int(idx) >= arrays_by_id[arr_id]['size']:
                 raise GrueError(
                     f"array '{arr_id}' index {idx} out of range"
                     f" (size {arrays_by_id[arr_id]['size']})", line, 'E086')
@@ -988,11 +1127,23 @@ def _emit_stmts(w, stmts: list, prefix: str, known_ids: set, kinds_ctx) -> None:
                 raise GrueError(
                     f"unknown array '{arr_id}' — declare with 'array {arr_id} N'",
                     line, 'E085')
-            if idx >= arrays_by_id[arr_id]['size']:
+            if idx.isdigit() and int(idx) >= arrays_by_id[arr_id]['size']:
                 raise GrueError(
                     f"array '{arr_id}' index {idx} out of range"
                     f" (size {arrays_by_id[arr_id]['size']})", line, 'E086')
             w(f'{prefix}{stmt["var"]} = {arr_id}-->{idx};')
+        elif t == 'obj_arr_set':
+            obj  = stmt['obj']
+            prop = stmt['prop']
+            idx  = stmt['idx']
+            val  = stmt['val']
+            w(f'{prefix}{obj}.&{prop}-->{idx} = {val};')
+        elif t == 'obj_arr_get':
+            var  = stmt['var']
+            obj  = stmt['obj']
+            prop = stmt['prop']
+            idx  = stmt['idx']
+            w(f'{prefix}{var} = {obj}.&{prop}-->{idx};')
         elif t == 'end':
             outcome = stmt['outcome']
             msg     = stmt.get('msg')
@@ -1132,7 +1283,24 @@ def _maybe_rtrue(w, stmts: list) -> None:
         w(f'{_STMT0}rtrue;')
 
 
-_NPC_KINDS = {'man', 'woman', 'robot'}
+def _collect_locals(stmts: list) -> list:
+    """Recursively collect all 'let' variable names from a statement tree."""
+    names = []
+    for stmt in stmts:
+        if stmt['type'] == 'let' and stmt['var'] not in names:
+            names.append(stmt['var'])
+        elif stmt['type'] == 'if':
+            for n in _collect_locals(stmt['then']):
+                if n not in names:
+                    names.append(n)
+            if stmt.get('else'):
+                for n in _collect_locals(stmt['else']):
+                    if n not in names:
+                        names.append(n)
+    return names
+
+
+_NPC_KINDS = {'man', 'woman', 'person', 'animal', 'class_instance'}
 
 def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set,
                    kinds_ctx, obj_kind=None) -> None:
@@ -1180,8 +1348,16 @@ def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set,
         w(f'{_ACTION}default: rfalse;')
         w(f'{_PROP}],')
 
+    def _locals_for(hmap):
+        seen = []
+        for stmts in hmap.values():
+            for n in _collect_locals(stmts):
+                if n not in seen:
+                    seen.append(n)
+        return (' ' + ' '.join(seen)) if seen else ''
+
     if life_h:
-        w(f'{_PROP}life [;')
+        w(f'{_PROP}life [{_locals_for(life_h)};')
         for key, stmts in life_h.items():
             _, noun_filter = _parse_handler_key(key, verb_action_map)
             w(f'{_ACTION}Give:')
@@ -1196,7 +1372,7 @@ def _emit_handlers(w, handlers: dict, verb_action_map: dict, known_ids: set,
     for prop, hmap in (('before', before_h), ('after', after_h)):
         if not hmap:
             continue
-        w(f'{_PROP}{prop} [;')
+        w(f'{_PROP}{prop} [{_locals_for(hmap)};')
         for key, stmts in hmap.items():
             action, second_filter = _parse_handler_key(key, verb_action_map)
             w(f'{_ACTION}{action}:')
@@ -1217,7 +1393,7 @@ def _emit_object(w, obj: dict, parent: str, verb_action_map: dict, known_ids: se
     oid   = obj['id']
     attrs = _obj_attributes(obj)
     kws   = ' '.join(f"'{k}'" for k in obj['keywords']) if obj['keywords'] else ''
-    _inside = obj['properties'].get('inside')
+    _inside = obj['properties'].get('inside') or obj['properties'].get('on')
     loc = _to_id(_inside) if _inside else parent
 
     # Class instance: validate required properties then emit with class name
@@ -1244,8 +1420,16 @@ def _emit_object(w, obj: dict, parent: str, verb_action_map: dict, known_ids: se
         w(f'    with description "{_i6str(obj["desc"])}",')
     if 'key' in obj['properties']:
         w(f'         with_key {obj["properties"]["key"]},')
+    # per-object array overrides from class
+    if cls:
+        for oa in cls.get('obj_arrays', []):
+            if oa['name'] in obj['properties']:
+                vals = obj['properties'][oa['name']]
+                w(f'         {oa["name"]} {vals},')
     for prop_key, prop_val in obj['properties'].items():
-        if prop_key in ('key', 'inside'):
+        if cls and any(oa['name'] == prop_key for oa in cls.get('obj_arrays', [])):
+            continue  # already emitted above
+        if prop_key in ('key', 'inside', 'on'):
             continue
         prop_kind_id = _to_id(prop_key)
         if prop_kind_id in kinds_by_id:
@@ -1325,6 +1509,9 @@ def _emit_class(w, cls: dict, verb_action_map: dict, known_ids: set, kinds_ctx):
             kd = kinds_by_id.get(prop_kind_id)
             if kd and len(kd['values']) == 2 and prop_val.lower() == kd['values'][1]:
                 attr_list.append(kd['values'][1])
+
+    for oa in cls.get('obj_arrays', []):
+        with_lines.append(oa['name'] + ' ' + ' '.join(['0'] * oa['size']))
 
     has_with     = bool(with_lines) or bool(cls['handlers'])
     has_clause   = ' '.join(attr_list)
@@ -1448,38 +1635,42 @@ def _uses_plural_s(ast: dict) -> bool:
 
 
 def _emit_draw_status_line(w, status_slots):
-    slots = status_slots if status_slots is not None else ['score', 'moves']
-    parts = []
-    for slot in slots:
-        s = slot.strip()
-        if s == 'score':
-            parts.append('"Score: ", score')
-        elif s in ('moves', 'turns'):
-            parts.append('"Moves: ", turns')
-        elif s == 'time':
-            parts.append('"Time: ", turns')
-        else:
-            parts.append(f'"{s.capitalize()}: ", {s}')
-    def _slot_width(s):
-        if s == 'score':               return 9    # "Score: 99"
-        if s in ('moves', 'turns'):    return 10   # "Moves: 999"
-        if s == 'time':                return 9    # "Time: 99"
-        return len(s) + 1 + 4                      # "Name: 999"
-    right_width = (sum(_slot_width(sl.strip()) for sl in slots)
-                   + 2 * max(len(slots) - 1, 0))
-    right_expr  = ', "  ", '.join(parts)
-    w('[ DrawStatusLine width right_start;')
+    locals_ = 'width right_start' if status_slots else 'width'
+    w(f'[ DrawStatusLine {locals_};')
     w('    @split_window 1;')
     w('    @set_window 1;')
     w('    width = 0-->33;')
     w('    @set_cursor 1 1;')
     w('    spaces width;')
     w('    @set_cursor 1 1;')
-    w('    print (name) location;')
-    w(f'    right_start = width - {right_width};')
-    w('    if (right_start < 1) right_start = 1;')
-    w('    @set_cursor 1 right_start;')
-    w(f'    print {right_expr};')
+    if not status_slots:
+        w('    print (name) location;')
+    else:
+        parts = []
+        for slot in status_slots:
+            s = slot.strip()
+            if s == 'score':
+                parts.append('"Score: ", score')
+            elif s in ('moves', 'turns'):
+                parts.append('"Moves: ", turns')
+            elif s == 'time':
+                parts.append('"Time: ", turns')
+            else:
+                parts.append(f'"{s.capitalize()}: ", {s}')
+        def _slot_width(s):
+            if s == 'score':               return 9
+            if s in ('moves', 'turns'):    return 10
+            if s == 'time':                return 9
+            return len(s) + 1 + 4
+        right_width = (sum(_slot_width(sl.strip()) for sl in status_slots)
+                       + 2 * max(len(status_slots) - 1, 0))
+        right_expr  = ', "  ", '.join(parts)
+        w(f'    right_start = width - {right_width};')
+        w('    if (right_start < 2) right_start = 2;')
+        w('    @set_cursor 1 right_start;')
+        w(f'    print {right_expr};')
+        w('    @set_cursor 1 1;')
+        w(f'    print (name) location;')
     w('    @set_window 0;')
     w('];')
     w('')
@@ -1593,9 +1784,16 @@ def emit_i6(ast: dict) -> str:
         action   = _verb_action_name(verb)
         sub_name = action + 'Sub'
         default  = verb.get('default', '')
+        obj_slots = verb.get('obj_slots', [True])
         w(f'[ {sub_name};')
         if default:
             w(f'    "{_i6str(default)}";')
+        if len(obj_slots) > 0 and obj_slots[0]:
+            w(f'    if (inp1 > 1 && RunRoutines(inp1, after) ~= 0) rtrue;')
+        if len(obj_slots) > 1 and obj_slots[1]:
+            w(f'    if (inp2 > 1 && RunRoutines(inp2, after) ~= 0) rtrue;')
+        w(f'    if (location ~= 0 && RunRoutines(location, after) ~= 0) rtrue;')
+        w(f'    return GamePostRoutine();')
         w('];')
         w('')
         synonyms  = verb.get('synonyms', verb['words'][:1])
@@ -1721,10 +1919,10 @@ def emit_i6(ast: dict) -> str:
         w(f'    selfobj.description = "{_i6str(ast["player_desc"])}";')
     if ast.get('seed') is not None:
         w(f'    random(-{ast["seed"]});')
-    w(f'    print "^^{_i6str(title)}^^^";')
     if ast.get('on_start'):
         _emit_stmts(w, ast['on_start'], '    ', known_ids,
                     (kinds_by_id, values_set, vars_set, classes_by_id, arrays_by_id))
+    w('    print "^";')
     w('];')
 
     return '\n'.join(lines)
@@ -1750,7 +1948,7 @@ def main():
         sys.exit(1)
 
     try:
-        ast = parse(source)
+        ast = parse(source, source_path=src_path)
         inf = emit_i6(ast)
     except GrueError as e:
         loc      = f'{src_path.name}:{e.line}: ' if e.line else f'{src_path.name}: '

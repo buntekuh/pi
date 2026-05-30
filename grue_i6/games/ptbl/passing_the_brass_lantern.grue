@@ -1,0 +1,31 @@
+"Passing the Brass Lantern" by Bernd Eickhoff
+
+uses chapters/01_talos
+
+player "They say Medea is a sorceress.\n
+        They say she wields power to deceive.\n
+        They are wrong.\n
+        Socrates is my father, who lent me his inquisitive mind\n
+        and Ulysses my mother, a wanderer and a teller of tales.\n
+        I speak no lies, but the questions that shake us.\n
+        This story is my undoing of Talos and the creation of the new mind in its stead."
+
+
+verb talk
+    takes creature noun
+    "There is no one here who will answer."
+
+kind burning: dark, lit
+
+object Brass Lantern, lamp "The lantern is {self burning}"
+    instead of examine:
+        if self is lit:
+            say "The lantern burns with a steady flame."
+        else:
+            say "The lantern is dark."
+
+kind scene: talos, emily
+
+object State "tracks global state"
+
+    
