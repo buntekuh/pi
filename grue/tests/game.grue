@@ -1,0 +1,107 @@
+# game — Biro Factory, Chapter 2: The Robots
+
+"The Biro Factory" by Bernd Eickhoff version chapter two
+
+var biros_made
+var quota: 10
+var day_length: 20
+
+kind robot_status: *idle, assembling, fetching, malfunctioning
+
+class Robot
+    robot_status: idle
+    parts: 0
+
+    on every turn:
+        if robot_status is assembling:
+            if parts > 0:
+                parts - 1
+                biros_made + 1
+                say "{self} assembles a biro. Total: {biros_made}."
+            else:
+                robot_status = idle
+                say "{self} runs out of parts and stops."
+        if robot_status is fetching:
+            parts + 3
+            robot_status = assembling
+            say "{self} returns with parts and begins assembling."
+        if robot_status is malfunctioning:
+            say "{self} sparks and judders."
+        if turn modulo 7 == 0 and robot_status is assembling:
+            robot_status = malfunctioning
+            say "{self} breaks down!"
+
+    on examine self:
+        say "{self} is {robot_status}. Parts: {parts}. Biros made: {biros_made}."
+
+    on direct self to assemble:
+        say "{self} is broken. Repair it first." if robot_status is malfunctioning
+        fail malfunctioning if robot_status is malfunctioning
+        robot_status = assembling
+        say "{self} begins assembling."
+
+    on direct self to fetch parts:
+        say "{self} is broken. Repair it first." if robot_status is malfunctioning
+        fail malfunctioning if robot_status is malfunctioning
+        robot_status = fetching
+        say "{self} heads to the parts room."
+
+    on repair self:
+        say "{self} is not broken." unless robot_status is malfunctioning
+        fail not_broken unless robot_status is malfunctioning
+        robot_status = idle
+        say "You repair {self}. It whirs back to life."
+
+on every turn:
+    if turn == day_length:
+        if biros_made >= quota:
+            say "Day complete. {biros_made} biros produced. Quota met!"
+        else:
+            say "Day complete. Only {biros_made} biros. Deeply disappointing."
+        end
+
+on check quota:
+    say "{biros_made} of {quota} biros produced."
+    say "{quota - biros_made} more needed." if biros_made < quota
+    say "Quota met!" if biros_made >= quota
+
+Room lobby of the biro factory "A cavernous reception hall. The factory floor lies to the north."
+    north: assembly line
+    Robot Benson "A stocky iron robot with a serial number stamped on its chest."
+    Robot Willoughby "A tall, spindly robot that moves with surprising grace."
+
+Room assembly line "Conveyor belts and stamping machines fill the room. The lobby is south."
+    south: lobby of the biro factory
+    east: parts warehouse
+
+Room parts warehouse "Shelves of biro components stretch to the ceiling."
+    west: assembly line
+
+test
+    test "examine robots".
+    test "fetch and assemble".
+    test "malfunctioning".
+    test "quota".
+
+test "examine robots"
+    examine Benson. "idle"
+    examine Willoughby. "idle"
+
+test "fetch and assemble"
+    direct Benson to fetch parts. "heads to the parts room"
+    . "returns with parts"
+    examine Benson. "assembling"
+    . "assembles a biro"
+
+test "malfunctioning"
+    Benson.robot_status = malfunctioning
+    direct Benson to fetch parts. "broken. Repair it first."
+    repair Benson. "whirs back to life"
+    examine Benson. "idle"
+    repair Benson. "not broken"
+
+test "quota"
+    check quota. "10 more needed"
+    biros_made = 10
+    check quota. "Quota met!"
+    check quota. not "more needed"

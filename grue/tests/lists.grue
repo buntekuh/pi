@@ -1,0 +1,55 @@
+# lists — Object as list, static and dynamic property access
+
+"Lists" by Test
+
+class Log
+    Object entries
+    position: 0
+
+    on record string:entry in self:
+        say "Log is full." if position >= 5
+        fail full if position >= 5
+        entries.{position} = entry
+        position + 1
+        say "Recorded at {position - 1}."
+
+    on read self at number:slot:
+        say "Nothing at {slot}." unless entries.{slot} is set
+        fail empty unless entries.{slot} is set
+        say "{entries.{slot}}"
+
+    on read self:
+        for i from 0 to 5:
+            say "{i}: {entries.{i}}" if entries.{i} is set
+
+    on write string:key to self:
+        entries.{key} = key
+        say "Written at key '{key}'."
+
+Log mission log "A mission log."
+
+test
+    test "dynamic write and read".
+    test "static read".
+    test "computed key".
+    test "full log".
+
+test "dynamic write and read"
+    record "Arrived" in mission log. "Recorded at 0."
+    record "Explored" in mission log. "Recorded at 1."
+    read mission log. "Arrived"
+    read mission log. "Explored"
+
+test "static read"
+    record "Arrived" in mission log.
+    read mission log at 0. "Arrived"
+    read mission log at 1. "Nothing at 1."
+
+test "computed key"
+    write "jason" to mission log. "Written at key 'jason'."
+    read mission log at jason. "jason"
+
+test "full log"
+    from 0 to 5:
+        record "Entry" in mission log.
+    record "One too many" in mission log. "Log is full."

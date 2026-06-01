@@ -1,0 +1,44 @@
+# movement — going places, custom exits, multi-word exits, override
+
+"Movement" by Test
+
+var energy: 3
+
+on go Room:destination:
+    say "You are too tired to move." if energy == 0
+    fail if energy == 0
+    parent
+    energy - 1
+
+Room Washington DC "Before you stands a ladder. Whether it goes all the way to the moon is being discussed by the learned scholars at the university."
+    top of ladder: Mare Tranquillitatis
+    manhole: the sewers
+    west: landing pad
+
+Room Mare Tranquillitatis "A vast lunar plain."
+    bottom of ladder: Washington DC
+
+Room the sewers "Say hi to the rats."
+    up: Washington DC
+
+Room landing pad "A concrete pad."
+    east: Washington DC
+
+test
+    test "standard exits".
+    test "custom exits".
+    test "energy limit".
+
+test "standard exits"
+    go west. "landing pad"
+    go east. "Washington DC"
+
+test "custom exits"
+    go top of ladder. "lunar plain"
+    go bottom of ladder. "Washington DC"
+    go manhole. "to the rats"
+
+test "energy limit"
+    energy = 1
+    go west. "landing pad"
+    go east. "too tired"

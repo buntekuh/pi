@@ -1,0 +1,42 @@
+# parent — before / after / instead-of behavior
+
+"Parent" by Test
+
+class Vehicle
+    on examine self:
+        say "A sturdy vehicle."
+
+class Car extends Vehicle
+    on examine self:
+        say "A shiny car."
+        parent
+
+class Truck extends Vehicle
+    on examine self:
+        parent
+        say "It is very large."
+
+class Bicycle extends Vehicle
+    on examine self:
+        say "A bicycle. Just a bicycle."
+
+Car red sedan "A red sedan."
+Truck heavy lorry "A heavy lorry."
+Bicycle penny farthing "A towering penny farthing."
+
+test
+    test "before".
+    test "after".
+    test "instead of".
+
+test "before"
+    examine red sedan. "shiny"
+    examine red sedan. "sturdy"
+
+test "after"
+    examine heavy lorry. "sturdy"
+    examine heavy lorry. "very large"
+
+test "instead of"
+    examine penny farthing. "bicycle"
+    examine penny farthing. not "sturdy"

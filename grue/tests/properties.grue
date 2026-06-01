@@ -1,0 +1,39 @@
+# properties — plain properties, numeric, string, object references, removal
+
+"Properties" by Test
+
+Room kitchen "A kitchen."
+    north: hallway
+
+Room hallway "A hallway."
+    south: kitchen
+
+Room attic "A dusty attic."
+
+on seal north:
+    hallway.north = unset
+    say "The north exit is sealed."
+
+on unseal north:
+    hallway.north = attic
+    say "The north exit is open."
+
+on go north:
+    say "There is no exit to the north." unless location.north is set
+    fail unless location.north is set
+    parent
+
+test
+    test "exits".
+    test "seal and unseal".
+
+test "exits"
+    go north. "hallway"
+    go south. "kitchen"
+
+test "seal and unseal"
+    go north. "hallway"
+    seal north. "sealed"
+    go north. "no exit to the north"
+    unseal north. "open"
+    go north. "attic"

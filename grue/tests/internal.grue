@@ -1,0 +1,40 @@
+# internal — callable from code only, never player-accessible
+
+"Internal" by Test
+
+internal has object:thing:
+    succeed if player has thing
+    fail not_here
+
+internal move object:thing to Room:destination:
+    thing.location = destination
+
+internal score points:number:
+    score + points
+
+on take Object:item:
+    say "You don't see that here." unless {has item silently}
+    fail unless {has item silently}
+    say "Taken."
+
+on deposit Object:item in Room:room:
+    say "You don't have that." unless {has item silently}
+    fail unless {has item silently}
+    {move item to room}
+    {score 10}
+    say "Deposited. Score: {score}."
+
+Object crate "A wooden crate."
+Room vault "A secure vault."
+
+test
+    test "internal not player-accessible".
+    test "internal via handler".
+
+test "internal not player-accessible"
+    has crate. "You can't do that."
+
+test "internal via handler"
+    take crate. "Taken."
+    deposit crate in vault. "Deposited. Score: 10."
+    deposit crate in vault. "You don't have that."

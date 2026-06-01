@@ -1,0 +1,34 @@
+# actors — on every turn at global, room, and object level
+
+"Actors" by Test
+
+on every turn:
+    say "You wake in a cold, dark room." if turn == 0
+
+Room engine room "Banks of humming machinery."
+    on every turn:
+        say "The machinery hums." if turn > 0
+
+Object time bomb "A ticking device."
+    fuse: 5
+    on every turn:
+        fuse - 1
+        say "The bomb ticks. {fuse} turns remaining."
+        if fuse == 0:
+            say "BOOM."
+            end
+
+test
+    test "global turn 0".
+    test "countdown".
+
+test "global turn 0"
+    . "cold, dark room"
+
+test "countdown"
+    . "5 turns remaining"
+    . "4 turns remaining"
+    . "3 turns remaining"
+    . "2 turns remaining"
+    . "1 turns remaining"
+    . "BOOM"

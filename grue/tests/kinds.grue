@@ -1,0 +1,43 @@
+# kinds — boolean, named list, global variables, default marker, comparison
+
+"Kinds" by Test
+
+kind lockable: *false, true
+kind light: *extinguished, lit
+kind mood: happy, *neutral, sad
+kind wet: *dry, damp, wet, soaked, drenched
+
+Object brass lantern, lamp "A tarnished brass lantern."
+    is lit
+    is lockable
+
+Object Peter "A young boy."
+    is sad
+    is damp
+
+on examine brass lantern:
+    say "The lantern glows." if brass lantern is lit
+    say "The lantern is dark." if brass lantern is extinguished
+
+on examine Peter:
+    say "Peter looks miserable." if Peter is sad
+    say "Peter is soaking." if Peter.wet >= wet
+    say "Peter is damp." if Peter is damp and Peter.wet < wet
+
+test
+    test "boolean kind".
+    test "named kind".
+    test "comparison".
+
+test "boolean kind"
+    examine brass lantern. "glows"
+
+test "named kind"
+    examine Peter. "miserable"
+    examine Peter. "damp"
+    examine Peter. not "soaking"
+
+test "comparison"
+    Peter.wet = drenched
+    examine Peter. "soaking"
+    examine Peter. not "damp"

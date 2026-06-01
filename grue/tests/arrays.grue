@@ -1,0 +1,105 @@
+# arrays — open a ledger, record and recall entries
+#
+# Demonstrates: handler signatures as grammar, typed parameters,
+# fail/succeed tokens, when dispatch, silently, class hierarchy,
+# dynamic property access with {expr}, is set / is unset.
+
+internal has object:thing:
+    succeed if player has thing
+    fail not_here
+
+class Ledger
+    Object log
+    position: 0
+    kind opened: *closed, open
+
+    on open self at number:page:
+        say "That page doesn't exist." if page >= 10
+        fail out_of_bounds if page >= 10
+        position = page
+        opened = open
+        say "Opened {self} at position {page}."
+
+    on record string:entry in self:
+        say "Open it first." unless opened is open
+        fail not_open unless opened is open
+        say "Already written." if log.{position} is set
+        fail already_written if log.{position} is set
+        log.{position} = entry
+        say "Recorded."
+
+    on record string:entry on number:page in self:
+        say "You don't have that." unless {has self silently}
+        fail not_here unless {has self silently}
+        say "That page doesn't exist." if page >= 10
+        fail out_of_bounds if page >= 10
+        say "Already written." if log.{page} is set
+        fail already_written if log.{page} is set
+        log.{page} = entry
+        say "Recorded at position {page}."
+
+    on recall self:
+        say "Open it first." unless opened is open
+        fail not_open unless opened is open
+        say "Nothing here." unless log.{position} is set
+        fail empty unless log.{position} is set
+        say "{log.{position}}"
+
+    on examine self:
+        say "{self} is closed." if opened is closed
+        say "{self} open at position {position}." if opened is open
+        say "Entry: {log.{position}}." if log.{position} is set
+        say "Blank." if opened is open and log.{position} is unset
+
+Room archive "A dusty storage facility in the forgotten west wing."
+    Object table "A sturdy reading table."
+        Ledger rolodex "A clackity index card rolodex. Most cards are missing."
+        Ledger notebook "A brown leatherbound notebook. It has 10 pages."
+
+test
+    test "open".
+    test "record".
+    test "three-noun record".
+    test "recall".
+    test "examine".
+    test "when dispatch".
+
+test "open"
+    open rolodex at 3. "Opened rolodex at position 3."
+    open rolodex at 10. "That page doesn't exist."
+    open rolodex at 9. "Opened rolodex at position 9."
+
+test "record"
+    record "Jason" in rolodex. "Open it first."
+    open rolodex at 3.
+    record "Jason" in rolodex. "Recorded."
+    record "Medea" in rolodex. "Already written."
+
+test "three-noun record"
+    record "Talos" on 3 in rolodex. "Recorded at position 3."
+    record "Eliza" on 3 in rolodex. "Already written."
+    record "Eliza" on 4 in rolodex. "Recorded at position 4."
+    record "Grue" on 10 in rolodex. "That page doesn't exist."
+
+test "recall"
+    open rolodex at 3.
+    recall rolodex. "Nothing here."
+    record "Jason" in rolodex.
+    recall rolodex. "Jason"
+
+test "examine"
+    examine rolodex. "closed"
+    open rolodex at 3.
+    examine rolodex. "open at position 3"
+    examine rolodex. "Blank"
+    record "Jason" in rolodex.
+    examine rolodex. "Entry: Jason."
+
+Room archive "..."
+    test "when dispatch"
+        when {open rolodex at 3}:
+            out_of_bounds:
+                say "Test: out of bounds."
+            succeed:
+                record "Jason" in rolodex.
+                recall rolodex. "Jason"

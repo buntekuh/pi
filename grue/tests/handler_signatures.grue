@@ -1,0 +1,49 @@
+# handler_signatures — typed parameters, keywords, class types, self
+
+"Handler Signatures" by Test
+
+class Ledger
+    Object log
+    position: 0
+
+    on open self at number:page:
+        position = page
+        say "Opened {self} at {page}."
+
+    on record string:entry in self:
+        log.{position} = entry
+        say "Recorded {entry}."
+
+    on recall self:
+        say "{log.{position}}"
+
+on traverse passage in the dark:
+    say "You stumble through."
+
+on talk to Object:npc:
+    say "{npc} nods."
+
+on give Object:item to Object:npc:
+    say "You hand {item} to {npc}."
+
+Ledger rolodex "A clackity rolodex."
+Object guard "A stern guard."
+
+test
+    test "keyword and class param".
+    test "string param".
+    test "two object params".
+    test "bare keyword handler".
+
+test "keyword and class param"
+    open rolodex at 5. "Opened rolodex at 5."
+
+test "string param"
+    open rolodex at 0.
+    record "Jason" in rolodex. "Recorded Jason."
+
+test "two object params"
+    give rolodex to guard. "You hand rolodex to guard."
+
+test "bare keyword handler"
+    traverse passage in the dark. "stumble through"

@@ -1,0 +1,43 @@
+# truthiness — only false and unset are false; 0 is not false
+
+"Truthiness" by Test
+
+kind flag: *false, true
+
+Object counter "A mechanical counter."
+    count: 0
+
+on check zero:
+    say "count is truthy." if counter.count
+    say "count is falsy." unless counter.count
+
+on check flag:
+    say "flag is truthy." if flag
+    say "flag is falsy." unless flag
+
+on check missing:
+    say "missing is truthy." if counter.missing
+    say "missing is falsy." unless counter.missing
+
+on raise flag:
+    flag = true
+    say "Flag raised."
+
+test
+    test "zero is not false".
+    test "false is false".
+    test "unset is false".
+    test "true is true".
+
+test "zero is not false"
+    check zero. "count is truthy."
+
+test "false is false"
+    check flag. "flag is falsy."
+
+test "unset is false"
+    check missing. "missing is falsy."
+
+test "true is true"
+    raise flag.
+    check flag. "flag is truthy."

@@ -1,0 +1,33 @@
+# when — token dispatch, named arms, fail/succeed/default
+
+"When" by Test
+
+on traverse passage in the dark:
+    say "You are eaten by a grue." if location is dark room
+    fail eaten_by_grue if location is dark room
+    say "You stumble through."
+
+Room entrance "A lit entrance."
+    north: dark room
+
+Room dark room "It is pitch black."
+
+on go north:
+    when {traverse passage in the dark}:
+        eaten_by_grue:
+            say "It is very dark. You are likely to be eaten by a grue."
+            end
+        succeed:
+            say "You stumble through to the other side."
+        default:
+            say "Something went wrong."
+
+test
+    test "succeed arm".
+    test "named token arm".
+
+test "succeed arm"
+    traverse passage in the dark. "stumble through"
+
+test "named token arm"
+    go north. "likely to be eaten"

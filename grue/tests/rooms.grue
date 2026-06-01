@@ -1,0 +1,33 @@
+# rooms — room declarations, exits, nested objects
+
+"Rooms" by Test
+
+Room kitchen "The smell of burnt coffee lingers."
+    north: hallway
+    east: garden
+
+Room hallway "A narrow hallway."
+    south: kitchen
+    up: attic
+    Object coat rack "A sturdy wooden rack."
+
+Room garden "A walled garden."
+    west: kitchen
+
+Room attic "A dusty attic."
+    down: hallway
+
+test
+    test "exits".
+    test "up and down".
+
+test "exits"
+    go north. "hallway"
+    go south. "kitchen"
+    go east. "garden"
+    go west. "kitchen"
+
+test "up and down"
+    go north. "hallway"
+    go up. "attic"
+    go down. "hallway"

@@ -1,0 +1,54 @@
+# iterators — for/in, for/from, range repeat, filter
+
+"Iterators" by Test
+
+Room storeroom "A cluttered storeroom."
+    Object crate "A wooden crate."
+    Object barrel "A heavy barrel."
+    Object lantern "A dusty lantern."
+
+on inventory:
+    say "You are carrying: [nobreak]"
+    for item in player.filter(Object):
+        say "{item}[comma]"
+
+on list exits:
+    for key, value in location.filter(Room):
+        say "{key}: {value}[comma]"
+
+on count things:
+    var n
+    for item in location.filter(Object):
+        n + 1
+    say "{n} things here."
+
+on bang number:times times:
+    from 0 to times:
+        say "Bang!"
+
+on log entries:
+    for i from 0 to 3:
+        say "Entry {i}."
+
+test
+    test "inventory".
+    test "filter by class".
+    test "range repeat".
+    test "range with index".
+
+test "inventory"
+    take crate. "Taken."
+    take lantern. "Taken."
+    inventory. "crate"
+    inventory. "lantern"
+    inventory. not "barrel"
+
+test "filter by class"
+    count things. "3 things here."
+
+test "range repeat"
+    bang 3 times. "Bang!"
+
+test "range with index"
+    log entries. "Entry 0."
+    log entries. "Entry 2."

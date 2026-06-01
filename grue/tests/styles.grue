@@ -1,0 +1,59 @@
+# styles — Style and Font declarations, block styles, inline spans
+
+"Styles" by Test
+
+Style default
+    Font
+        family: serif
+        face: "Georgia"
+        size: 16
+    align: left
+    color: black
+
+Style mono
+    Font
+        family: monospaced
+        face: "Courier New"
+        size: 13
+    align: left
+
+Style key
+    Font
+        family: monospaced
+        bold: true
+    color: dodgerblue
+
+Style header
+    Font
+        family: sans
+        size: 24
+        bold: true
+    align: center
+
+Style alert
+    Font
+        bold: true
+        italic: true
+    color: crimson
+
+on status:
+    say header "SYSTEM STATUS"
+    say mono "All systems nominal."
+    say "Press [key]ENTER[/key] to continue."
+    say alert "WARNING: reactor unstable."
+
+test
+    test "block style".
+    test "inline span".
+    test "alert".
+
+test "block style"
+    status. "SYSTEM STATUS"
+    status. "nominal"
+
+test "inline span"
+    status. "ENTER"
+
+test "alert"
+    status. "WARNING"
+    status. "reactor unstable"

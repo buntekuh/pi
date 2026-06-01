@@ -1,0 +1,46 @@
+# set_unset — unset as null type, is set / is unset, kind unset vs null
+
+"Set and Unset" by Test
+
+kind topic: *unset, jason, help
+
+Object notebook "A notebook."
+    Object log
+
+var page
+
+on write string:entry:
+    say "Already written." if log.{page} is set
+    fail if log.{page} is set
+    log.{page} = entry
+    say "Written."
+
+on read:
+    say "Nothing here." unless log.{page} is set
+    fail unless log.{page} is set
+    say "{log.{page}}"
+
+on clear:
+    log.{page} = unset
+    say "Cleared."
+
+on check topic:
+    say "Topic is unset." if topic is unset
+    say "Topic is jason." if topic is jason
+
+test
+    test "write and read".
+    test "kind unset vs null".
+
+test "write and read"
+    write "hello". "Written."
+    read. "hello"
+    write "world". "Already written."
+    clear. "Cleared."
+    read. "Nothing here."
+
+test "kind unset vs null"
+    check topic. "Topic is unset."
+    topic is jason
+    check topic. "Topic is jason."
+    check topic. not "Topic is unset."

@@ -1,0 +1,41 @@
+# silently — suppresses say throughout call chain
+
+"Silently" by Test
+
+kind opened: *closed, open
+
+Object box "A wooden box."
+
+internal has object:thing:
+    succeed if player has thing
+    fail not_here
+
+on open Object:container:
+    say "You don't have that." unless {has container silently}
+    fail not_here unless {has container silently}
+    say "Already open." if container is opened
+    fail already_open if container is opened
+    container.opened = open
+    say "{container} swings open."
+
+on check Object:thing:
+    if {has thing silently}:
+        say "{thing} is in your inventory."
+    else:
+        say "{thing} is not here."
+
+test
+    test "silently suppresses output".
+    test "check uses silently".
+
+test "silently suppresses output"
+    take box. "Taken."
+    open box. "swings open"
+    open box. "Already open."
+    open box. not "swings open"
+
+test "check uses silently"
+    check box. "not here"
+    take box.
+    check box. "in your inventory"
+    check box. not "not here"

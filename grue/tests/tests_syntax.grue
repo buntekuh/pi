@@ -1,0 +1,53 @@
+# tests_syntax — default test, named tests, assertions, scoped tests, chaining
+
+"Test Syntax" by Test
+
+class Ledger
+    Object log
+    position: 0
+    kind opened: *closed, open
+
+    on open self at number:page:
+        say "That page doesn't exist." if page >= 10
+        fail out_of_bounds if page >= 10
+        position = page
+        opened = open
+        say "Opened {self} at position {page}."
+
+    on record string:entry in self:
+        say "Open it first." unless opened is open
+        fail not_open unless opened is open
+        log.{position} = entry
+        say "Recorded."
+
+    on recall self:
+        say "Open it first." unless opened is open
+        fail not_open unless opened is open
+        say "Nothing written here." unless log.{position} is set
+        fail empty unless log.{position} is set
+        say "{log.{position}}"
+
+Ledger rolodex "A clackity rolodex."
+
+Room archive "A dusty archive."
+    Ledger notebook "A leatherbound notebook."
+
+test
+    test "open".
+    test "record and recall".
+    test "scoped".
+
+test "open"
+    open rolodex at 3. "Opened rolodex at position 3."
+    open rolodex at 10. "That page doesn't exist."
+    open rolodex at 10. not "Opened"
+
+test "record and recall"
+    record "Jason" in rolodex. "Open it first."
+    open rolodex at 0.
+    record "Jason" in rolodex. "Recorded."
+    recall rolodex. "Jason"
+
+Room archive "..."
+    test "scoped"
+        open notebook at 5. "Opened notebook at position 5."

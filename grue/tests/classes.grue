@@ -1,0 +1,61 @@
+# classes — declaration, properties, kinds, instances, inheritance
+
+"Classes" by Test
+
+class Ledger
+    Object log
+    position: 0
+    kind opened: *closed, open
+
+    on open self at number:page:
+        say "That page doesn't exist." if page >= 10
+        fail out_of_bounds if page >= 10
+        position = page
+        opened = open
+        say "Opened {self} at position {page}."
+        succeed opened
+
+    on record string:entry in self:
+        say "You haven't opened it yet." unless opened is open
+        fail not_open unless opened is open
+        log.{position} = entry
+        say "Recorded."
+        succeed stored
+
+class Rolodex extends Ledger
+    on open self at number:page:
+        say "Clack. Clack. Clack."
+        parent
+
+class Notebook extends Ledger
+    max_pages: 20
+
+    on open self at number:page:
+        say "That page doesn't exist." if page >= max_pages
+        fail out_of_bounds if page >= max_pages
+        parent
+
+Rolodex rolodex "A clackity index card rolodex."
+Notebook notebook "A brown leatherbound notebook."
+
+test
+    test "basic class".
+    test "inheritance".
+    test "subclass limit".
+    test "record".
+
+test "basic class"
+    open rolodex at 3. "Opened rolodex at position 3."
+
+test "inheritance"
+    open rolodex at 3. "Clack"
+    open rolodex at 3. "Opened"
+
+test "subclass limit"
+    open notebook at 15. "Opened notebook at position 15."
+    open rolodex at 15. "That page doesn't exist."
+
+test "record"
+    record "Jason" in rolodex. "You haven't opened it yet."
+    open rolodex at 0. "Opened"
+    record "Jason" in rolodex. "Recorded."

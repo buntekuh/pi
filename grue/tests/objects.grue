@@ -1,0 +1,26 @@
+# objects — declarations, nesting, aliases, descriptions
+
+"Objects" by Test
+
+Room kitchen "A kitchen."
+    Object table "A scrubbed pine table."
+    Object brass lantern, lamp "A tarnished brass lantern."
+    Object mug, cup, vessel "Your grandmother's mug."
+        Object tea bag "A soggy tea bag."
+
+Object torch "A flickering torch."
+Object old key, key "A heavy iron key."
+
+test
+    test "aliases".
+    test "nesting".
+
+test "aliases"
+    examine lamp. "tarnished brass"
+    examine brass lantern. "tarnished brass"
+    take cup. "Taken."
+    examine vessel. "grandmother"
+
+test "nesting"
+    examine mug. "grandmother"
+    examine tea bag. "soggy"

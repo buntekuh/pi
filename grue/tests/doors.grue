@@ -1,0 +1,48 @@
+# doors — top-level doors, nested doors, inline doors
+
+"Doors" by Test
+
+kind lockable: *false, true
+
+Room corridor "A narrow corridor."
+    north: great hall
+    south: vestibule
+
+Room great hall "A vast echoing hall."
+    south: corridor
+
+Room vestibule "A grand entrance hall."
+    north: corridor
+    east: Door brass door
+        leads to: kitchen
+        is lockable
+        key: brass key
+
+Room kitchen "A kitchen."
+
+Door iron door, gate "A heavy iron door."
+    east: landing
+    west: bedroom
+
+Room landing "A landing."
+Room bedroom "A small bedroom."
+
+Object brass key "A small brass key."
+
+test
+    test "inline door locked".
+    test "inline door with key".
+    test "top-level door".
+
+test "inline door locked"
+    go north. "great hall"
+    go north. "great hall"
+    go east. "The brass door is locked."
+
+test "inline door with key"
+    take brass key. "Taken."
+    go east. "kitchen"
+
+test "top-level door"
+    go east. "landing"
+    go west. "bedroom"

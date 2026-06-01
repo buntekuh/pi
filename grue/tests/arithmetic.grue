@@ -1,0 +1,66 @@
+# arithmetic — integers, rounding, floor/ceiling, math functions, modulo
+
+"Arithmetic" by Test
+
+var score
+var energy: 100
+
+on earn number:points:
+    score + points
+    say "Score: {score}."
+
+on halve:
+    score = score / 2
+    say "Score: {score}."
+
+on halve floor:
+    score = floor(score / 2)
+    say "Score: {score}."
+
+on halve ceiling:
+    score = ceiling(score / 2)
+    say "Score: {score}."
+
+on drain number:amount:
+    energy - amount
+    energy = biggest(energy, 0)
+    say "Energy: {energy}."
+
+on distance from number:target:
+    var d: absolute(score - target)
+    say "Distance: {d}."
+
+on tick:
+    say "Tick!" if turn modulo 3 == 0
+
+test
+    test "addition".
+    test "rounding".
+    test "floor".
+    test "ceiling".
+    test "clamp".
+    test "modulo".
+
+test "addition"
+    earn 10. "Score: 10."
+    earn 5. "Score: 15."
+
+test "rounding"
+    earn 7.
+    halve. "Score: 4."
+
+test "floor"
+    earn 7.
+    halve floor. "Score: 3."
+
+test "ceiling"
+    earn 7.
+    halve ceiling. "Score: 4."
+
+test "clamp"
+    drain 200. "Energy: 0."
+
+test "modulo"
+    tick. not "Tick"
+    tick. not "Tick"
+    tick. "Tick!"

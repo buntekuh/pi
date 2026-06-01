@@ -1,0 +1,30 @@
+# js — js {} escape, external calls, library-level usage
+
+"JavaScript Escape" by Test
+
+on talk to terminal:
+    say "The terminal hums."
+    js { elizaRespond(player_input) }
+
+on examine screen:
+    say "The screen flickers."
+    js { displayImage('terminal.png') }
+
+internal on save:
+    js {
+        const name = await showSaveDialog()
+        if (name) saveGameState(name)
+    }
+
+Object terminal "A green-screened terminal."
+Object screen "A wall-mounted display screen."
+
+test
+    test "js talk".
+    test "js examine".
+
+test "js talk"
+    talk to terminal. "terminal hums"
+
+test "js examine"
+    examine screen. "screen flickers"

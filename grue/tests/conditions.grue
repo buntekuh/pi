@@ -1,0 +1,51 @@
+# conditions — if/unless block and postfix, and/or/not
+
+"Conditions" by Test
+
+kind mood: happy, *neutral, sad
+kind light: *extinguished, lit
+
+Object brass lantern "A tarnished brass lantern."
+    is lit
+
+Object Peter "A young boy."
+    is sad
+
+on examine brass lantern:
+    if brass lantern is lit:
+        say "The lantern glows."
+    else:
+        say "The lantern is dark."
+
+on examine Peter:
+    say "Peter looks miserable." if Peter is sad
+    say "Peter seems content." unless Peter is sad
+
+on check both:
+    say "Bright and gloomy." if brass lantern is lit and Peter is sad
+    say "Something is off." if brass lantern is extinguished or Peter is happy
+
+test
+    test "block if".
+    test "postfix if".
+    test "unless".
+    test "and".
+    test "extinguished".
+
+test "block if"
+    examine brass lantern. "glows"
+
+test "postfix if"
+    examine Peter. "miserable"
+
+test "unless"
+    examine Peter. not "content"
+
+test "and"
+    check both. "Bright and gloomy"
+
+test "extinguished"
+    brass lantern.light = extinguished
+    examine brass lantern. "dark"
+    check both. not "Bright and gloomy"
+    check both. "Something is off"

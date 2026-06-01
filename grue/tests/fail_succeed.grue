@@ -1,0 +1,64 @@
+# fail_succeed — tokens as code-to-code signals, when dispatches on them
+#
+# The pattern: class handlers fail/succeed with tokens and say nothing.
+# A compound handler uses when to chain two operations and produce player text.
+
+class Ledger
+    Object log
+    position: 0
+    kind opened: *closed, open
+
+    on open self at number:page:
+        fail out_of_bounds if page >= 10
+        position = page
+        opened = open
+        succeed opened
+
+    on record string:entry in self:
+        fail not_open unless opened is open
+        fail already_written if log.{position} is set
+        log.{position} = entry
+        succeed stored
+
+    on recall self:
+        fail not_open unless opened is open
+        fail empty unless log.{position} is set
+        say "{log.{position}}"
+
+# compound command: opens the ledger at a page, then records the entry
+on file string:entry in Ledger:ledger at number:page:
+    when {open ledger at page}:
+        out_of_bounds:
+            say "That page is out of bounds."
+        opened:
+            when {record entry in ledger}:
+                not_open:
+                    say "Could not open the ledger."
+                already_written:
+                    say "That slot is already taken."
+                stored:
+                    say "Filed '{entry}' at page {page}."
+
+Ledger rolodex "A clackity index card rolodex."
+
+test
+    test "out of bounds".
+    test "already written".
+    test "file sequence".
+    test "recall".
+
+test "out of bounds"
+    file "Jason" in rolodex at 10. "out of bounds"
+    file "Jason" in rolodex at 10. not "Filed"
+
+test "already written"
+    file "Jason" in rolodex at 0. "Filed 'Jason' at page 0."
+    file "Medea" in rolodex at 0. "already taken"
+
+test "file sequence"
+    file "Talos" in rolodex at 2. "Filed 'Talos' at page 2."
+    file "Eliza" in rolodex at 3. "Filed 'Eliza' at page 3."
+
+test "recall"
+    file "Jason" in rolodex at 0.
+    recall rolodex. "Jason"

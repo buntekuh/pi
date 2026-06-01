@@ -1,0 +1,43 @@
+# choose — player choice, nested choices, arbitrary code in arms
+
+"Choose" by Test
+
+kind topic: *unset, jason, help, farewell
+kind opinion: *unset, exasperating, love interest
+
+Object Medea "A woman of fierce intelligence."
+
+on talk to Medea:
+    choose "What do you want to talk about?":
+        "Tell me about Jason.":
+            topic is jason
+            choose:
+                "Exasperating.":
+                    opinion is exasperating
+                    say "She grimaces."
+                "The man I love.":
+                    opinion is love interest
+                    say "Her eyes soften."
+        "I need your help.":
+            topic is help
+            say "Medea considers your request."
+        "Farewell.":
+            topic is farewell
+            say "She nods curtly."
+
+test
+    test "top-level choice".
+    test "nested choice".
+    test "farewell".
+
+test "top-level choice"
+    talk to Medea. "What do you want to talk about"
+
+test "nested choice"
+    talk to Medea.
+    choose "Tell me about Jason.".
+    choose "Exasperating.". "grimaces"
+
+test "farewell"
+    talk to Medea.
+    choose "Farewell.". "nods curtly"
