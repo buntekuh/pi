@@ -1,0 +1,67 @@
+# array_lit — Array literal syntax, access, length, and iteration
+
+"Array Literals" by Test
+
+Object game
+    primes: [2, 3, 5, 7, 11]
+    names: ["Ben", "Bob", "Bruno"]
+    empty: []
+
+on list primes:
+    for item in game.primes:
+        say "{item}[comma]"
+
+on get prime at number:i:
+    say "{game.primes.{i}}"
+
+on count primes:
+    say "{game.primes.length}"
+
+on greet dwarves:
+    for i, name in game.names:
+        say "{i}: {name}"
+
+on local array:
+    var items: [10, 20, 30]
+    say "{items.{0}}"
+
+on score array:
+    var score: 5
+    var derived: [score, score + 10, score * 2]
+    say "{derived.{1}}"
+
+on pass array:
+    {process game.primes}
+
+internal process Array:list:
+    say "{list.length}"
+
+test
+    test "list primes".
+    test "get prime".
+    test "count primes".
+    test "greet dwarves".
+    test "local array".
+    test "score array".
+    test "pass array".
+
+test "list primes"
+    list primes. "2"
+
+test "get prime"
+    get prime at 2. "5"
+
+test "count primes"
+    count primes. "5"
+
+test "greet dwarves"
+    greet dwarves. "0: Ben"
+
+test "local array"
+    local array. "10"
+
+test "score array"
+    score array. "15"
+
+test "pass array"
+    pass array. "5"

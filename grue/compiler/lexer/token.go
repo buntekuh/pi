@@ -59,14 +59,6 @@ const (
 	// The Value holds the raw digit string; conversion to int is done by the parser.
 	NUMBER
 
-	// JS_BLOCK is the content of a js { } escape block — raw JavaScript captured
-	// verbatim between the braces. Brace depth is tracked so nested JS objects
-	// and functions are captured correctly. The Value is the trimmed JS source.
-	//
-	// js { } blocks are the only place single quotes and other non-Grue syntax
-	// can appear; capturing them as a single opaque token avoids lexer confusion.
-	JS_BLOCK
-
 	// --- Operator tokens ---
 	//
 	// Two-character operators are recognised greedily: <= is LTE, not LT + EQ.
@@ -93,7 +85,7 @@ const (
 	RPAREN   // )
 	LBRACE   // {  dynamic property access (log.{pos}), string interpolation
 	RBRACE   // }
-	LBRACKET // [  string directives [nobreak], inline style spans [key]...[/key]
+	LBRACKET // [  Array literals [1, 2, 3]; also string directives [nobreak] inside STRING tokens
 	RBRACKET // ]
 )
 
@@ -103,11 +95,10 @@ var tokenNames = map[TokenType]string{
 	DEDENT:   "DEDENT",
 	NEWLINE:  "NEWLINE",
 	EOF:      "EOF",
-	WORD:     "WORD",
-	STRING:   "STRING",
-	NUMBER:   "NUMBER",
-	JS_BLOCK: "JS_BLOCK",
-	EQ:       "=",
+	WORD:   "WORD",
+	STRING: "STRING",
+	NUMBER: "NUMBER",
+	EQ:     "=",
 	EQEQ:     "==",
 	PLUSEQ:   "+=",
 	MINUSEQ:  "-=",
@@ -151,7 +142,7 @@ type Token struct {
 // Tokens with values include the quoted value; structural tokens show only type and position.
 func (t Token) String() string {
 	switch t.Type {
-	case WORD, STRING, NUMBER, JS_BLOCK:
+	case WORD, STRING, NUMBER:
 		return fmt.Sprintf("%s(%q) %d:%d", t.Type, t.Value, t.Line, t.Col)
 	default:
 		return fmt.Sprintf("%s %d:%d", t.Type, t.Line, t.Col)

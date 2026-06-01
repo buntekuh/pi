@@ -3,7 +3,7 @@
 "Choose" by Test
 
 kind topic: *unset, jason, help, farewell
-kind opinion: *unset, exasperating, love interest
+kind opinion: *unset, exasperating, love_interest
 
 Object Medea "A woman of fierce intelligence."
 

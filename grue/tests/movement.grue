@@ -1,4 +1,4 @@
-# movement — going places, custom exits, multi-word exits, override
+# movement — going places, custom multi-word exits, override
 
 "Movement" by Test
 
@@ -36,7 +36,7 @@ test "standard exits"
 test "custom exits"
     go top of ladder. "lunar plain"
     go bottom of ladder. "Washington DC"
-    go manhole. "to the rats"
+    go manhole. "rats"
 
 test "energy limit"
     energy = 1

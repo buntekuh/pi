@@ -62,6 +62,13 @@ for item in player:              # player's inventory
 for key, value in kitchen:       # all kitchen properties and exits
 ```
 
+### Object reference semantics
+
+Objects in the world tree are always **references** — passing an Object to a
+handler passes a reference to the original node, not a copy. Modifications
+inside the handler are immediately visible everywhere that holds a reference
+to the same node. There is no implicit copying of Objects.
+
 ### The tree as authoring tool
 
 Because the world is a single well-defined tree, the IDE can expose it as a
@@ -76,8 +83,18 @@ having to mentally reconstruct it from source files.
 ### 1. Classes, Inheritance and Instances
 
 **Class names** are single words, capitalized: `Room`, `Door`, `Ledger`, `Robot`.
-**Instance names** are multi-word, any capitalization: `kitchen`, `iron door`,
-`Mare Tranquillitatis`, `HAL`.
+
+**Instance names** are sequences of words separated by spaces. Valid characters
+in each word: letters, digits, underscores, hyphens, and apostrophes.
+Numbers are valid name components: `3 wishes`, `2B`, `O'Brien`, `mother-in-law`.
+Commas are not allowed in names — they are reserved as alias separators.
+
+```
+Room Mare Tranquillitatis "A vast lunar plain."
+Object mother-in-law "A difficult relation."
+Object O'Brien "The station commander."
+Object 3 wishes "A small brass lamp."
+```
 
 The first word of any declaration is always the class name. Everything after
 (before the optional description string) is the instance name.
@@ -179,12 +196,17 @@ any game file. All top-level declarations become part of the global namespace.
 
 #### Properties
 
-Named key-value pairs on any node. The name has meaning. Valid value types
-are objects, numbers, and strings:
+Named key-value pairs on any node. Property names may be multiple words
+but must not contain reserved keywords as standalone words — `is`, `and`,
+`or`, `not`, `if`, `unless`, `on`, `in`, `to`, `from`, `for`, `fail`,
+`succeed`, `true`, `false`, `unset`, and all other language keywords.
+The compiler enforces this.
+
 ```
 east: kitchen
 max_occupants: 4
 save_file_name: "autosave"
+top of ladder: Mare Tranquillitatis
 ```
 
 #### set and unset
@@ -228,6 +250,11 @@ integer assigned left to right starting at 0, which is what makes them
 comparable. A kind variable always holds exactly one of its declared values —
 it can never be empty.
 
+**Kind names and kind values are always single words** (letters, digits,
+underscores). Multi-word concepts use underscores: `love_interest`,
+`stealing_the_fleece`. The reserved word `not` is forbidden as a kind value,
+since `is not X` always means boolean negation.
+
 The default value is marked with `*`. If no `*` is given, the first value is
 the default:
 ```
@@ -253,7 +280,7 @@ kind wet: *dry, damp, wet, drenched, drowned
 **Declaring a kind** — `kind` always declares. At the top level it also creates
 a global variable of that type:
 ```
-kind topic: *unset, jason, help, stealing the fleece
+kind topic: *unset, jason, help, stealing_the_fleece
 kind mood: happy, *neutral, sad
 ```
 
@@ -558,14 +585,14 @@ no extra declaration:
 
 ```
 Room crater rim "The edge of the crater."
-    top of ladder: Mare Tranquillitatis
     manhole: the sewers
+    port: docking bay
     west: landing pad
 ```
 
 The input handler matches the player's input against all Room-valued properties
-of the current location, so `top of ladder` and `manhole` work as movement
-commands automatically.
+of the current location, so `manhole` and `port` work as movement commands
+automatically.
 
 ### 7. Actors
 
@@ -602,50 +629,6 @@ on every turn:
     say "The villain arrives at the castle!" if turn == 20
 ```
 
-#### AI
-
-`Ai` is a library class. An instance binds a model, source material, and role.
-The class defines `internal on respond` which the author calls from handlers.
-`js { }` is available to any author — the library uses it for the actual API call:
-
-```
-class Ai
-    internal on respond Ai:ai with Object:schema:
-        js {
-            const result = await callAiApi(ai.model, ai.role, schema)
-            // map result back to Grue properties
-        }
-
-Ai Eliza
-    model: "claude-haiku"
-    source: "eliza_background.md"
-    role: "You are ELIZA, 1966. A mirror, not an advisor."
-    language: "short sentences, always a question, never advice"
-    history: 10
-    context: mood, location
-```
-
-Objects call the respond handler. For a plain text response:
-
-```
-Object teletype "A huge teletype machine."
-    on talk self:
-        say "The machine clacks and prints:"
-        {respond Eliza with Object}
-```
-
-For a structured response, pass an inline Record with the expected schema:
-
-```
-    on talk self:
-        {respond Eliza with Record
-            speech: string
-            topic: unset
-        }:
-            say speech
-            medea_awareness + 1 if topic isnt unset
-```
-
 ---
 
 ## Part II — The Language
@@ -670,16 +653,12 @@ The game declaration appears at the top of the main file:
 | Command | Purpose |
 |---------|---------|
 | `print` | Raw string output — the primitive |
+| `stop` | Disable all further player input |
 | `fail` | Exit handler with failure |
 | `succeed` | Exit handler with success |
 | `parent` | Call parent handler |
-| `end` | End the story |
-| `quit` | Exit the application |
-| `save` | Save game state |
-| `restore` | Load saved game |
-| `restart` | Restart from beginning |
 | `choose` | Player choice block |
-| `js { }` | JavaScript escape |
+| `interface` | Interface to external capabilities |
 | `test` | Define / run tests |
 
 `say` is a standard library handler that wraps `print` with styles, inline
@@ -867,35 +846,25 @@ last_succeed            # token from the last successful handler call
 ```
 
 
-### 10. save, quit, end game
+### 10. stop, save, quit, restart
 
-`stop` is the built-in primitive that disables all further player input.
-Everything else is a library handler built on top of it.
+`stop` is the only built-in primitive for ending player interaction. It
+disables all further input immediately.
 
-| Command | Type | Behaviour |
-|---------|------|-----------|
-| `stop` | built-in | Disables all further input |
-| `end` | handler | Sets `game_state`, calls `stop`. Overridable |
-| `quit` | handler | Opens confirmation dialog, then calls `stop` |
-| `save` | handler | Opens save dialog via `js { }` |
-| `load` | handler | Opens load dialog via `js { }` |
-| `restart` | handler | Opens confirmation dialog, resets game to turn 0 |
-| `restore` | alias | Old-timey IF alias for `load` |
-
-Because `end`, `quit`, `save`, and `load` are library handlers, they can all
-be overridden. The dialog-opening handlers use `js { }` for the actual
-browser dialog interaction:
+`save`, `load`, `quit`, `restart`, and `restore` are not built into the
+language — they are standard library handlers defined on top of `stop` and
+`interface`. Because they are ordinary handlers, authors can override them
+like any other:
 
 ```
-internal on save:
-    js {
-        const name = await showSaveDialog()
-        if (name) saveGameState(name)
-    }
+on quit:
+    stop        # no confirmation dialog — hardcore mode
 ```
 
-`restore` may be retired in favour of `load` — the decision is left to the
-standard library.
+The standard library defines these using `interface` handlers for the
+platform-specific parts (file dialogs, persistence). Authors who want
+different behaviour declare handlers with the same signatures and the library
+versions are replaced.
 
 ### 11. choose
 
@@ -908,9 +877,9 @@ choose "What do you want to talk about?":
         topic is jason
         choose:
             "Exasperating.":
-                medea and jason is exasperating
+                medea_and_jason is exasperating
             "The man I love.":
-                medea and jason is love interest
+                medea_and_jason is love_interest
     "I need your help.":
         topic is help
     "Farewell.":
@@ -945,78 +914,98 @@ for key, value in kitchen.filter(Door):    # only exits through doors
 Since `Door` extends `Room`, `filter(Room)` returns both. A locked exit is
 just a door whose handler prevents passage.
 
-### 13. Lists
+### 13. Arrays
 
-Lists are plain `Object` instances. All items are just properties — numeric
-keys, named keys, and kinds coexist freely on the same object. No new syntax.
-
-Properties declared inline at definition are static — their key is a literal:
-
-```
-Object my list
-    0: "zero"
-    1: "one"
-    2: "two"
-```
-
-**Dynamic property access** uses `{expr}` after the dot. The expression is
-evaluated at runtime and its result used as the key. This works for reads,
-writes, and any expression:
+`Array` is a built-in class for ordered collections. Array literals use `[...]`
+syntax and create an `Array` instance with integer keys assigned left to right
+starting at 0:
 
 ```
-my list.0 = "first entry"          # static — key is literally "0"
-my list.{position} = "Jason"       # dynamic — key is value of position
-my list.{player.name} = 10         # dynamic — key is player's name string
-my list.{"entry_" + turn} = "yes"  # dynamic — computed key
-my list.{position} = unset         # clears the entry; key remains
+primes: [2, 3, 5, 7, 11]
+names:  ["Ben", "Bob", "Bruno"]
+scores: [base, base + 10, base * 2]    # elements are expressions
 ```
 
-`log.position` is always static — it accesses the literal property named
-`"position"` on the object, not the property at the index stored in `position`.
-Use `log.{position}` for dynamic lookup.
-
-Iterate as any node:
+Only unkeyed values are permitted inside `[...]`. Named properties are a
+compile error — they belong on a named Object:
 
 ```
-for key, value in my list:
-    say "{key}: {value}[comma]"
-```
+valid:   [1, 2, 3]             # ✓
+invalid: [1, label: "x", 2]   # ✗ compile error
 
-Use `filter` to select properties by type — see section 12.
-
-Pre-declaring slots with `unset` is valid — the type is inferred on first write:
-
-```
-Object log
-    0: unset
-    1: unset
-    2: unset
-```
-
-Or leave the Object empty and let entries be created on first write — both work.
-Size limits are enforced at runtime:
-
-```
-class Ledger
-    Object log
-        0: unset
-        1: unset
-        2: unset
+Object cursor                  # named metadata alongside an Array
+    items: [10, 20, 30]
     position: 0
-    kind opened: *closed, open
-
-    on record string:entry in self:
-        say "Out of bounds." if position >= 3
-        fail out_of_bounds if position >= 3
-        log.{position} = entry
-        position + 1
-        say "Recorded."
 ```
 
-Static and dynamic reads:
+#### Accessing items
+
+Static access uses a literal integer after the dot. Dynamic access uses `{expr}`:
+
 ```
-say "{log.0}"               # static — literal key "0"
-say "{log.{position}}"      # dynamic — key is value of position
+say "{primes.0}"          # 2  — static, key is the literal 0
+say "{primes.{i}}"        # dynamic — key is the value of i
+primes.{i} = 99           # dynamic write
+```
+
+`arr.position` is always static — it accesses the property literally named
+`position`, not the item at the index stored in `position`.
+Use `arr.{position}` for dynamic lookup.
+
+#### length
+
+`length` is a computed property available on every Object. It returns the count
+of set properties. For a dense Array it equals the number of elements:
+
+```
+say "{primes.length}"        # 5
+say "{player.length}"        # number of items carried
+say "{location.length}"      # number of properties on the current room
+```
+
+#### Iterating
+
+Both iterator forms work on any Object including Array:
+
+```
+for item in primes:
+    say "{item}"             # 2, 3, 5, 7, 11
+
+for i, item in primes:
+    say "{i}: {item}"        # 0: 2,  1: 3,  …
+```
+
+#### Dynamic property access
+
+`{expr}` after a dot evaluates the expression and uses its result as the key.
+Works for reads, writes, and any expression on any Object:
+
+```
+log.{position} = "Jason"       # dynamic write — key is value of position
+log.{player.name} = 10         # dynamic write — key is player's name
+log.{position} = unset         # clears the entry; key remains
+say "{log.{position}}"         # dynamic read
+```
+
+#### Array is a convention
+
+The `[...]` restriction is enforced at the literal only. Once an Array exists
+in the world tree it is a plain Object — the runtime does not prevent adding
+named properties after creation. `dwarves.position = 7` is legal code. If an
+author chooses to treat an Array as a general Object, that is on them.
+
+#### Array as a class
+
+`Array` is a first-class class. The standard library may add handlers to it.
+Authors can use it in handler signatures and `filter` expressions:
+
+```
+on summarise Array:list:
+    for item in list:
+        say "{item}[comma]"
+
+for arr in world.filter(Array):
+    say "{arr.length} items"
 ```
 
 ### 14. Conditions and Expressions
@@ -1164,28 +1153,65 @@ Box extends Font
     padding: 20
 ```
 
-### js {}
+### interface
 
-Inserts an arbitrary JavaScript block. The application is responsible for
-proper sandboxing. Use for external API calls, browser interaction, or anything
-the Grue runtime does not provide directly:
+`interface` declares a handler that calls an external capability outside of
+Grue. The body identifies the target with `call:`. The runtime dispatches on
+the `call:` value and silently ignores any type it does not recognise — so
+interface handlers degrade gracefully on runtimes that lack the capability.
+
+Currently only `call: js` is defined. Other types — graphics, audio, spans,
+and more — can be defined in future.
+
+#### call: js
+
+Wires the handler to a JavaScript function. There is no inline JavaScript in
+Grue — the Grue file stays pure Grue, and JavaScript files stay pure
+JavaScript.
+
+The response Object comes first in the signature, inputs follow:
 
 ```
-on talk to terminal:
-    js { elizaRespond(player_input) }
-
-on examine screen:
-    js { displayImage('terminal.png') }
-
-internal on save:
-    js {
-        const name = await showSaveDialog()
-        if (name) saveGameState(name)
-    }
+interface Object:response Object:request:
+    call: js
+    function: "processData"
+    filename: "handlers.js"
 ```
 
-`js { }` is available to any author, but is primarily intended for library
-authors. Game authors should prefer handlers.
+The body contains only Grue property declarations:
+
+| Property | Purpose |
+|----------|---------|
+| `call` | The external capability to invoke. Currently: `js` |
+| `function` | (`call: js`) Name of the JavaScript function to call |
+| `filename` | (`call: js`) Path to the JavaScript file, relative to the game file |
+
+The runtime serialises each Grue Object to a plain JavaScript object, calls
+the named function, and awaits the promise. The response Object is passed by
+reference — writes to its properties update the original world tree node
+directly, so changes are visible to the caller immediately after the call
+returns.
+
+The JavaScript function mirrors the Grue declaration order:
+
+```javascript
+// handlers.js
+async function processData(response, request) {
+    const result = await someApi(request.input)
+    response.output = result.text
+    response.status = "done"
+}
+```
+
+`interface` handlers are always internal — they are never reachable by player
+input. Input-only handlers (no response) are valid for side effects:
+
+```
+interface Object:event:
+    call: js
+    function: "logEvent"
+    filename: "analytics.js"
+```
 
 ### 16. Tests
 

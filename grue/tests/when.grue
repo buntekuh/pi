@@ -16,7 +16,7 @@ on go north:
     when {traverse passage in the dark}:
         eaten_by_grue:
             say "It is very dark. You are likely to be eaten by a grue."
-            end
+            stop
         succeed:
             say "You stumble through to the other side."
         default:

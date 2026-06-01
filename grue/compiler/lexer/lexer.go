@@ -316,71 +316,32 @@ func (l *lexer) lexNumber() Token {
 	return Token{NUMBER, buf.String(), line, col}
 }
 
-// lexWord lexes a word — any run of letters, digits, and underscores starting
-// with a letter or underscore.
+// lexWord lexes a word token.
 //
-// All keywords (on, fail, kind, class, Room, Object, ...) and all identifier
-// parts (brass, lantern, sad, lit, ...) are emitted as plain WORD tokens.
-// The parser uses context to distinguish keywords from names.
+// Valid word characters: Unicode letters (including umlauts and accented
+// characters — unicode.IsLetter covers all Unicode letter categories),
+// digits, underscores, and apostrophes. Starting character must be a letter
+// or underscore.
 //
-// Special case: the word "js" followed by "{" triggers lexJSBlock, which
-// captures the entire JavaScript block as a single JS_BLOCK token rather than
-// trying to lex JavaScript with the Grue operator set.
+// Apostrophes allow names like O'Brien, Bernd's, and can't to be a single token.
+//
+// Hyphens are NOT included — they are emitted as MINUS and the parser groups
+// WORD MINUS WORD sequences into hyphenated names (mother-in-law, Jean-Luc)
+// when in name-gathering context.
+//
+// Numbers are also valid name components (3 wishes, Area 51) but start as
+// NUMBER tokens; the parser combines WORD and NUMBER tokens into names.
+//
+// All keywords (on, fail, kind, class, Room, ...) and name fragments (brass,
+// lantern, O'Brien, ...) are plain WORD tokens. The parser uses context to
+// distinguish keywords from name parts.
 func (l *lexer) lexWord() Token {
 	line, col := l.line, l.col
 	var buf strings.Builder
-	for !l.atEnd() && (unicode.IsLetter(l.current()) || unicode.IsDigit(l.current()) || l.current() == '_') {
+	for !l.atEnd() && (unicode.IsLetter(l.current()) || unicode.IsDigit(l.current()) || l.current() == '_' || l.current() == '\'') {
 		buf.WriteRune(l.advance())
 	}
-	word := buf.String()
-
-	// Check for js { } escape block. Skip any whitespace between "js" and "{".
-	if word == "js" {
-		for !l.atEnd() && (l.current() == ' ' || l.current() == '\t') {
-			l.advance()
-		}
-		if !l.atEnd() && l.current() == '{' {
-			return l.lexJSBlock(line, col)
-		}
-	}
-
-	return Token{WORD, word, line, col}
-}
-
-// lexJSBlock captures a raw JavaScript block between matching braces.
-//
-// When Grue source contains js { ... }, the content is arbitrary JavaScript
-// that the Grue lexer cannot understand (single quotes, semicolons, etc.).
-// Rather than trying to tokenize it, we capture everything between the braces
-// as a single opaque JS_BLOCK token. Brace depth is tracked so nested JS
-// objects and function literals ({ key: { value: 1 } }) are handled correctly.
-//
-// The captured content is whitespace-trimmed. The opening { has already been
-// confirmed by the caller; this function consumes it and the matching }.
-func (l *lexer) lexJSBlock(line, col int) Token {
-	l.advance() // consume opening {
-	var buf strings.Builder
-	depth := 1 // we are one brace deep
-
-	for !l.atEnd() && depth > 0 {
-		ch := l.advance()
-		switch ch {
-		case '{':
-			depth++
-			buf.WriteRune(ch)
-		case '}':
-			depth--
-			if depth > 0 {
-				// Inner closing brace — still inside the block.
-				buf.WriteRune(ch)
-			}
-			// Outermost closing brace is consumed but not written.
-		default:
-			buf.WriteRune(ch)
-		}
-	}
-
-	return Token{JS_BLOCK, strings.TrimSpace(buf.String()), line, col}
+	return Token{WORD, buf.String(), line, col}
 }
 
 // lexOperator lexes a one- or two-character operator or punctuation token.

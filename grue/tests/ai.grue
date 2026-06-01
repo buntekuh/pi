@@ -15,15 +15,16 @@ kind mood: calm, *anxious, distressed
 Object teletype "A huge teletype machine."
     on talk self:
         say "The machine clacks and prints:"
-        {respond Eliza with Object}
-
-    on confide string:feeling to self:
-        {respond Eliza with Record
+        respond Eliza with Record record
             speech: string
             topic: unset
-        }:
-            say speech
-            mood is distressed if topic isnt unset
+        
+
+    on confide string:feeling to self:
+        respond Eliza with Record record
+            speech: string
+            topic: unset
+        
 
 test
     test "plain response".

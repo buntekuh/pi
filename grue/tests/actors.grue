@@ -16,7 +16,7 @@ Object time bomb "A ticking device."
         say "The bomb ticks. {fuse} turns remaining."
         if fuse == 0:
             say "BOOM."
-            end
+            stop
 
 test
     test "global turn 0".

@@ -58,7 +58,7 @@ on every turn:
             say "Day complete. {biros_made} biros produced. Quota met!"
         else:
             say "Day complete. Only {biros_made} biros. Deeply disappointing."
-        end
+        stop
 
 on check quota:
     say "{biros_made} of {quota} biros produced."
