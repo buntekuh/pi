@@ -1,0 +1,22 @@
+# supporters — objects that other objects can be placed on
+# A Supporter is always accessible — there is no open/close state.
+# Examples: tables, shelves, pedestals, altars.
+
+class Supporter
+
+    on put object:item on self:
+        item.location = self
+        say "You put {item} on {self}."
+
+    on take object:item from self:
+        fail not_there if item.location isnt self
+        item.location = player
+        say "You take {item} from {self}."
+
+    on examine self:
+        parent
+        var count: 0
+        for item in self.filter(Object):
+            say "{item}[comma]"
+            count + 1
+        say "[p]Nothing is on {self}." if count == 0

@@ -1,0 +1,73 @@
+# containers — objects that can hold other objects
+# A Container can optionally be openable and lockable.
+# Non-openable containers (bags, baskets) are always accessible.
+# Openable containers (chests, boxes) are only accessible when open.
+
+kind openable: *false, true
+kind lockable: *false, true
+kind open: *false, true
+kind locked: *false, true
+
+class Container
+    openable: false
+    lockable: false
+    open: true
+    locked: false
+    key: unset
+
+    on open self:
+        fail not_openable unless openable is true
+        fail already_open if self is open
+        fail is_locked if locked is true
+        open = true
+        say "You open {self}."
+
+    on close self:
+        fail not_openable unless openable is true
+        fail already_closed if self is not open
+        open = false
+        say "You close {self}."
+
+    on lock self with object:k:
+        fail not_lockable unless lockable is true
+        fail already_locked if locked is true
+        fail wrong_key unless k is key
+        locked = true
+        say "You lock {self}."
+
+    on unlock self with object:k:
+        fail not_lockable unless lockable is true
+        fail not_locked if locked is false
+        fail wrong_key unless k is key
+        locked = false
+        say "You unlock {self}."
+
+    on put object:item in self:
+        fail is_closed if openable is true and self is not open
+        item.location = self
+        say "You put {item} in {self}."
+
+    on take object:item from self:
+        fail is_closed if openable is true and self is not open
+        fail not_inside if item.location isnt self
+        item.location = player
+        say "You take {item} from {self}."
+
+    on look in self:
+        fail is_closed if openable is true and self is not open
+        var count: 0
+        for item in self.filter(Object):
+            say "{item}[comma]"
+            count + 1
+        say "It is empty." if count == 0
+
+    on examine self:
+        parent
+        if openable is true and self is not open:
+            say "[p]It is closed."
+        else:
+            var count: 0
+            for item in self.filter(Object):
+                say "{item}[comma]"
+                count + 1
+            say "[p]It is empty." if count == 0
