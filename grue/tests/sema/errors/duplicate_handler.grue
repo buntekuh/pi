@@ -1,0 +1,11 @@
+# expect: error duplicate_handler line 10
+
+"Duplicate Handler" by Test
+
+Room hall "A long hall."
+
+on examine object:item:
+    say "You look at {item}."
+
+on examine object:thing:
+    say "Nothing special."

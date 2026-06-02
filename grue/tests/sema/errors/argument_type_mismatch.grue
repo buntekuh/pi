@@ -1,0 +1,20 @@
+# expect: error argument_type_mismatch line 20
+
+"Argument Type Mismatch" by Test
+
+class Machine
+    on operate self:
+        say "Boop."
+
+class Vehicle
+    on drive self:
+        say "Vroom."
+
+Object telephone "An old rotary phone."
+    is Machine
+
+Object car "A red sports car."
+    is Vehicle
+
+on every turn:
+    operate car

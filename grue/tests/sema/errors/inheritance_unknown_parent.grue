@@ -1,0 +1,5 @@
+# expect: error unknown_class line 5
+
+"Unknown Parent" by Test
+
+class Sword extends Weapon

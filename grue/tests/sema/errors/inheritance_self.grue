@@ -1,0 +1,5 @@
+# expect: error inheritance_cycle line 5
+
+"Inheritance Self" by Test
+
+class Narcissus extends Narcissus

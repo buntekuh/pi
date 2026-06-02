@@ -172,9 +172,10 @@ func (p *parser) parseTopLevelDecl() (ast.Decl, error) {
 		case "class":
 			return p.parseClassDecl()
 		case "on", "internal":
+			if p.atWord("internal") && p.peekAt(1).Type == lexer.WORD && p.peekAt(1).Value == "interface" {
+				return p.parseInterfaceHandlerDecl()
+			}
 			return p.parseHandlerDecl()
-		case "interface":
-			return p.parseInterfaceHandlerDecl()
 		case "test":
 			return p.parseTestDecl()
 		default:
@@ -475,9 +476,10 @@ func (p *parser) parseBodyDecl() (ast.Decl, error) {
 	if tok.Type == lexer.WORD {
 		switch tok.Value {
 		case "on", "internal":
+			if p.atWord("internal") && p.peekAt(1).Type == lexer.WORD && p.peekAt(1).Value == "interface" {
+				return p.parseInterfaceHandlerDecl()
+			}
 			return p.parseHandlerDecl()
-		case "interface":
-			return p.parseInterfaceHandlerDecl()
 		case "kind":
 			return p.parseKindDecl()
 		case "var":
@@ -723,13 +725,14 @@ func (p *parser) parseHandlerDecl() (*ast.HandlerDecl, error) {
 	}, nil
 }
 
-// interface Object:response Object:request:
+// internal interface Object:response Object:request:
 //
 //	call: js
 //	function: "processData"
 //	filename: "handlers.js"
 func (p *parser) parseInterfaceHandlerDecl() (*ast.InterfaceHandlerDecl, error) {
 	pos := p.currentPos()
+	p.advance() // consume "internal"
 	p.advance() // consume "interface"
 	sig, err := p.parseSignature()
 	if err != nil {
@@ -1166,8 +1169,10 @@ func (p *parser) parseWhenArm() (ast.WhenArm, error) {
 
 	// Label: identifier token (word), quoted string, "fail", "succeed", or "default"
 	var label string
+	quoted := false
 	if tok.Type == lexer.STRING {
 		label = tok.Value
+		quoted = true
 		p.advance()
 	} else if tok.Type == lexer.WORD {
 		label = tok.Value
@@ -1186,7 +1191,7 @@ func (p *parser) parseWhenArm() (ast.WhenArm, error) {
 	if err != nil {
 		return ast.WhenArm{}, err
 	}
-	return ast.WhenArm{Pos: pos, Label: label, Body: body}, nil
+	return ast.WhenArm{Pos: pos, Label: label, Quoted: quoted, Body: body}, nil
 }
 
 // =============================================================================
@@ -1397,9 +1402,8 @@ func (p *parser) parseAssignOrMutateStmt() (ast.Stmt, error) {
 	}
 
 	// Bare handler call with inline object body — no operator, next line is indented:
-	//   respond Eliza with Record record
-	//       speech: string
-	//       topic: unset
+	//   play Sound:sound:
+	//       file: "pling.wav"
 	if tok.Type == lexer.NEWLINE && p.peekAt(1).Type == lexer.INDENT {
 		p.advance() // consume NEWLINE
 		body, err := p.parseBodyDecls()
@@ -1407,6 +1411,16 @@ func (p *parser) parseAssignOrMutateStmt() (ast.Stmt, error) {
 			return nil, err
 		}
 		return &ast.BareCallWithBodyStmt{Pos: pos, Expr: lhs, Body: body}, nil
+	}
+
+	// Bare handler call with no body — plain statement call:
+	//   operate car
+	//   fix machine with spanner
+	if tok.Type == lexer.NEWLINE || tok.Type == lexer.EOF {
+		if err := p.expectNewline(); err != nil {
+			return nil, err
+		}
+		return &ast.BareCallStmt{Pos: pos, Expr: lhs}, nil
 	}
 
 	return nil, fmt.Errorf("%s: expected assignment or mutation, got %s %q",

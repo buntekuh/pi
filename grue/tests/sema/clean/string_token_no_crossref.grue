@@ -1,0 +1,15 @@
+# String tokens ("too dark") are not cross-referenced — must produce zero diagnostics.
+
+"String Token No Crossref" by Test
+
+Room hall "A long hall."
+
+on traverse passage:
+    fail "too dark"
+
+on enter hall:
+    when {traverse passage}:
+        "blocked":
+            say "The way is blocked."
+        succeed:
+            say "You pass through."

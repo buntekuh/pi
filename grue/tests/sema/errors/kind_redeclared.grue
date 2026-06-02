@@ -1,0 +1,6 @@
+# expect: error kind_redeclared line 6
+
+"Kind Redeclared" by Test
+
+kind mood: happy, sad
+kind mood: angry, calm

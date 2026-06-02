@@ -1,0 +1,15 @@
+# expect: warning unhandled_token line 12
+
+"Unhandled Token" by Test
+
+Room hall "A long hall."
+
+on traverse passage:
+    fail blocked
+
+on enter hall:
+    when {traverse passage}:
+        out_of_bounds:
+            say "Out of bounds."
+        succeed:
+            say "You pass through."

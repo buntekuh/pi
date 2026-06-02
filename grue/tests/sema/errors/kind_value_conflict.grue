@@ -1,0 +1,10 @@
+# expect: error kind_value_conflict line 8
+# expect: error kind_value_conflict line 9
+# expect: error kind_redeclared line 10
+
+"Kind Value Conflict" by Test
+
+kind mood: happy, sad
+kind weather: sunny, sad
+kind quality: finest, *sad
+kind mood: happy, sad

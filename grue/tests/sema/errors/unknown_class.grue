@@ -1,0 +1,9 @@
+# expect: error unknown_class line 9
+
+"Unknown Class" by Test
+
+Room hall "A long hall."
+    Object box "A plain box."
+
+on examine object:item:
+    say "It is a {item}." if item.class is Ghost

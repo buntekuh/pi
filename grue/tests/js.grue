@@ -2,17 +2,17 @@
 
 "Interface Test" by Test
 
-interface Object:result:
+internal interface Object:result:
     call: js
     function: "elizaRespond"
     filename: "terminal.js"
 
-interface Object:result Object:input:
+internal interface Object:result Object:input:
     call: js
     function: "processData"
     filename: "handlers.js"
 
-interface Object:result:
+internal interface Object:result:
     call: js
     function: "showSaveDialog"
     filename: "dialogs.js"

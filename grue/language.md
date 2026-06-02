@@ -102,11 +102,9 @@ The first word of any declaration is always the class name. Everything after
 Single inheritance. Implicit `extends Object` if omitted.
 `Object` provides: name, keywords, description, location.
 
-`.class` is a reserved property on every object. It may only be assigned a
-class name — changing it switches the object's active handlers:
-```
-peter.class = Adolescent
-```
+`.class` is a reserved property on every object. Dynamically changing an
+object's class is under consideration but not yet defined — deferred for
+further design work.
 
 Class names are capitalized single words — syntactically distinct from kind
 values (lowercase). This lets `is` check both without ambiguity:
@@ -413,8 +411,40 @@ fail "out of bounds" if page >= 10
 
 #### Calling handlers
 
-`{handler args}` calls a handler inline. `silently` suppresses `say` throughout
-the call chain:
+Handlers are called by name with their arguments. Arguments are references to
+existing objects in the world tree — types are already known and do not need
+to be repeated at the call site:
+
+```
+operate telephone
+fix machine with spanner
+```
+
+**Explicit class override** — an argument may be qualified with a class name
+to select a specific level in the handler chain. The class must be the
+object's actual class or one of its ancestors; using an unrelated class is a
+compile error. All arguments are checked against the handler's declared
+parameter types:
+
+```
+operate Machine:telephone     # use Machine's handler, not Telephone's
+```
+
+**Inline object creation** — the last argument in a call may be a new object
+created inline. The class name is required because the object does not yet
+exist in the world tree. A trailing `:` signals that a property body follows:
+
+```
+play Sound:sound:
+    file: "pling.wav"
+    volume: 80
+```
+
+Only the final argument may have an inline body. Earlier arguments must be
+references to existing objects.
+
+**Expression call** — `{handler args}` calls a handler as an expression.
+`silently` suppresses `say` throughout the call chain:
 
 ```
 fail unless {has ledger silently}
@@ -612,6 +642,9 @@ on every turn:
     lamp.light = lit if turn == 0
     say "You wake up in a cold, dark room..." if turn == 0
 
+on spawn Robot:
+    say "The killer robots are on the march."
+    
 Room doomsday chamber "Banks of humming machinery."
     on every turn:
         spawn Robot killer robot
@@ -1079,6 +1112,7 @@ score = round(score / 2)            # same as bare assignment, explicit
 score = absolute(score - target)    # absolute value
 score = biggest(score, 0)           # maximum of two values
 score = smallest(score, 100)        # minimum of two values
+score = random(0, 50)               # chooses a random integer between and including the two parameters given
 if turn modulo 5 == 0:              # modulo — infix operator
 ```
 ## 15. Styles
@@ -1172,7 +1206,7 @@ JavaScript.
 The response Object comes first in the signature, inputs follow:
 
 ```
-interface Object:response Object:request:
+internal interface Object:response Object:request:
     call: js
     function: "processData"
     filename: "handlers.js"
@@ -1207,11 +1241,44 @@ async function processData(response, request) {
 input. Input-only handlers (no response) are valid for side effects:
 
 ```
-interface Object:event:
+internal interface Object:event:
     call: js
     function: "logEvent"
     filename: "analytics.js"
 ```
+
+#### Example — calling an AI function
+
+The response object is declared in advance so the caller has a named place to
+read the result. The `interface` handler wires up the JavaScript function. The
+call passes the pre-declared response object and a request object:
+
+```
+class AiResponse
+    answer: unset
+
+AiResponse air
+
+internal interface ai Object:response Object:request:
+    call: js
+    function: "askAi"
+    filename: "ai.js"
+
+on ask:
+    {ai air question}
+    say "{air.answer}"
+```
+
+```javascript
+// ai.js
+async function askAi(response, request) {
+    const result = await callLanguageModel(request.text)
+    response.answer = result.text
+}
+```
+
+The runtime populates `air` in place. After `{ai air question}` returns,
+`air.answer` holds the result and the game continues.
 
 ### 16. Tests
 

@@ -1,0 +1,6 @@
+# expect: error unknown_class line 5
+
+"Unknown Class In Signature" by Test
+
+on examine Ghost:g:
+    say "You see through it."

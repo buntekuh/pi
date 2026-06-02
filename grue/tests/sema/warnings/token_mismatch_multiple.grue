@@ -1,0 +1,17 @@
+# expect: warning token_mismatch line 9
+# expect: warning token_mismatch line 10
+
+"Multiple Token Mismatches" by Test
+
+Room hall "A long hall."
+
+on traverse passage:
+    fail too_dark
+    fail out_of_bounds
+
+on enter hall:
+    when {traverse passage}:
+        blocked:
+            say "The way is blocked."
+        succeed:
+            say "You pass through."

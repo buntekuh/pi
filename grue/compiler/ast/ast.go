@@ -498,10 +498,13 @@ func (s *WhenStmt) stmtNode()     {}
 
 // WhenArm is one arm of a when statement.
 // Label is the token string, "fail", "succeed", or "default".
+// Quoted is true when the label was a quoted string — quoted labels are not
+// cross-referenced against fail/succeed tokens.
 type WhenArm struct {
-	Pos   Pos
-	Label string
-	Body  []Stmt
+	Pos    Pos
+	Label  string
+	Quoted bool
+	Body   []Stmt
 }
 
 // ChooseStmt presents labeled options to the player:
@@ -557,17 +560,29 @@ type TestCmdStmt struct {
 func (s *TestCmdStmt) Position() Pos { return s.Pos }
 func (s *TestCmdStmt) stmtNode()     {}
 
+// BareCallStmt is a handler call written without { } braces and without an
+// inline body — a plain statement call:
+//
+//	operate car
+//	fix machine with spanner
+type BareCallStmt struct {
+	Pos  Pos
+	Expr Expr
+}
+
+func (s *BareCallStmt) Position() Pos { return s.Pos }
+func (s *BareCallStmt) stmtNode()     {}
+
 // BareCallWithBodyStmt is a handler call written without { } braces, followed
-// by an inline object body. Used when the final argument is an inline instance
-// whose properties are initialised in the indented block:
+// by an inline object body. The final argument is a new inline instance whose
+// properties are given in the indented block. The class name is required:
 //
-//	respond Eliza with Record record
-//	    speech: string
-//	    topic: unset
+//	play Sound:sound:
+//	    file: "pling.wav"
+//	    volume: 80
 //
-// Expr captures the call expression (the words before NEWLINE, typically a
-// multi-word NameExpr). Body contains property declarations for the inline
-// object argument.
+// Expr captures the call expression. Body contains property declarations for
+// the inline object.
 type BareCallWithBodyStmt struct {
 	Pos  Pos
 	Expr Expr

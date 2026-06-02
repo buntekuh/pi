@@ -1,0 +1,15 @@
+# expect: warning token_mismatch line 8
+
+"Token Mismatch" by Test
+
+Room hall "A long hall."
+
+on traverse passage:
+    fail out_of_bounds
+
+on enter hall:
+    when {traverse passage}:
+        blocked:
+            say "The way is blocked."
+        succeed:
+            say "You pass through."

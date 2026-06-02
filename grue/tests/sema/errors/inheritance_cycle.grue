@@ -1,0 +1,7 @@
+# expect: error inheritance_cycle line 5
+
+"Inheritance Cycle" by Test
+
+class Alpha extends Beta
+
+class Beta extends Alpha

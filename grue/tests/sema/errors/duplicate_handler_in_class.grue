@@ -1,0 +1,10 @@
+# expect: error duplicate_handler line 9
+
+"Duplicate Handler In Class" by Test
+
+class Chest
+    on open self:
+        say "The chest creaks open."
+
+    on open self:
+        say "Already open."

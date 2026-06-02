@@ -1,0 +1,21 @@
+# expect: error class_override_incompatible line 14
+
+"Incompatible Class Override" by Test
+
+class Vehicle
+    on operate self:
+        say "Vroom."
+
+class Machine
+    on operate self:
+        say "Boop."
+
+class Telephone extends Machine
+    on operate self:
+        say "Ring."
+
+Object telephone "An old rotary phone."
+    is Telephone
+
+on test override:
+    operate Vehicle:telephone
