@@ -640,15 +640,46 @@ automatically.
 
 ### 7. Actors
 
-Actors are not a distinct language concept — any object, class, or room with
-an `on every turn:` handler is effectively an actor. The handler always fires
-every turn regardless of where the player is. The author guards with conditions.
+Actors are not a distinct language concept — any object or class with an
+`on every turn:` handler is effectively an actor. Object and class turn
+handlers always fire every turn regardless of where the player is.
+
+Room turn handlers are scoped: they fire only when the player is currently
+in that room. This makes rooms natural containers for scripted sequences
+without manual location guards.
 
 `on every turn:` exists at three levels: global, room, and object/class.
-All fire every turn without restriction.
+Global and object/class handlers fire every turn without restriction. Room
+handlers fire only when `location is` that room.
+
+Unlike player-input handlers, all turn handlers (`on every turn:`, `on turn N:`,
+and all range forms) may be declared **multiple times** at the same level — all
+instances fire independently, in declaration order. There is no override and no
+handler chain. Each declaration is a separate, self-contained reaction to the
+passing of a turn:
+
+```
+on every turn:
+    if location isnt last_room:    # room entry tracking
+        {entered location}
+        last_room = location
+
+on every turn:
+    say "Rain patters on the windows." if weather is rainy
+```
 
 `turn` is a global counter that increases by one every turn. It starts at 0
 before the player's first input — use `if turn == 0:` for initialization.
+`turn` is writable — assigning `turn = 0` resets the counter, which restarts
+all `on turn` handlers relative to that point. This is the mechanism for
+room-relative or scene-relative turn counting:
+
+```
+on go Room:destination:
+    turn = 0 if destination is cave    # reset on entering the cave
+    parent
+```
+
 There is no separate `on start:` — authors who want one can define their own:
 
 ```
@@ -693,6 +724,9 @@ on turn -2:
 | `on turn 3-5:` | turns 3, 4, and 5 |
 | `on turn 10-:` | turn 10 and every turn after |
 | `on turn -8:` | every turn up to and including turn 8 |
+
+All `on turn` forms follow the same multiple-declaration rule: any number of
+handlers with the same form may be declared at the same level and all fire.
 
 ---
 

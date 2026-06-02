@@ -1,0 +1,61 @@
+# party — turn-reset on room entry, scripted sequence per location
+
+"The Party" by Bernd Eickhoff version social_hell
+
+on go Room:destination:
+    turn = 0
+    parent
+
+Room kitchen "A cramped kitchen, busy with party overflow."
+    east: living room
+
+    on turn 0:
+        say "You wander into the kitchen."
+
+    on turn 1:
+        say "A blonde and John are in the corner. They have only eyes for each other."
+
+    on turn 2:
+        say "You feel your presence is an inconvenience."
+        go living room
+
+Room living room "The main room. Music thumps."
+    west: kitchen
+    north: garden
+
+    on turn 0:
+        say "You drift into the living room."
+
+    on turn 1:
+        say "A group huddles around the TV. Nobody looks up."
+
+    on turn 2:
+        say "The silence is deafening."
+        go garden
+
+Room garden "A small patio. Cold air and the smell of cigarettes."
+    south: living room
+
+    on turn 0:
+        say "You slip out into the back garden."
+
+    on turn 1:
+        say "Two people are deep in conversation. One angles away as you approach."
+
+    on turn 2:
+        say "Even outside you can't escape the awkwardness."
+        go kitchen
+
+test
+    test "kitchen sequence".
+    test "cycling".
+
+test "kitchen sequence"
+    . "wander into the kitchen"
+    wait. "only eyes for each other"
+    wait. "inconvenience"
+
+test "cycling"
+    wait. "drift into the living room"
+    wait. "Nobody looks up"
+    wait. "garden"
