@@ -279,6 +279,24 @@ type HandlerDecl struct {
 func (d *HandlerDecl) Position() Pos { return d.Pos }
 func (d *HandlerDecl) declNode()     {}
 
+// TurnHandlerDecl fires on a specific turn or turn range:
+//
+//	on turn 1:       From=1,  To=1   (exact)
+//	on turn 5-6:     From=5,  To=6   (inclusive range)
+//	on turn 7-:      From=7,  To=-1  (7 and beyond)
+//	on turn -8:      From=0,  To=8   (up to and including 8)
+//
+// To=-1 means no upper bound.
+type TurnHandlerDecl struct {
+	Pos  Pos
+	From int
+	To   int
+	Body []Stmt
+}
+
+func (d *TurnHandlerDecl) Position() Pos { return d.Pos }
+func (d *TurnHandlerDecl) declNode()     {}
+
 // TestDecl is a named or default test block:
 //
 //	test

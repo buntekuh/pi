@@ -663,7 +663,8 @@ func (p *parser) parseKindUseDecl() (*ast.KindUseDecl, error) {
 // on open Ledger:ledger at number:page:
 // internal has object:thing:
 // on every turn:
-func (p *parser) parseHandlerDecl() (*ast.HandlerDecl, error) {
+// on turn 1:  /  on turn 5-6:  /  on turn 7-:  /  on turn -8:
+func (p *parser) parseHandlerDecl() (ast.Decl, error) {
 	pos := p.currentPos()
 	internal := false
 	if p.atWord("internal") {
@@ -678,6 +679,15 @@ func (p *parser) parseHandlerDecl() (*ast.HandlerDecl, error) {
 	} else {
 		if err := p.expectWord("on"); err != nil {
 			return nil, err
+		}
+	}
+
+	// Special case: "on turn N:" / "on turn N-M:" / "on turn N-:" / "on turn -N:"
+	if p.atWord("turn") {
+		next := p.peekAt(1)
+		if next.Type == lexer.NUMBER || next.Type == lexer.MINUS {
+			_ = internal // turn handlers fire unconditionally; internal is ignored
+			return p.parseTurnHandlerDecl(pos)
 		}
 	}
 
@@ -723,6 +733,71 @@ func (p *parser) parseHandlerDecl() (*ast.HandlerDecl, error) {
 		Signature: sig,
 		Body:      body,
 	}, nil
+}
+
+// parseTurnHandlerDecl parses:
+//
+//	on turn 1:        exact turn
+//	on turn 5-6:      inclusive range
+//	on turn 7-:       7 and beyond (To = -1)
+//	on turn -8:       up to and including 8 (From = 0)
+func (p *parser) parseTurnHandlerDecl(pos ast.Pos) (*ast.TurnHandlerDecl, error) {
+	p.advance() // consume "turn"
+
+	from, to := 0, -1
+
+	if p.at(lexer.MINUS) {
+		// "-N" form: up to and including N
+		p.advance() // consume "-"
+		tok, err := p.expect(lexer.NUMBER)
+		if err != nil {
+			return nil, err
+		}
+		to = atoi(tok.Value)
+	} else {
+		// starts with a number
+		tok, err := p.expect(lexer.NUMBER)
+		if err != nil {
+			return nil, err
+		}
+		from = atoi(tok.Value)
+		to = from // default: exact turn
+
+		if p.at(lexer.MINUS) {
+			p.advance() // consume "-"
+			if p.at(lexer.NUMBER) {
+				// "N-M" range
+				tok2, err := p.expect(lexer.NUMBER)
+				if err != nil {
+					return nil, err
+				}
+				to = atoi(tok2.Value)
+			} else {
+				// "N-" form: N and beyond
+				to = -1
+			}
+		}
+	}
+
+	if _, err := p.expect(lexer.COLON); err != nil {
+		return nil, err
+	}
+	if err := p.expectNewline(); err != nil {
+		return nil, err
+	}
+	body, err := p.parseStmtBlock()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.TurnHandlerDecl{Pos: pos, From: from, To: to, Body: body}, nil
+}
+
+func atoi(s string) int {
+	n := 0
+	for _, c := range s {
+		n = n*10 + int(c-'0')
+	}
+	return n
 }
 
 // internal interface Object:response Object:request:

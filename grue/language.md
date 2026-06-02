@@ -511,10 +511,29 @@ on examine object:Truc:
     say "Custom only."  # instead of — next level never runs
 ```
 
+#### Includes
+
+`include` splits a game across multiple source files. All declarations in an
+included file merge into the same namespace at the same precedence as the main
+file — they are the same game, just written across several files:
+
+```
+include "chapter_2"
+include "chapter_3"
+```
+
+Declaring a handler with the same signature in two different included files is
+the same error as declaring it twice in one file. The compiler enforces
+uniqueness across the main file and all includes together.
+
+Includes are resolved recursively. An included file may itself include further
+files. Circular includes are a compiler error.
+
 #### Library imports
 
-`library` imports external reusable code. Library handlers sit at the bottom
-of the selection chain — own code always takes precedence:
+`library` imports reusable external code. Library handlers sit at the bottom
+of the selection chain — own-code handlers (from the main file or any include)
+always take precedence:
 
 ```
 library "standard"
@@ -522,16 +541,11 @@ library "containers"
 library "containers" as std    # alias on collision
 ```
 
-Declaring a handler with the same signature as a library handler overrides it.
-Declaring a handler with the same signature as another handler in own code is a
-compiler error — each signature may appear only once across the main file and all includes:
+Declaring a handler with the same signature as a library handler silently
+overrides it — this is intentional, not an error.
 
-```
-include "chapter_2"
-include "chapter_3"
-```
-
-All imported files are plain `.grue` files. Library metadata by convention:
+All imported files are plain `.grue` files. Library files conventionally begin
+with a metadata comment:
 ```
 # containers — portable container objects with open/close/lock
 # author: Jane Smith
@@ -656,11 +670,29 @@ Object time bomb "A ticking device."
         explode if fuse == 0
 ```
 
-There is no `on turn x:` syntax — use a condition:
+`on turn` handlers fire only on specific turns or turn ranges, without
+needing a manual condition:
+
 ```
-on every turn:
-    say "The villain arrives at the castle!" if turn == 20
+on turn 1:
+    say "You wake up on the cold floor."
+
+on turn 3-5:
+    say "Time passes slowly."
+
+on turn 10-:
+    say "You have been here a long time."
+
+on turn -2:
+    say "The first moments."
 ```
+
+| Form | Fires when |
+|---|---|
+| `on turn 1:` | exactly turn 1 |
+| `on turn 3-5:` | turns 3, 4, and 5 |
+| `on turn 10-:` | turn 10 and every turn after |
+| `on turn -8:` | every turn up to and including turn 8 |
 
 ---
 

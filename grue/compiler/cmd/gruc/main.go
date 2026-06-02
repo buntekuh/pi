@@ -55,6 +55,14 @@ func printSummary(file *ast.File) {
 			fmt.Printf("  %-7s %s\n", d.ClassName, d.Name)
 		case *ast.StyleDecl:
 			fmt.Printf("  style   %s\n", d.Name)
+		case *ast.TurnHandlerDecl:
+			if d.To == -1 {
+				fmt.Printf("  turn    %d-\n", d.From)
+			} else if d.From == d.To {
+				fmt.Printf("  turn    %d\n", d.From)
+			} else {
+				fmt.Printf("  turn    %d-%d\n", d.From, d.To)
+			}
 		case *ast.InterfaceHandlerDecl:
 			fmt.Printf("  iface   %s\n", sigStr(d.Signature))
 		case *ast.HandlerDecl:

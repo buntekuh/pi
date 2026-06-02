@@ -1,0 +1,29 @@
+# turn_handlers — on turn N, on turn N-M, on turn N-, on turn -N
+
+"Turn Handlers" by Test
+
+Room cell "A bare stone cell."
+
+on turn 1:
+    say "You wake up on the cold floor."
+
+on turn 3-5:
+    say "Time passes slowly."
+
+on turn 10-:
+    say "You have been here a long time."
+
+on turn -2:
+    say "The first moments."
+
+test
+    test "turn start".
+    test "turn range".
+
+test "turn start"
+    wait. "You wake up"
+
+test "turn range"
+    wait.
+    wait.
+    wait. "Time passes"
