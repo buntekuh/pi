@@ -170,14 +170,19 @@ func (ArrayValue) valueNode()  {}
 // type names. "self" in a class or instance body is resolved to the owner's
 // class name so that keys are stable for chain lookup.
 //
+// ResolvedSig mirrors Signature with every "self" type replaced by the
+// declaring class name. Grammar construction uses ResolvedSig to determine
+// the concrete parameter types for each slot without needing the ownerClass.
+//
 // Example: `on open self at number:page:` in class Ledger → SigKey = "open Ledger number"
 // Example: `on open Ledger:ledger at number:page:` globally → SigKey = "open Ledger number"
 type Handler struct {
-	Internal  bool
-	Signature []ast.SigPart
-	SigKey    string     // keywords + resolved type names joined by spaces
-	Body      []ast.Stmt // raw AST body; the code generator compiles this
-	IsLibrary bool
+	Internal    bool
+	Signature   []ast.SigPart // raw AST signature (may contain "self" type)
+	ResolvedSig []ast.SigPart // signature with "self" replaced by ownerClass
+	SigKey      string        // keywords + resolved type names joined by spaces
+	Body        []ast.Stmt    // raw AST body; the code generator compiles this
+	IsLibrary   bool
 }
 
 // InterfaceHandler declares a handler that calls an external capability.

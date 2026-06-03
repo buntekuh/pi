@@ -365,16 +365,32 @@ func (b *builder) buildVar(d *ast.VarDecl) *Prop {
 // Handler building
 // =============================================================================
 
-// buildHandler converts a HandlerDecl to a Handler, computing the stable SigKey.
+// buildHandler converts a HandlerDecl to a Handler, computing the stable SigKey
+// and the ResolvedSig (signature with "self" replaced by ownerClass).
 // The raw AST body is kept as-is; the code generator compiles it to JavaScript.
 func (b *builder) buildHandler(d *ast.HandlerDecl, ownerClass string, isLibrary bool) *Handler {
 	return &Handler{
-		Internal:  d.Internal,
-		Signature: d.Signature,
-		SigKey:    sigKey(d.Signature, ownerClass),
-		Body:      d.Body,
-		IsLibrary: isLibrary,
+		Internal:    d.Internal,
+		Signature:   d.Signature,
+		ResolvedSig: resolveSignature(d.Signature, ownerClass),
+		SigKey:      sigKey(d.Signature, ownerClass),
+		Body:        d.Body,
+		IsLibrary:   isLibrary,
 	}
+}
+
+// resolveSignature returns a copy of sig with every SigParam whose Type is
+// "self" replaced by ownerClass.  All other parts are left unchanged.
+func resolveSignature(sig []ast.SigPart, ownerClass string) []ast.SigPart {
+	resolved := make([]ast.SigPart, len(sig))
+	for i, p := range sig {
+		if param, ok := p.(ast.SigParam); ok && param.Type == "self" {
+			resolved[i] = ast.SigParam{Type: ownerClass, Name: param.Name}
+		} else {
+			resolved[i] = p
+		}
+	}
+	return resolved
 }
 
 func (b *builder) buildTurnRange(d *ast.TurnHandlerDecl, isLibrary bool) *TurnRangeHandler {
