@@ -13,10 +13,10 @@ internal Object:object has Item:item:
 # The guard on leave prevents it firing before the player has been anywhere.
 var last room: unset
 
-on every turn:
+internal every turn:
     if last room isnt location:
         if last room is unset:
-            start
+            start game
         else:
             leave last room
             enter location
@@ -24,8 +24,8 @@ on every turn:
         last room = location
             
 
-on start:
+internal start game:
 
-on enter Room:room:
+internal enter Room:room:
 
-on leave Room:room:
+internal leave Room:room:
