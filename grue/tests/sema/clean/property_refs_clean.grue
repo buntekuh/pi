@@ -1,0 +1,12 @@
+# Valid property value references — instances and leads to: all resolve.
+
+"Property Refs Clean" by Test
+
+Room foyer "A grand foyer."
+    north: corridor
+    east: Door iron gate "A heavy gate."
+        leads to: garden
+
+Room corridor "A long corridor."
+
+Room garden "A walled garden."

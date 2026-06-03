@@ -1,0 +1,8 @@
+# expect: error unknown_kind_value line 8
+
+"Unknown Kind Value" by Test
+
+kind mood: *neutral, happy, sad
+
+Object sad_clown "A sad clown."
+    is cheerful

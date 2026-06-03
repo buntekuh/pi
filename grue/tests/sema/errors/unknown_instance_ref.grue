@@ -1,0 +1,8 @@
+# expect: error unknown_instance_ref line 8
+
+"Unknown Instance Ref" by Test
+
+Room hallway "A long hallway."
+
+Room kitchen "A kitchen."
+    north: pantry

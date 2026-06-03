@@ -146,20 +146,60 @@ func (a *analyser) warnf(code string, line int, format string, args ...any) {
 	a.diags = append(a.diags, Diagnostic{Warning, code, line, fmt.Sprintf(format, args...)})
 }
 
-// Analyse runs all semantic checks on file and returns the diagnostics found.
-func Analyse(file *ast.File) []Diagnostic {
+// Symbols holds the declaration tables produced by Pass 1.
+// Pass it to Check to run validation.
+type Symbols struct {
+	a         *analyser
+	Includes  []string // paths from include directives, in declaration order
+	Libraries []string // paths from library directives, in declaration order
+}
+
+// Collect runs Pass 1 on the given files and returns the populated symbol
+// tables. No diagnostics are emitted; this is a pure collection pass.
+// The driver should inspect Symbols.Includes and Symbols.Libraries, load and
+// parse those files, call Collect again with the full set, then call Check.
+func Collect(files ...*ast.File) *Symbols {
 	a := newAnalyser()
-	a.collectDecls(file.Decls, "")
-	a.mergeDoorDecls(file.Decls) // merges same-name inline doors; mutates AST
-	a.checkKinds(file.Decls)
-	a.checkInheritance()
-	a.checkHandlerSigs(file.Decls)
-	a.checkClassRefs(file.Decls)
-	a.checkCallArgs(file.Decls)
-	a.collectTokens(file.Decls)
-	a.checkTokenCrossRefs()
-	a.checkSingletons(file.Decls)
-	return a.diags
+	s := &Symbols{a: a}
+	for _, f := range files {
+		a.collectDecls(f.Decls, "")
+		a.collectTokens(f.Decls)
+		for _, d := range f.Decls {
+			switch d := d.(type) {
+			case *ast.IncludeDecl:
+				s.Includes = append(s.Includes, d.Path)
+			case *ast.LibraryImport:
+				s.Libraries = append(s.Libraries, d.Path)
+			}
+		}
+	}
+	return s
+}
+
+// Check runs Pass 2 using the pre-collected symbol tables and returns all
+// diagnostics. files must be the same set that was passed to Collect.
+func (s *Symbols) Check(files ...*ast.File) []Diagnostic {
+	var allDecls []ast.Decl
+	for _, f := range files {
+		allDecls = append(allDecls, f.Decls...)
+	}
+	s.a.mergeDoorDecls(allDecls)
+	s.a.checkKinds(allDecls)
+	s.a.checkInheritance()
+	s.a.checkHandlerSigs(allDecls)
+	s.a.checkClassRefs(allDecls)
+	s.a.checkKindUseRefs(allDecls)
+	s.a.checkPropertyValueRefs(allDecls)
+	s.a.checkCallArgs(allDecls)
+	s.a.checkTokenCrossRefs()
+	s.a.checkSingletons(allDecls)
+	return s.a.diags
+}
+
+// Analyse runs both passes on the same set of files and returns all diagnostics.
+// Equivalent to Collect(files...).Check(files...).
+func Analyse(files ...*ast.File) []Diagnostic {
+	return Collect(files...).Check(files...)
 }
 
 // =============================================================================
@@ -215,22 +255,11 @@ func (a *analyser) collectDecls(decls []ast.Decl, currentClass string) {
 			a.collectDecls(d.Body, d.Name)
 
 		case *ast.InstanceDecl:
-			// Effective class starts as the declaration class name.
-			// "is ClassName" in the body overrides it — this is how an author
-			// sets the runtime class of a generic Object instance.
-			effectiveClass := d.ClassName
-			for _, bodyDecl := range d.Body {
-				if ku, ok := bodyDecl.(*ast.KindUseDecl); ok {
-					if isCapitalized(ku.Value) && !ku.Negate {
-						effectiveClass = ku.Value
-					}
-				}
-			}
 			if existing, exists := a.instances[d.Name]; exists && existing.line != 0 {
 				a.errorf("duplicate_instance", d.Pos.Line,
 					"instance %q already declared at line %d", d.Name, existing.line)
 			} else {
-				a.instances[d.Name] = instanceInfo{className: effectiveClass, line: d.Pos.Line}
+				a.instances[d.Name] = instanceInfo{className: d.ClassName, line: d.Pos.Line}
 			}
 			a.collectDecls(d.Body, d.ClassName)
 
@@ -329,6 +358,89 @@ func (a *analyser) checkInheritance() {
 			}
 			current = parent
 		}
+	}
+}
+
+// =============================================================================
+// Property value reference checks
+// =============================================================================
+
+// checkPropertyValueRefs verifies that NameExpr property values resolve to
+// known instances. Inline instance declarations (non-nil Body) are skipped
+// but their nested properties are checked recursively.
+func (a *analyser) checkPropertyValueRefs(decls []ast.Decl) {
+	for _, d := range decls {
+		switch d := d.(type) {
+		case *ast.InstanceDecl:
+			a.checkPropertyValueRefsInBody(d.Body)
+		case *ast.ClassDecl:
+			a.checkPropertyValueRefsInBody(d.Body)
+		}
+	}
+}
+
+func (a *analyser) checkPropertyValueRefsInBody(decls []ast.Decl) {
+	for _, d := range decls {
+		prop, ok := d.(*ast.PropertyDecl)
+		if !ok {
+			continue
+		}
+		if len(prop.Body) > 0 {
+			// Inline instance declaration — the value is a class+name spec
+			// handled by door merging. Recurse to check nested properties.
+			a.checkPropertyValueRefsInBody(prop.Body)
+			continue
+		}
+		name, ok := prop.Value.(*ast.NameExpr)
+		if !ok {
+			continue
+		}
+		if _, exists := a.instances[name.Name]; !exists {
+			a.errorf("unknown_instance_ref", prop.Pos.Line,
+				"property %q refers to unknown instance %q", prop.Key, name.Name)
+		}
+	}
+}
+
+// =============================================================================
+// Kind use reference checks
+// =============================================================================
+
+// checkKindUseRefs verifies that every KindUseDecl value names a declared kind
+// value. Capitalised values are an error — class changing is not supported.
+func (a *analyser) checkKindUseRefs(decls []ast.Decl) {
+	for _, d := range decls {
+		switch d := d.(type) {
+		case *ast.InstanceDecl:
+			for _, bodyDecl := range d.Body {
+				if ku, ok := bodyDecl.(*ast.KindUseDecl); ok {
+					a.checkKindUseValue(ku)
+				}
+			}
+			a.checkKindUseRefs(d.Body)
+		case *ast.ClassDecl:
+			for _, bodyDecl := range d.Body {
+				if ku, ok := bodyDecl.(*ast.KindUseDecl); ok {
+					a.checkKindUseValue(ku)
+				}
+			}
+			a.checkKindUseRefs(d.Body)
+		}
+	}
+}
+
+func (a *analyser) checkKindUseValue(ku *ast.KindUseDecl) {
+	if isCapitalized(ku.Value) {
+		a.errorf("class_change_deprecated", ku.Pos.Line,
+			"'is %s': changing an instance's class is not supported; declare the instance as %s directly",
+			ku.Value, ku.Value)
+		return
+	}
+	_, isValue := a.kindValues[ku.Value]
+	_, isName := a.kindNames[ku.Value]
+	if !isValue && !isName {
+		a.errorf("unknown_kind_value", ku.Pos.Line,
+			"'%s' is not a declared kind value or kind name", ku.Value)
 	}
 }
 

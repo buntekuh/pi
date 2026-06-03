@@ -1,0 +1,8 @@
+# expect: error class_change_deprecated line 8
+
+"Class Change Deprecated" by Test
+
+Object mysterious_box "A mysterious box."
+
+Object ball "A rubber ball."
+    is Container
