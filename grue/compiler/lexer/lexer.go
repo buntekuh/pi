@@ -1,3 +1,26 @@
+// Package-level design notes (see also token.go for the keyword design rationale):
+//
+// The lexer converts raw source text into a flat token stream. Its most important
+// design decision is what it does NOT do: it never classifies words as keywords.
+// Every bareword is a WORD token. This allows the parser — which has full
+// syntactic context — to decide whether "on" starts a handler, whether "room"
+// is a property name, or whether "fail" is a statement keyword. The boundary is
+// clean: the lexer handles only character-level concerns (indentation, strings,
+// numbers, operators); the parser handles all word-level semantics.
+//
+// Indentation stack: the lexer maintains a stack of column numbers rather than
+// a simple depth counter. A depth counter would only tell you how many levels
+// deep you are; a column-number stack lets you verify that a dedented line
+// matches a previously opened indentation level exactly. This catches errors
+// like dedenting to column 3 when the stack holds [0, 4] — that column was
+// never opened, so it is illegal (Python-style rule: you must return to a
+// column that was used to open a block).
+//
+// String interpolation: {expression} and [directive] content inside strings is
+// passed through verbatim in the STRING token value. The lexer does not try to
+// parse expressions inside strings; doing so would require mutual recursion with
+// the expression parser and would complicate error recovery significantly.
+
 package lexer
 
 import (
@@ -15,12 +38,19 @@ import (
 // nesting of indentation levels. It always has at least one entry (0) for the
 // top-level scope. When a block opens, the new column number is pushed; when
 // it closes, it is popped and a DEDENT token is emitted.
+//
+// Why a stack of column numbers rather than a simple depth counter?
+// A depth counter (0, 1, 2, …) would only tell you how deep the nesting is.
+// A column-number stack lets handleIndent verify that a dedent lands exactly on
+// a column that was previously used to open a block. Dedenting to an
+// intermediate column that was never explicitly opened is a syntax error —
+// catching it here prevents confusing errors downstream in the parser.
 type lexer struct {
 	src     []rune
 	pos     int
 	line    int
 	col     int
-	indents []int // stack of indent column numbers; [0] = base level
+	indents []int // stack of indent column numbers; [0] = base level (col 0)
 }
 
 // Tokenize is the public entry point. It converts a complete Grue source file
@@ -255,10 +285,13 @@ func (l *lexer) lexToken() (Token, error) {
 
 // lexString lexes a double-quoted string literal.
 //
-// Multi-line strings: a newline inside a string followed by any amount of
-// whitespace is collapsed to a single space. This allows long room descriptions
-// and messages to be wrapped across source lines for readability without
-// affecting the output text.
+// Multi-line collapsing: a newline inside a string, plus any following
+// whitespace, is collapsed to a single space. Grue room descriptions and
+// messages are conceptually single paragraphs; authors wrap them across lines
+// for source readability, but the output should render as one unbroken line.
+// The rule is: newline + whitespace → one space, unless the buffer is already
+// empty, already ends in a space, or the next non-whitespace character is the
+// closing quote (which would produce a trailing space).
 //
 //	Room drawing room "A long description that wraps
 //	    across two lines."
@@ -266,6 +299,7 @@ func (l *lexer) lexToken() (Token, error) {
 //
 // String interpolation ({...}) and inline directives ([...]) are preserved
 // verbatim in the token value. The parser resolves them in a later pass.
+// There is no STRING_INTERP token — see the WORD comment in token.go for why.
 func (l *lexer) lexString() (Token, error) {
 	line, col := l.line, l.col
 	l.advance() // consume opening "
@@ -392,9 +426,11 @@ func (l *lexer) lexOperator() (Token, error) {
 	case ':':
 		return Token{COLON, ":", line, col}, nil
 	case '.':
-		// . is used for property access (lamp.light) and as the separator in
-		// test assertions (open rolodex at 3. "Opened"). The parser determines
-		// which role it plays from context.
+		// . is context-sensitive. Mid-line (lamp.light, log.{pos}) it is a
+		// property-access separator. At the end of a test command
+		// (open rolodex at 3. "Opened") it separates the command from the
+		// assertion string. The lexer always emits DOT; the parser decides
+		// which role it plays by looking at what follows it in context.
 		return Token{DOT, ".", line, col}, nil
 	case ',':
 		return Token{COMMA, ",", line, col}, nil
@@ -405,6 +441,14 @@ func (l *lexer) lexOperator() (Token, error) {
 	case '{':
 		// { outside a string is dynamic property access (log.{position}) or
 		// an inline handler call ({has ledger silently}).
+		//
+		// Note: when { appears inside a string, it begins an interpolation
+		// expression. Nested braces are legal inside that expression
+		// (e.g. {a.{b}} — dynamic lookup on a dynamic key). The lexer does
+		// not parse interpolations at all: it passes the entire string value
+		// through verbatim. If the lexer were to track brace depth inside
+		// strings in order to find the matching }, it would need to understand
+		// expression syntax, which belongs in the parser.
 		return Token{LBRACE, "{", line, col}, nil
 	case '}':
 		return Token{RBRACE, "}", line, col}, nil

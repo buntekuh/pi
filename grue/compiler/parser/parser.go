@@ -1,9 +1,42 @@
 // Package parser implements a recursive descent parser for Grue source files.
 // It consumes a token stream from the lexer and produces an *ast.File.
 //
-// The parser is context-driven: the same token sequence may mean different
-// things in different positions (declaration body vs handler body vs test body),
-// so each context has its own parsing functions.
+// Context-driven design
+//
+// The lexer emits no keywords — every bareword is a WORD token — so the parser
+// must rely on position and context to give words meaning. The same token
+// sequence has different interpretations depending on where it appears:
+//
+//   - A WORD after an INDENT inside a class body is a property key ("light:", "weight:")
+//   - A WORD after an INDENT inside a handler body is a statement keyword ("say", "fail")
+//     or the start of an assignment/call expression
+//   - A WORD immediately after "on" is the first keyword in a handler signature
+//   - A capitalised WORD at the start of a line is a class name (instance declaration)
+//
+// Rather than trying to unify these in a single dispatch table, the parser has
+// separate entry points for each syntactic context: parseBodyDecl, parseStmt,
+// parseTestCmd, parseSignature, parsePropertyName, etc. Each knows exactly
+// which constructs are legal and what to do when it sees an unexpected token.
+//
+// peek / advance pattern
+//
+// The parser is a simple one-token lookahead LL parser. p.peek() returns the
+// current token without consuming it; p.advance() returns and consumes it.
+// For multi-token lookahead (e.g. distinguishing "Type:name" from a keyword
+// followed by a colon) the parser uses p.peekAt(offset) to inspect tokens
+// further ahead without side effects. There is no separate lookahead buffer:
+// p.peekAt(n) indexes directly into the token slice, which is already fully
+// materialised before parsing begins.
+//
+// Body parser separation
+//
+// There are four distinct body parsers: parseBodyDecls (declarations inside a
+// class or instance), parseStmtBlock (imperative statements inside a handler),
+// parseTestBlock (test commands), and inline bodies for doors/inline instances.
+// They are separate functions rather than a unified body parser because each
+// context has a different set of legal constructs and different error-recovery
+// semantics. Unifying them would require threading a context flag through every
+// recursive call and would make it much harder to produce useful error messages.
 package parser
 
 import (
@@ -17,6 +50,11 @@ import (
 
 // reserved is the set of words that may not appear as standalone words inside
 // property names. They are valid as keywords in handler signatures and elsewhere.
+//
+// The list exists to produce better error messages when an author accidentally
+// writes something like "on: lit" (intending a property) — without this check
+// the parser would try to parse "on: lit" as a handler signature and emit a
+// confusing error about a missing handler body.
 var reserved = map[string]bool{
 	"is": true, "isnt": true, "and": true, "or": true, "not": true,
 	"if": true, "unless": true, "on": true,
@@ -60,10 +98,18 @@ func Parse(tokens []lexer.Token) (*ast.File, error) {
 // Navigation helpers
 // =============================================================================
 
+// peek returns the current token without consuming it.
+// Equivalent to peekAt(0). All conditional dispatch in the parser goes
+// through peek() or peekAt() rather than consuming a token speculatively,
+// so that error messages always point at the right position.
 func (p *parser) peek() lexer.Token {
 	return p.peekAt(0)
 }
 
+// peekAt returns the token at pos+offset without advancing. offset=0 is the
+// current token; offset=1 is one ahead. Because the full token slice is
+// already in memory, random access is O(1) and there is no need for a
+// dedicated multi-token lookahead buffer.
 func (p *parser) peekAt(offset int) lexer.Token {
 	i := p.pos + offset
 	if i >= len(p.tokens) {
@@ -72,6 +118,8 @@ func (p *parser) peekAt(offset int) lexer.Token {
 	return p.tokens[i]
 }
 
+// advance consumes and returns the current token. Does not advance past EOF
+// so callers can safely call advance() multiple times once the stream is done.
 func (p *parser) advance() lexer.Token {
 	tok := p.tokens[p.pos]
 	if tok.Type != lexer.EOF {
@@ -413,8 +461,19 @@ func (p *parser) parseInstanceDecl() (*ast.InstanceDecl, error) {
 	}, nil
 }
 
-// parseInstanceName collects words, numbers, and hyphens into a name string.
-// Stops at comma, string, newline, indent, dedent, eof, or colon.
+// parseInstanceName collects words, numbers, and hyphens into a name string,
+// joining them with spaces (e.g. "brass lantern", "Area 51", "mother-in-law").
+//
+// The termination conditions are context clues the caller provides implicitly
+// by the surrounding syntax:
+//   - COMMA or STRING means aliases or a description string follows
+//   - NEWLINE/INDENT/DEDENT/EOF means the name extended to end of line
+//   - COLON means we're in a property-key context (shouldn't normally be reached
+//     from an instance name, but handled defensively)
+//
+// Hyphens between words are joined without spaces ("mother-in-law"), but a
+// bare trailing hyphen terminates the name to avoid consuming arithmetic
+// minus operators.
 func (p *parser) parseInstanceName() string {
 	var parts []string
 	for {
@@ -448,7 +507,14 @@ func (p *parser) parseInstanceName() string {
 // =============================================================================
 
 // parseBodyDecls parses an optional indented block of declarations.
-// Returns an empty slice if there is no indented block.
+// Returns an empty slice (not an error) if there is no indented block, because
+// many constructs (empty class, instance with no properties) have no body.
+//
+// This is the declaration body parser — legal inside a class, instance, or
+// inline door. It is distinct from parseStmtBlock (handler bodies) and
+// parseTestBlock (test bodies) because each context has a different set of
+// legal constructs. Mixing them would require a context parameter threaded
+// through every recursive call.
 func (p *parser) parseBodyDecls() ([]ast.Decl, error) {
 	if !p.at(lexer.INDENT) {
 		return nil, nil
@@ -471,7 +537,11 @@ func (p *parser) parseBodyDecls() ([]ast.Decl, error) {
 }
 
 // parseBodyDecl dispatches to the right declaration parser based on the
-// first token of the current line.
+// first token of the current line inside a class or instance body.
+//
+// Capitalised words are class names (nested instance declarations). Lowercase
+// words are either known keywords (on, kind, var, test, is) or property names.
+// Numbers are also valid property keys (e.g. "0: unset").
 func (p *parser) parseBodyDecl() (ast.Decl, error) {
 	tok := p.peek()
 
@@ -512,10 +582,30 @@ func (p *parser) parseBodyDecl() (ast.Decl, error) {
 // Property declaration
 // =============================================================================
 
-// north: hallway
-// top of ladder: Mare Tranquillitatis
-// max_occupants: 4
-// 0: unset
+// parsePropertyDecl parses a property declaration of the form "key: value".
+// The key can be multi-word ("top of ladder", "max occupants") and the value
+// can be a number, string, name, array literal, or the special word "unset".
+// Multiple comma-separated values are wrapped in a ListLit.
+//
+// Inline door syntax: a PropertyDecl can hold both a Value AND a Body when the
+// property value is a class instance spec and an indented block follows it:
+//
+//	east: Door brass door "A heavy door."
+//	    leads to: kitchen
+//	    locked: true
+//
+// In this case Value is a NameExpr with the instance name ("brass door") and
+// Body holds the door's own property declarations. The description string —
+// if present — is prepended to Body as a "description" PropertyDecl so the
+// rest of the compiler pipeline sees it like any other property regardless of
+// whether it was written inline or inside the block.
+//
+// Examples:
+//
+//	north: hallway
+//	top of ladder: Mare Tranquillitatis
+//	max_occupants: 4
+//	0: unset
 func (p *parser) parsePropertyDecl() (*ast.PropertyDecl, error) {
 	pos := p.currentPos()
 
@@ -588,6 +678,12 @@ func (p *parser) parsePropertyDecl() (*ast.PropertyDecl, error) {
 // parsePropertyName reads the property name — words and numbers separated by
 // spaces, stopping at COLON. Raises an error if a reserved keyword appears
 // as a standalone word in the name.
+//
+// The trailing COLON is what unambiguously ends a property name. There is no
+// maximum word count — Grue property names can be arbitrarily long phrases
+// ("top of ladder", "number of times opened"). The reserved-word check exists
+// to catch likely author mistakes rather than to enforce a keyword rule,
+// because no character-level distinction separates keywords from names.
 func (p *parser) parsePropertyName() (string, error) {
 	var parts []string
 	for {
@@ -679,10 +775,19 @@ func (p *parser) parseKindUseDecl() (*ast.KindUseDecl, error) {
 // Handler declaration
 // =============================================================================
 
-// on open Ledger:ledger at number:page:
-// internal has object:thing:
-// on every turn:
-// on turn 1:  /  on turn 5-6:  /  on turn 7-:  /  on turn -8:
+// parseHandlerDecl parses a handler or turn-handler declaration.
+//
+// Forms:
+//
+//	on open Ledger:ledger at number:page:
+//	internal has object:thing:
+//	on every turn:
+//	on turn 1:  /  on turn 5-6:  /  on turn 7-:  /  on turn -8:
+//
+// The "internal" modifier is checked before consuming "on" because it changes
+// what follows ("internal on ..." with explicit "on", or "internal has ..."
+// without it). This flexibility allows library authors to write internal
+// handlers without being forced to use the word "on".
 func (p *parser) parseHandlerDecl() (ast.Decl, error) {
 	pos := p.currentPos()
 	internal := false
@@ -842,17 +947,37 @@ func (p *parser) parseInterfaceHandlerDecl() (*ast.InterfaceHandlerDecl, error) 
 	return &ast.InterfaceHandlerDecl{Pos: pos, Signature: sig, Body: body}, nil
 }
 
-// parseSignature reads a handler signature: alternating keywords and type:name
-// parameters, ending with a bare COLON before NEWLINE.
+// parseSignature reads a handler signature: an alternating sequence of
+// keywords and Type:name parameter pairs, terminated by a bare COLON.
 //
-// Example: open Ledger:ledger at number:page
-// → [Keyword("open"), Param(Ledger,ledger), Keyword("at"), Param(number,page)]
+//	open Ledger:ledger at number:page:
+//	→ [Keyword("open"), Param("Ledger","ledger"), Keyword("at"), Param("number","page")]
+//
+// Why alternate keywords and parameters?
+// Grue handler signatures are designed to read like natural English commands
+// ("open Ledger:ledger at number:page" reads as "open [a ledger] at [a page
+// number]"). The alternation is unambiguous without brackets or explicit
+// separators because the WORD COLON WORD pattern can only be a parameter,
+// never a keyword — bare COLONs are not legal mid-keyword. This makes long,
+// descriptive signatures like "on open Ledger:ledger at number:page:" parse
+// without any ambiguity.
+//
+// "self" in signatures: the word "self" is a special SigParam with both Type
+// and Name set to "self". It is not a lexer keyword; the parser recognises it
+// by value and emits a SigParam so that the sema/world pass can resolve it to
+// the enclosing instance without needing a special AST node kind.
+//
+// Two-token lookahead is needed: a WORD followed by COLON followed by WORD
+// is a parameter; a WORD followed by COLON NOT followed by WORD (i.e. the
+// signature-terminating colon) is the end of the signature, not a parameter.
 func (p *parser) parseSignature() ([]ast.SigPart, error) {
 	var parts []ast.SigPart
 	for {
 		tok := p.peek()
 
-		// Bare COLON terminates the signature
+		// Bare COLON terminates the signature — this is what distinguishes
+		// the end-of-signature colon from a Type:name colon (which is always
+		// followed by another WORD).
 		if tok.Type == lexer.COLON {
 			p.advance()
 			return parts, nil
@@ -865,14 +990,20 @@ func (p *parser) parseSignature() ([]ast.SigPart, error) {
 
 		word := tok.Value
 
-		// "self" alone is a self-parameter
+		// "self" is a special parameter meaning "the enclosing instance". It
+		// is resolved by sema/world, not by the parser — the parser just
+		// records it as a SigParam so the rest of the pipeline has a uniform
+		// type to work with.
 		if word == "self" {
 			p.advance()
 			parts = append(parts, ast.SigParam{Type: "self", Name: "self"})
 			continue
 		}
 
-		// WORD COLON WORD → typed parameter (Type:name)
+		// WORD COLON WORD → typed parameter (Type:name).
+		// Two-token lookahead: we need peekAt(1) == COLON AND peekAt(2) == WORD
+		// to distinguish "Ledger:ledger" (parameter) from the bare terminating
+		// colon (which has nothing after it, or has NEWLINE after it).
 		if p.peekAt(1).Type == lexer.COLON && p.peekAt(2).Type == lexer.WORD {
 			p.advance()               // consume type word
 			p.advance()               // consume COLON
@@ -881,7 +1012,7 @@ func (p *parser) parseSignature() ([]ast.SigPart, error) {
 			continue
 		}
 
-		// Otherwise it's a keyword
+		// Otherwise it's a plain keyword in the signature ("open", "at", "with").
 		p.advance()
 		parts = append(parts, ast.SigKeyword{Word: word})
 	}
@@ -891,10 +1022,15 @@ func (p *parser) parseSignature() ([]ast.SigPart, error) {
 // Statement block
 // =============================================================================
 
-// parseStmtBlock parses an indented block of statements.
-// When testMode is active (inside a test block), it delegates to
-// parseTestBlock so that nested loops and conditionals keep test-command
-// semantics for their bodies.
+// parseStmtBlock parses an indented block of imperative statements (the body
+// of a handler, if/unless, for, when, choose, etc.).
+//
+// When testMode is active the parser is already inside a test block. In that
+// case parseStmtBlock delegates to parseTestBlock so that nested control
+// structures (if/for/when inside a test) still treat their lines as test
+// commands rather than ordinary statements. Without this delegation, a "for"
+// loop inside a test block would expect assignment/call statements but find
+// player-command lines and produce confusing errors.
 func (p *parser) parseStmtBlock() ([]ast.Stmt, error) {
 	if p.testMode {
 		return p.parseTestBlock()
@@ -1525,6 +1661,10 @@ func (p *parser) parseAssignOrMutateStmt() (ast.Stmt, error) {
 // Test declaration
 // =============================================================================
 
+// parseTestDecl parses a top-level or nested "test" block.
+// Test blocks contain TestCmdStmt nodes rather than regular statements.
+// The parser enters testMode for the duration of the block so that all
+// nested control-flow bodies (if/for/when) also use test-command parsing.
 func (p *parser) parseTestDecl() (*ast.TestDecl, error) {
 	pos := p.currentPos()
 	p.advance() // consume "test"
@@ -1542,11 +1682,26 @@ func (p *parser) parseTestDecl() (*ast.TestDecl, error) {
 	return &ast.TestDecl{Pos: pos, Name: name, Body: body}, nil
 }
 
-// parseTestBlock parses test command lines: command. "assertion" or command. not "assertion"
-// Lines that contain an assignment operator or start with a statement keyword
-// are parsed as regular Grue statements. Everything else is a player command.
-// Sets testMode so that nested statement blocks (from/for/if/when bodies)
-// continue using test-command semantics.
+// parseTestBlock parses the body of a test block as a mix of test commands and
+// regular Grue statements.
+//
+// Why TestCmdStmt rather than regular statements?
+// Test commands are player-command strings ("open rolodex at 3") that are
+// dispatched at runtime by the game engine, not Grue statements executed
+// directly. They need a different AST node type so the code generator can emit
+// "run this player command and check the output" rather than "execute this
+// assignment". If test bodies used regular statements, the compiler would have
+// to infer at the code-gen stage whether a given line was a player command or
+// an assignment — which is fragile and context-dependent.
+//
+// Lines that look like assignments (contain =, +=, -=) or start with a
+// statement keyword (if, for, say, etc.) are parsed as regular statements so
+// that test setup logic (setting variables, conditional logic) still works.
+// Everything else on a line is treated as a player command.
+//
+// testMode is a boolean flag on the parser struct rather than a parameter so
+// that it propagates automatically into all recursive calls (parseStmtBlock,
+// parseIfStmt, etc.) without requiring callers to thread it through.
 func (p *parser) parseTestBlock() ([]ast.Stmt, error) {
 	if !p.at(lexer.INDENT) {
 		return nil, nil
@@ -1594,9 +1749,16 @@ func (p *parser) isTestStmtKeyword() bool {
 	return false
 }
 
-// lineHasAssignment returns true if the current line contains an assignment
-// operator (=, +=, -=) before NEWLINE. Scans past DOT so that property
-// assignments like "lamp.light = lit" are correctly detected.
+// lineHasAssignment scans forward from the current position to determine
+// whether this line is an assignment statement. It looks for =, +=, or -=
+// before the next NEWLINE/EOF, without consuming any tokens.
+//
+// This scan is needed in test blocks to distinguish:
+//   - "lamp.light = lit"  → regular assignment statement (set up test state)
+//   - "lamp lit"          → player command (issue to the game engine)
+//
+// Without the scan, the parser could not decide which path to take on a line
+// starting with a bare WORD — both forms start the same way.
 func (p *parser) lineHasAssignment() bool {
 	for i := p.pos; i < len(p.tokens); i++ {
 		switch p.tokens[i].Type {
@@ -1610,6 +1772,16 @@ func (p *parser) lineHasAssignment() bool {
 }
 
 // parseTestCmd parses one test command line.
+//
+// The DOT is the separator between the player command and the assertion. This
+// role is context-sensitive: mid-expression a DOT is a property access
+// separator, but at the end of a test command it signals "check that the
+// response contains this string". The parser knows it is in test-command
+// context (not an expression) because parseTestBlock is the caller.
+//
+// A bare dot at the start of the line (. "expected") means "wait one turn and
+// check the output" — useful for testing timed events without issuing a command.
+//
 // Forms:
 //
 //	open rolodex at 3. "Opened"
@@ -1855,7 +2027,15 @@ func (p *parser) parseUnary() (ast.Expr, error) {
 	return p.parsePostfix()
 }
 
-// parsePostfix handles property access chains: a.b, a.{expr}
+// parsePostfix handles property access chains: a.b, a.{expr}, and collection
+// filters: collection.filter(ClassName).
+//
+// DOT is used for both static access (lamp.light) and dynamic access
+// (log.{position}). The distinction is made here by checking whether a LBRACE
+// follows the DOT: if so, we parse a full expression as the key and wrap it in
+// a PropertyAccess with KeyExpr set; otherwise we expect a plain WORD and set
+// the static Key field. Both are represented by the same AST node type so the
+// code generator only needs one case.
 func (p *parser) parsePostfix() (ast.Expr, error) {
 	expr, err := p.parsePrimary()
 	if err != nil {
@@ -1971,8 +2151,13 @@ var exprNameStop = map[string]bool{
 
 // parseExprName collects consecutive WORD tokens into a space-joined name,
 // stopping at MINUS (arithmetic operator) and any word in exprNameStop.
-// Use this in expression context instead of parseInstanceName to avoid
-// consuming arithmetic operators as part of a hyphenated name.
+//
+// Expression context requires a stricter stopping rule than instance names:
+// "fuse - 1" must parse as (NameExpr "fuse") MINUS (NumberLit 1), not as a
+// single name "fuse-1". parseInstanceName happily joins hyphenated parts because
+// in name context (instance declarations, property values) a hyphen is
+// unambiguously a name component. In expression context a minus sign is almost
+// certainly arithmetic, so we stop immediately at MINUS rather than peeking.
 func (p *parser) parseExprName() string {
 	var parts []string
 	for {
@@ -2013,9 +2198,12 @@ func (p *parser) parseFuncCall() (*ast.FuncCallExpr, error) {
 	return &ast.FuncCallExpr{Pos: pos, Name: name, Args: args}, nil
 }
 
-// parseArrayLit parses an Array literal: [expr, expr, ...]
-// Keys are auto-assigned 0, 1, 2, ... in declaration order.
-// NEWLINE, INDENT, and DEDENT tokens are skipped so multiline arrays work:
+// parseArrayLit parses an array literal: [expr, expr, ...]
+// Keys are auto-assigned 0, 1, 2, … in declaration order by the compiler.
+// NEWLINE, INDENT, and DEDENT tokens are skipped so multiline arrays work.
+// Named keys are explicitly rejected here (use an Object instead) because
+// allowing "key: value" inside [...] would create ambiguity between arrays
+// and objects, and would require a different AST node type.
 //
 //	primes: [
 //	    2, 3, 5,
@@ -2140,7 +2328,11 @@ func (p *parser) parseBareWords(stopAt []string) string {
 	return strings.Join(parts, " ")
 }
 
-// isCapitalized reports whether a string starts with an uppercase letter.
+// isCapitalized reports whether a string starts with an uppercase ASCII letter.
+// Used to distinguish class names (Room, Object, Ledger) from property keys
+// and statement keywords (north, say, on) at the start of a declaration line.
+// Only ASCII uppercase is checked because Grue class names are conventionally
+// ASCII identifiers, even if strings and property values may contain Unicode.
 func isCapitalized(s string) bool {
 	if len(s) == 0 {
 		return false

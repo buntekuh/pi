@@ -5,6 +5,8 @@ import (
 	"gruc/ast"
 	"gruc/lexer"
 	"gruc/parser"
+	"gruc/sema"
+	"gruc/world"
 	"os"
 )
 
@@ -32,51 +34,52 @@ func main() {
 		os.Exit(1)
 	}
 
-	printSummary(file)
+	// Sema pass 1 — collect symbols (includes / libraries resolved here).
+	syms := sema.Collect(file)
+
+	// TODO: load files from syms.Includes and syms.Libraries and re-Collect.
+	// For now, proceed with a single file and no library.
+
+	// Sema pass 2 — validate.
+	diags := syms.Check(file)
+	hasError := false
+	for _, d := range diags {
+		fmt.Fprintf(os.Stderr, "%s:%d: %s: %s\n", os.Args[1], d.Line, d.Code, d.Message)
+		if d.Severity == sema.Error {
+			hasError = true
+		}
+	}
+	if hasError {
+		os.Exit(1)
+	}
+
+	// Step 4 — World tree construction.
+	w := world.Build([]*ast.File{file}, nil)
+	printWorldSummary(w)
 }
 
-func printSummary(file *ast.File) {
-	fmt.Printf("%d top-level declarations:\n", len(file.Decls))
-	for _, decl := range file.Decls {
-		switch d := decl.(type) {
-		case *ast.GameDecl:
-			fmt.Printf("  game    %q by %s\n", d.Title, d.Author)
-		case *ast.LibraryImport:
-			fmt.Printf("  library %q\n", d.Path)
-		case *ast.IncludeDecl:
-			fmt.Printf("  include %q\n", d.Path)
-		case *ast.KindDecl:
-			fmt.Printf("  kind    %s: %v\n", d.Name, d.Values)
-		case *ast.VarDecl:
-			fmt.Printf("  var     %s\n", d.Name)
-		case *ast.ClassDecl:
-			fmt.Printf("  class   %s (%d body items)\n", d.Name, len(d.Body))
-		case *ast.InstanceDecl:
-			fmt.Printf("  %-7s %s\n", d.ClassName, d.Name)
-case *ast.TurnHandlerDecl:
-			if d.To == -1 {
-				fmt.Printf("  turn    %d-\n", d.From)
-			} else if d.From == d.To {
-				fmt.Printf("  turn    %d\n", d.From)
-			} else {
-				fmt.Printf("  turn    %d-%d\n", d.From, d.To)
-			}
-		case *ast.InterfaceHandlerDecl:
-			fmt.Printf("  iface   %s\n", sigStr(d.Signature))
-		case *ast.HandlerDecl:
-			if d.EveryTurn {
-				fmt.Printf("  handler on every turn\n")
-			} else {
-				fmt.Printf("  handler %s\n", sigStr(d.Signature))
-			}
-		case *ast.TestDecl:
-			if d.Name == "" {
-				fmt.Printf("  test    (default)\n")
-			} else {
-				fmt.Printf("  test    %q\n", d.Name)
-			}
-		default:
-			fmt.Printf("  %T\n", d)
+func printWorldSummary(w *world.World) {
+	if w.Game.Title != "" {
+		fmt.Printf("game    %q by %s", w.Game.Title, w.Game.Author)
+		if w.Game.Version != "" {
+			fmt.Printf(" version %s", w.Game.Version)
+		}
+		fmt.Println()
+	}
+
+	fmt.Printf("kinds   %d\n", len(w.Kinds))
+	fmt.Printf("classes %d\n", len(w.Classes))
+	fmt.Printf("nodes   %d\n", len(w.NodeMap))
+	fmt.Printf("vocab   %d terms\n", len(w.Vocab))
+
+	fmt.Printf("root handlers       %d\n", len(w.Root.Handlers))
+	fmt.Printf("root every-turn     %d\n", len(w.Root.EveryTurn))
+	fmt.Printf("root turn-ranges    %d\n", len(w.Root.TurnRanges))
+
+	if len(w.Root.Children) > 0 {
+		fmt.Println("top-level nodes:")
+		for _, n := range w.Root.Children {
+			fmt.Printf("  %-10s %s\n", n.ClassName, n.Name)
 		}
 	}
 }

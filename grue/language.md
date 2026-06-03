@@ -62,7 +62,6 @@ Classes are nodes that can contain everything the world can, except rooms:
 | Arrays | Fixed-size arrays (`array log 10`) |
 | Objects | Objects that instances contain by default |
 | Styles | Style definitions scoped to the class |
-| Classes | Nested class definitions |
 | Handlers | `on` handlers — the class's public interface |
 | Internal handlers | `internal` handlers — callable from code only |
 | Turn handlers | Per-class turn behavior |

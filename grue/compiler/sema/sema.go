@@ -3,6 +3,25 @@
 //
 // Errors prevent code generation. Warnings are reported but do not stop
 // compilation.
+//
+// # Two-pass design
+//
+// Grue allows forward references everywhere — a room can name an exit that is
+// declared later in the file, and a handler can call an instance that appears
+// after it. A single-pass validator would therefore have to defer or re-check
+// almost every reference.  Instead, sema uses two explicit passes:
+//
+//   - Pass 1 (Collect): walks all files and builds the symbol tables (kinds,
+//     classes, instances, handlers, fail/succeed tokens, when-arm labels).
+//     No diagnostics are emitted — the goal is a complete view of the world.
+//
+//   - Pass 2 (Check): uses the complete symbol tables to validate every
+//     reference.  Errors here are definitive.
+//
+// The driver is responsible for loading included and library files between the
+// two passes.  It calls Collect on the initial file(s), inspects
+// Symbols.Includes and Symbols.Libraries, parses those files, then calls
+// Collect again on the full set before calling Check.
 package sema
 
 import (
@@ -66,6 +85,8 @@ var builtinKinds = map[string][]string{
 var builtinBoolKinds = []string{}
 
 // compassReverse maps each standard direction to its opposite.
+// Unused at present — reserved for automatic reverse-exit generation if that
+// feature is added. Kept here alongside the other world-model tables.
 var compassReverse = map[string]string{
 	"north": "south", "south": "north",
 	"east": "west", "west": "east",
@@ -85,31 +106,46 @@ var builtinParamTypes = map[string]bool{
 	"self": true, "object": true, "number": true, "string": true,
 }
 
+// instanceInfo records the declared class and source line of an instance.
+// className is the ClassName from the InstanceDecl — it reflects any
+// class-change applied by `is ClassName` in the body.
 type instanceInfo struct {
 	className string
 	line      int
 }
 
+// handlerInfo records a handler signature and its owning scope for argument
+// type checking.  ownerClass is empty for top-level handlers; "self" in the
+// signature resolves to this class name.
 type handlerInfo struct {
 	sig        []ast.SigPart
 	ownerClass string // empty = top-level
 	line       int
 }
 
-// analyser accumulates diagnostics across multiple passes over the AST.
+// analyser accumulates all symbol tables and diagnostics across both passes.
 type analyser struct {
 	diags        []Diagnostic
 	kindNames    map[string]int    // kind name → declaration line
 	kindValues   map[string]string // value name → kind name (first declarer)
 	classNames   map[string]int    // class name → declaration line (builtins at 0)
 	classParents map[string]string // class name → parent name
-	classOrder   []string          // class names in declaration order
+	// classOrder preserves declaration order for deterministic cycle detection.
+	// Map iteration in Go is random, so a plain map would produce non-deterministic
+	// error messages when reporting inheritance cycles.
+	classOrder   []string
 	instances    map[string]instanceInfo // instance name → effective class
-	handlers     []handlerInfo           // all declared handlers, for type checking
-	failTokens   map[string]int    // identifier token → first fail/succeed line
-	whenLabels   map[string]int    // unquoted when arm label → line
+	handlers     []handlerInfo           // all declared handlers, used for bare-call type checking
+	// failTokens and whenLabels are collected in pass 1 alongside declarations
+	// so that forward references work — a when arm can appear before the handler
+	// that produces its token.  Cross-references are checked at the end of pass 2.
+	failTokens   map[string]int // identifier token → first fail/succeed line
+	whenLabels   map[string]int // unquoted when arm label → first line
 }
 
+// newAnalyser returns an analyser pre-populated with all built-in classes,
+// inheritance relationships, and kinds so that validation code does not need
+// to special-case them.  Builtins are recorded at line 0 (no source location).
 func newAnalyser() *analyser {
 	a := &analyser{
 		kindNames:    make(map[string]int),
@@ -156,8 +192,13 @@ type Symbols struct {
 
 // Collect runs Pass 1 on the given files and returns the populated symbol
 // tables. No diagnostics are emitted; this is a pure collection pass.
-// The driver should inspect Symbols.Includes and Symbols.Libraries, load and
-// parse those files, call Collect again with the full set, then call Check.
+//
+// Typical driver sequence:
+//
+//	syms := sema.Collect(mainFile)
+//	// load and parse syms.Includes and syms.Libraries
+//	syms = sema.Collect(append(ownFiles, libFiles...)...)
+//	diags := syms.Check(append(ownFiles, libFiles...)...)
 func Collect(files ...*ast.File) *Symbols {
 	a := newAnalyser()
 	s := &Symbols{a: a}
@@ -177,7 +218,11 @@ func Collect(files ...*ast.File) *Symbols {
 }
 
 // Check runs Pass 2 using the pre-collected symbol tables and returns all
-// diagnostics. files must be the same set that was passed to Collect.
+// diagnostics.  files must be the complete set — the same slice that was
+// passed to the final Collect call, including included and library files.
+//
+// mergeDoorDecls runs first because it validates the "leads to" cross-references
+// that checkPropertyValueRefs would otherwise flag as unknown instance refs.
 func (s *Symbols) Check(files ...*ast.File) []Diagnostic {
 	var allDecls []ast.Decl
 	for _, f := range files {
@@ -206,6 +251,12 @@ func Analyse(files ...*ast.File) []Diagnostic {
 // Singleton and reserved-name checks
 // =============================================================================
 
+// checkSingletons enforces name reservation rules.
+//
+// "world" is different from "player" and "text": world is the implicit runtime
+// root and can NEVER be declared (even once), while player and text are valid
+// as a single declaration but not twice.  The distinction gives authors a
+// clear error message for each case.
 func (a *analyser) checkSingletons(decls []ast.Decl) {
 	counts := make(map[string]int)
 	for _, d := range decls {
@@ -236,8 +287,15 @@ func (a *analyser) checkSingletons(decls []ast.Decl) {
 // =============================================================================
 
 // collectDecls walks decls and populates the class, kind, instance, and
-// handler registries. currentClass is the owning class name (empty at top
-// level) and is used to resolve "self" parameter types.
+// handler registries.  currentClass is the owning class name (empty at top
+// level) and is forwarded to handlerInfo so that "self" parameter types can
+// be resolved during argument type checking in pass 2.
+//
+// Only declaration-level constructs are registered; handler bodies (statements)
+// are not walked because statements do not introduce new names into the symbol
+// tables.  Duplicate instance detection happens here rather than in pass 2
+// because the world builder needs a clean NodeMap — early detection prevents
+// pass 3 from receiving conflicting data.
 func (a *analyser) collectDecls(decls []ast.Decl, currentClass string) {
 	for _, d := range decls {
 		switch d := d.(type) {
@@ -279,6 +337,14 @@ func (a *analyser) collectDecls(decls []ast.Decl, currentClass string) {
 // Kind checks
 // =============================================================================
 
+// checkKinds enforces two rules:
+//   - A kind name may only be declared once (kind_redeclared).
+//   - No two kinds may share a value name (kind_value_conflict).
+//
+// Value uniqueness is what makes `if peter is sad` unambiguous — the compiler
+// can look up "sad" in a global table and find "mood" without the author
+// having to write `peter.mood is sad`.  true/false are exempt because they
+// are intentionally shared by all boolean kinds.
 func (a *analyser) checkKinds(decls []ast.Decl) {
 	seen := make(map[string]int)
 	for _, d := range decls {
@@ -313,6 +379,16 @@ func (a *analyser) checkKinds(decls []ast.Decl) {
 // Inheritance checks
 // =============================================================================
 
+// checkInheritance validates that all parent class names exist and that there
+// are no inheritance cycles.
+//
+// Cycle detection walks classOrder (not classParents directly) to maintain
+// deterministic error reporting — Go map iteration is random, so using the
+// map directly would produce different error lines on different runs.  For each
+// class we walk the ancestor chain, keeping a path slice and a pathSet.  The
+// pathSet detects when we re-enter a class we are already visiting (a cycle);
+// the path slice lets us mark every class in the cycle via inCycle, so they
+// are each reported exactly once rather than once per traversal start point.
 func (a *analyser) checkInheritance() {
 	for className, parentName := range a.classParents {
 		if parentName == "World" {
@@ -365,9 +441,13 @@ func (a *analyser) checkInheritance() {
 // Property value reference checks
 // =============================================================================
 
-// checkPropertyValueRefs verifies that NameExpr property values resolve to
-// known instances. Inline instance declarations (non-nil Body) are skipped
-// but their nested properties are checked recursively.
+// checkPropertyValueRefs verifies that every NameExpr used as a property value
+// refers to a declared instance.  This enforces that `north: hallway` requires
+// hallway to exist somewhere in the source.
+//
+// Inline instance bodies (non-nil Body on a PropertyDecl, used for inline doors)
+// are not checked here — their "leads to" destinations were already validated by
+// mergeDoorDecls, which runs first in Check.
 func (a *analyser) checkPropertyValueRefs(decls []ast.Decl) {
 	for _, d := range decls {
 		switch d := d.(type) {
@@ -406,8 +486,12 @@ func (a *analyser) checkPropertyValueRefsInBody(decls []ast.Decl) {
 // Kind use reference checks
 // =============================================================================
 
-// checkKindUseRefs verifies that every KindUseDecl value names a declared kind
-// value. Capitalised values are an error — class changing is not supported.
+// checkKindUseRefs verifies that every `is X` / `is not X` declaration names a
+// known kind value or kind name.
+//
+// Capitalised values get a specific deprecation error rather than "unknown kind
+// value" because they were historically used for class-changing (`is Robot`),
+// which is not supported.  The error message tells the author what to do instead.
 func (a *analyser) checkKindUseRefs(decls []ast.Decl) {
 	for _, d := range decls {
 		switch d := d.(type) {
@@ -448,6 +532,14 @@ func (a *analyser) checkKindUseValue(ku *ast.KindUseDecl) {
 // Handler signature duplicate checks
 // =============================================================================
 
+// sigKey produces the canonical duplicate-detection key for a handler signature.
+// Parameter names are dropped; only keywords and type names are kept.
+// Two handlers with the same keywords/types but different parameter names are
+// still duplicates — the player command pattern is identical.
+//
+// Note: this is a simpler version than world.sigKey.  It does NOT resolve "self"
+// because duplicate detection only needs to compare signatures within one scope,
+// and "self" means the same class in all handlers of the same class body.
 func sigKey(sig []ast.SigPart) string {
 	parts := make([]string, 0, len(sig))
 	for _, p := range sig {
@@ -461,6 +553,10 @@ func sigKey(sig []ast.SigPart) string {
 	return strings.Join(parts, " ")
 }
 
+// checkHandlerSigs detects duplicate handler signatures within each scope
+// (global, per-class, per-instance).  Every-turn handlers are exempt because
+// multiple `on every turn:` declarations at the same level are intentional —
+// each fires independently in declaration order.
 func (a *analyser) checkHandlerSigs(decls []ast.Decl) {
 	seen := make(map[string]int)
 	for _, d := range decls {
@@ -492,6 +588,10 @@ func isCapitalized(s string) bool {
 	return len(s) > 0 && s[0] >= 'A' && s[0] <= 'Z'
 }
 
+// checkClassRef validates a single class-name reference.
+// Built-in parameter type keywords (self, object, number, string) and
+// lower-case names (kind values, instance names) are exempt — only capitalised
+// identifiers that are not builtinParamTypes are expected to be class names.
 func (a *analyser) checkClassRef(name string, line int) {
 	if builtinParamTypes[name] || !isCapitalized(name) {
 		return
@@ -501,6 +601,9 @@ func (a *analyser) checkClassRef(name string, line int) {
 	}
 }
 
+// checkClassRefs validates class-name references in handler signatures,
+// is/isnt expressions, and filter() calls.  It descends into handler bodies
+// because is/filter can appear anywhere in code.
 func (a *analyser) checkClassRefs(decls []ast.Decl) {
 	for _, d := range decls {
 		switch d := d.(type) {
@@ -667,8 +770,13 @@ func resolveParamType(paramType, ownerClass string) string {
 	return paramType
 }
 
-// matchCallToHandler tries to match call words against a handler signature.
-// Returns a map of argument word → parameter type, or nil if no match.
+// matchCallToHandler tries to match a flat word slice against one handler
+// signature. Returns a map of argument word → declared parameter type on
+// success, or nil on no match.
+//
+// This is used only for bare-call argument type checking, not for grammar
+// construction.  A nil return means "no match" — not an error by itself,
+// because the call might match a different handler not yet checked.
 func matchCallToHandler(words []string, sig []ast.SigPart) map[string]string {
 	result := make(map[string]string)
 	wi := 0
@@ -693,6 +801,10 @@ func matchCallToHandler(words []string, sig []ast.SigPart) map[string]string {
 	return result
 }
 
+// checkCallArgs walks handler bodies looking for BareCallStmt nodes and
+// validates their argument types.  Only bare calls (no braces) are checked
+// here; braced handler calls ({...}) appear as expressions and are validated
+// by the code generator which has richer context.
 func (a *analyser) checkCallArgs(decls []ast.Decl) {
 	for _, d := range decls {
 		switch d := d.(type) {
@@ -782,6 +894,12 @@ func (a *analyser) checkBareCallExpr(expr ast.Expr, pos ast.Pos) {
 // Token cross-reference checks
 // =============================================================================
 
+// collectTokens records every identifier fail/succeed token and every unquoted
+// when-arm label into the analyser tables.  Called in pass 1 so that forward
+// references work — a when arm can appear in a caller before the handler that
+// produces the token.  Only identifier tokens (NameExpr) are collected;
+// quoted string tokens ("stored", "out of bounds") are author-validated and
+// not cross-referenced by the compiler.
 func (a *analyser) collectTokens(decls []ast.Decl) {
 	for _, d := range decls {
 		switch d := d.(type) {
@@ -859,10 +977,22 @@ func (a *analyser) collectTokensInStmt(s ast.Stmt) {
 // Inline door merging
 // =============================================================================
 
-// mergeDoorDecls validates same-name inline doors. A door declared in one room
-// is one-way. A door declared in exactly two rooms must have cross-referencing
-// leads to: values (A→B and B→A) — the compiler treats them as one shared
-// object. More than two declarations of the same door name is an error.
+// mergeDoorDecls validates inline door declarations.
+//
+// An inline door is a PropertyDecl whose value contains a Door class name and
+// an instance name, e.g. `east: Door brass door`.  The same door name can
+// appear in at most two rooms:
+//
+//   - One room: one-way door; `leads to:` must name a known room.
+//   - Two rooms: shared bidirectional door; both `leads to:` values must
+//     cross-reference each other (A→B and B→A).  The compiler merges them
+//     into a single shared object in the world tree.
+//   - Three or more rooms: error.
+//
+// mergeDoorDecls runs before checkPropertyValueRefs because the door's inline
+// `leads to:` value is a NameExpr that would otherwise fail as an unknown
+// instance reference.  By validating it here first, checkPropertyValueRefs
+// can safely skip inline bodies (PropertyDecl.Body != nil).
 func (a *analyser) mergeDoorDecls(decls []ast.Decl) {
 	rooms := make(map[string]*ast.InstanceDecl)
 	for _, d := range decls {
@@ -946,6 +1076,16 @@ func (a *analyser) mergeDoorDecls(decls []ast.Decl) {
 	}
 }
 
+// checkTokenCrossRefs emits warnings when fail/succeed identifier tokens and
+// when-arm labels don't pair up.  Both directions are checked:
+//
+//   - A token produced by fail/succeed that no when arm catches suggests a
+//     caller can never distinguish that outcome — likely a missing arm.
+//   - A when arm that no fail/succeed produces suggests a dead branch or a
+//     typo in the token name.
+//
+// These are warnings, not errors, because a handler may be designed to be
+// called silently (the token is intentionally ignored by all callers).
 func (a *analyser) checkTokenCrossRefs() {
 	for token, line := range a.failTokens {
 		if _, exists := a.whenLabels[token]; !exists {
