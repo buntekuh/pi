@@ -8,16 +8,23 @@ internal Object:object has Item:item:
         succeed if thing is item
     fail
 
-# Room entry and leave hooks.
+# Room entry and leave hooks. On start hook when game starts.
 # Authors override on enter/on leave in room bodies or at world level.
 # The guard on leave prevents it firing before the player has been anywhere.
 var last room: unset
 
 on every turn:
     if last room isnt location:
-        leave last room if last room is set
-        enter location
+        if last room is unset:
+            start
+        else:
+            leave last room
+            enter location
+
         last room = location
+            
+
+on start:
 
 on enter Room:room:
 

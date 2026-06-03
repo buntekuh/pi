@@ -172,7 +172,6 @@ Object
 ├── Animal                  # a creature; gender defaults to neuter
 ├── Array                   # ordered collection
 └── Font                    # base for named text styles
-    └── Box                 # Font with a rendered border (planned)
 ```
 
 `kind gender: *neuter, male, female` is declared at world level — available
