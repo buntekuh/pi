@@ -32,6 +32,52 @@ type Diagnostic struct {
 // builtinClasses exist without being declared.
 var builtinClasses = map[string]bool{
 	"Object": true, "Room": true, "Door": true, "Array": true,
+	"Player": true, "Item": true, "Container": true, "Supporter": true,
+	"Scenery": true, "Person": true, "Man": true, "Woman": true,
+	"Animal": true, "Font": true, "Box": true,
+}
+
+// builtinClassParents defines the inheritance hierarchy for built-in classes.
+var builtinClassParents = map[string]string{
+	"Array":     "Object",
+	"Player":    "Object",
+	"Room":      "Object",
+	"Door":      "Room",
+	"Item":      "Object",
+	"Container": "Item",
+	"Supporter": "Item",
+	"Scenery":   "Object",
+	"Person":    "Object",
+	"Man":       "Person",
+	"Woman":     "Person",
+	"Animal":    "Object",
+	"Font":      "Object",
+	"Box":       "Font",
+}
+
+// builtinKinds are world-level kinds pre-declared by the runtime.
+// Values are listed without true/false (boolean kinds are handled separately).
+var builtinKinds = map[string][]string{
+	"gender":     {"neuter", "male", "female"},
+	"game_state": {"running", "won", "lost", "ended"},
+}
+
+// builtinBoolKinds are boolean (true/false) kinds pre-declared by the runtime.
+var builtinBoolKinds = []string{"bidirectional"}
+
+// compassReverse maps each standard direction to its opposite.
+var compassReverse = map[string]string{
+	"north": "south", "south": "north",
+	"east": "west", "west": "east",
+	"up": "down", "down": "up",
+	"in": "out", "out": "in",
+	"northeast": "southwest", "southwest": "northeast",
+	"northwest": "southeast", "southeast": "northwest",
+}
+
+// reservedInstances are instance names the author cannot declare more than once.
+var reservedInstances = map[string]bool{
+	"player": true, "text": true,
 }
 
 // builtinParamTypes are valid parameter type keywords that are not class names.
@@ -77,6 +123,18 @@ func newAnalyser() *analyser {
 	for name := range builtinClasses {
 		a.classNames[name] = 0
 	}
+	for child, parent := range builtinClassParents {
+		a.classParents[child] = parent
+	}
+	for kindName, values := range builtinKinds {
+		a.kindNames[kindName] = 0
+		for _, v := range values {
+			a.kindValues[v] = kindName
+		}
+	}
+	for _, kindName := range builtinBoolKinds {
+		a.kindNames[kindName] = 0
+	}
 	return a
 }
 
@@ -92,6 +150,7 @@ func (a *analyser) warnf(code string, line int, format string, args ...any) {
 func Analyse(file *ast.File) []Diagnostic {
 	a := newAnalyser()
 	a.collectDecls(file.Decls, "")
+	a.inferDoorExits(file.Decls) // mutates AST before other passes see it
 	a.checkKinds(file.Decls)
 	a.checkInheritance()
 	a.checkHandlerSigs(file.Decls)
@@ -99,7 +158,37 @@ func Analyse(file *ast.File) []Diagnostic {
 	a.checkCallArgs(file.Decls)
 	a.collectTokens(file.Decls)
 	a.checkTokenCrossRefs()
+	a.checkSingletons(file.Decls)
 	return a.diags
+}
+
+// =============================================================================
+// Singleton and reserved-name checks
+// =============================================================================
+
+func (a *analyser) checkSingletons(decls []ast.Decl) {
+	counts := make(map[string]int)
+	for _, d := range decls {
+		switch d := d.(type) {
+		case *ast.InstanceDecl:
+			if d.Name == "world" {
+				a.errorf("reserved_name", d.Pos.Line,
+					"'world' is the runtime root and cannot be declared")
+			}
+			if reservedInstances[d.Name] {
+				counts[d.Name]++
+				if counts[d.Name] > 1 {
+					a.errorf("duplicate_singleton", d.Pos.Line,
+						"'%s' may only be declared once", d.Name)
+				}
+			}
+		case *ast.ClassDecl:
+			if d.Name == "World" {
+				a.errorf("reserved_name", d.Pos.Line,
+					"'World' is reserved and cannot be declared as a class")
+			}
+		}
+	}
 }
 
 // =============================================================================
@@ -169,6 +258,10 @@ func (a *analyser) checkKinds(decls []ast.Decl) {
 			seen[kd.Name] = kd.Pos.Line
 		}
 		for _, v := range kd.Values {
+			// true/false are boolean kind values shared by all boolean kinds — exempt.
+			if v == "true" || v == "false" {
+				continue
+			}
 			if existingKind, exists := a.kindValues[v]; exists {
 				if existingKind != kd.Name {
 					a.errorf("kind_value_conflict", kd.Pos.Line,
@@ -188,6 +281,11 @@ func (a *analyser) checkKinds(decls []ast.Decl) {
 
 func (a *analyser) checkInheritance() {
 	for className, parentName := range a.classParents {
+		if parentName == "World" {
+			a.errorf("reserved_name", a.classNames[className],
+				"class %q cannot extend World", className)
+			continue
+		}
 		if _, exists := a.classNames[parentName]; !exists {
 			a.errorf("unknown_class", a.classNames[className],
 				"class %q extends unknown class %q", className, parentName)
@@ -636,6 +734,102 @@ func (a *analyser) collectTokensInStmt(s ast.Stmt) {
 	case *ast.ChooseStmt:
 		for _, arm := range s.Arms {
 			a.collectTokensInStmts(arm.Body)
+		}
+	}
+}
+
+// =============================================================================
+// Inline door reverse-exit inference
+// =============================================================================
+
+// inferDoorExits walks all Room instances looking for inline door property
+// declarations (e.g. east: Door brass door / leads to: kitchen). For each
+// bidirectional inline door it adds a synthetic reverse-exit PropertyDecl to
+// the destination room so that both directions work without the author having
+// to declare them twice.
+func (a *analyser) inferDoorExits(decls []ast.Decl) {
+	// Index rooms by name for fast lookup.
+	rooms := make(map[string]*ast.InstanceDecl)
+	for _, d := range decls {
+		inst, ok := d.(*ast.InstanceDecl)
+		if !ok {
+			continue
+		}
+		if a.isSubclassOf(inst.ClassName, "Room") {
+			rooms[inst.Name] = inst
+		}
+	}
+
+	for _, d := range decls {
+		inst, ok := d.(*ast.InstanceDecl)
+		if !ok || !a.isSubclassOf(inst.ClassName, "Room") {
+			continue
+		}
+
+		for _, bodyDecl := range inst.Body {
+			prop, ok := bodyDecl.(*ast.PropertyDecl)
+			if !ok || len(prop.Body) == 0 {
+				continue
+			}
+
+			// Value must be a NameExpr starting with a capitalized class name.
+			nameExpr, ok := prop.Value.(*ast.NameExpr)
+			if !ok {
+				continue
+			}
+			valueParts := strings.SplitN(nameExpr.Name, " ", 2)
+			if len(valueParts) < 2 || !isCapitalized(valueParts[0]) {
+				continue
+			}
+			className := valueParts[0]
+			instanceName := valueParts[1]
+
+			if !a.isSubclassOf(className, "Door") {
+				continue
+			}
+
+			// Scan the door's inline body for leads to: and is not bidirectional.
+			destination := ""
+			bidirectional := true
+			for _, item := range prop.Body {
+				if p, ok := item.(*ast.PropertyDecl); ok && p.Key == "leads to" {
+					if n, ok := p.Value.(*ast.NameExpr); ok {
+						destination = n.Name
+					}
+				}
+				if ku, ok := item.(*ast.KindUseDecl); ok &&
+					ku.Value == "bidirectional" && ku.Negate {
+					bidirectional = false
+				}
+			}
+
+			if destination == "" {
+				a.errorf("door_no_destination", prop.Pos.Line,
+					"inline door %q requires a 'leads to:' property", instanceName)
+				continue
+			}
+			if !bidirectional {
+				continue
+			}
+
+			reverseDir, known := compassReverse[prop.Key]
+			if !known {
+				continue // custom direction — author must declare reverse manually
+			}
+
+			destRoom, exists := rooms[destination]
+			if !exists {
+				a.errorf("unknown_room", prop.Pos.Line,
+					"door %q leads to unknown room %q", instanceName, destination)
+				continue
+			}
+
+			// Add a synthetic reverse exit: reverseDir: instanceName
+			destRoom.Body = append(destRoom.Body, &ast.PropertyDecl{
+				Pos:   prop.Pos,
+				Key:   reverseDir,
+				Value: &ast.NameExpr{Pos: prop.Pos, Name: instanceName},
+			})
 		}
 	}
 }

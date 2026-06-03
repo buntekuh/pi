@@ -2,7 +2,7 @@
 # A Supporter is always accessible — there is no open/close state.
 # Examples: tables, shelves, pedestals, altars.
 
-class Supporter
+class Supporter extends Item
 
     on put object:item on self:
         item.location = self

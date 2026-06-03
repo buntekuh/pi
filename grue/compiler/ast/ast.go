@@ -213,33 +213,6 @@ type KindUseDecl struct {
 func (d *KindUseDecl) Position() Pos { return d.Pos }
 func (d *KindUseDecl) declNode()     {}
 
-// StyleDecl declares a named style:
-//
-//	Style mono
-//	Style warning extends Box
-type StyleDecl struct {
-	Pos    Pos
-	Name   string
-	Parent string // optional "extends StyleName"
-	Body   []Decl // FontDecl and PropertyDecls (align, color)
-}
-
-func (d *StyleDecl) Position() Pos { return d.Pos }
-func (d *StyleDecl) declNode()     {}
-
-// FontDecl declares font properties inside a Style body:
-//
-//	Font
-//	    family: monospaced
-//	    size: 13
-//	    bold: true
-type FontDecl struct {
-	Pos  Pos
-	Body []Decl // PropertyDecls only
-}
-
-func (d *FontDecl) Position() Pos { return d.Pos }
-func (d *FontDecl) declNode()     {}
 
 // InterfaceHandlerDecl declares a handler that calls an external capability:
 //

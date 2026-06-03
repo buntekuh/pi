@@ -1,0 +1,9 @@
+# standard — core handlers available in every game
+
+# Check whether a container holds a specific item.
+# Usage: if player has lamp:
+#        fail unless player has key silently
+internal Object:object has Item:item:
+    for thing in object.filter(Item):
+        succeed if thing is item
+    fail

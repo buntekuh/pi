@@ -13,6 +13,26 @@ The game world is a single tree of dictionary nodes. Every object, room, class,
 style, and handler is a node. Properties are key-value pairs on a node. The
 hierarchy in source code IS the hierarchy in the tree.
 
+### `world` — the singleton root
+
+`world` is the root of the world tree. It is a singleton created automatically
+by the runtime — authors never declare it. It cannot be subclassed or
+re-declared; the compiler rejects `extends World` and any attempt to declare a
+second `world`. All top-level declarations in a game file become properties or
+children of `world`.
+
+Turn handlers declared at the top level of a game file belong to `world` and
+fire unconditionally every turn, like object-level handlers. This is what
+distinguishes them from room-level turn handlers, which fire only when the
+player is in that room.
+
+`world` is addressable in code:
+```
+world.score
+world.location
+for arr in world.filter(Array):
+```
+
 ### World-level nodes
 
 | Node | Description |
@@ -23,7 +43,6 @@ hierarchy in source code IS the hierarchy in the tree.
 | Doors | Top-level door rooms |
 | Objects | Global objects not inside any room |
 | Player | The player object |
-| Styles | Named style definitions |
 | Classes | Class definitions (see below) |
 | Handlers | Global `on` handlers |
 | Internal handlers | Global `internal` handlers |
@@ -54,7 +73,7 @@ Classes are nodes that can contain everything the world can, except rooms:
 ```
 brass lantern.light
 kitchen.north
-world.styles.mono.bold
+world.location
 ```
 
 ```
@@ -106,6 +125,33 @@ Single inheritance. Implicit `extends Object` if omitted.
 object's class is under consideration but not yet defined — deferred for
 further design work.
 
+#### Built-in class hierarchy
+
+The runtime and standard library pre-define the following classes. Authors
+extend them freely but may not redefine or replace them:
+
+```
+Object
+├── Player                  # the player — auto-instantiated as world.player
+├── Room                    # a location
+│   └── Door                # pass-through connection between rooms
+├── Item                    # anything that can be carried or contained
+│   ├── Container           # an Item that holds other Items (open/close/lock)
+│   └── Supporter           # an Item that other Items rest on top of
+├── Scenery                 # fixed room fixtures; cannot be taken
+├── Person                  # a named character; suppresses [the] and [a] articles
+│   ├── Man                 # Person with gender: male
+│   └── Woman               # Person with gender: female
+├── Animal                  # a creature; gender defaults to neuter
+├── Array                   # ordered collection
+└── Font                    # base for named text styles
+    └── Box                 # Font with a rendered border (planned)
+```
+
+`kind gender: *neuter, male, female` is declared at world level — available
+on every object. `Man` pre-sets `gender: male`, `Woman` pre-sets
+`gender: female`. `Animal` and bare `Person` default to `neuter`.
+
 Class names are capitalized single words — syntactically distinct from kind
 values (lowercase). This lets `is` check both without ambiguity:
 ```
@@ -120,7 +166,7 @@ class Ledger
     kind opened: closed, open
 
     on open at number:page:
-        fail unless {has self silently}
+        fail unless has self silently
         fail out_of_bounds unless page < log.length
         position = page
         opened = open
@@ -173,10 +219,9 @@ if location is kitchen:
 for item in location:
 ```
 
-#### The global namespace
+#### `world` properties
 
-The root of the world tree. Contains the player, location, and all global state.
-The standard library pre-defines the following:
+The standard library pre-defines the following properties on `world`:
 
 | Name | Type | Description |
 |------|------|-------------|
@@ -185,10 +230,11 @@ The standard library pre-defines the following:
 | `score` | value | Current score |
 | `turn` | value | Turn counter |
 | `game_state` | kind | `running`, `won`, `lost`, `ended` |
+| `gender` | kind | `neuter` (default), `male`, `female` — available on every object |
 | `save_file_name` | property | Name of the save file |
 
-Authors add their own global kinds, properties, and vars at the top level of
-any game file. All top-level declarations become part of the global namespace.
+Authors add their own kinds, properties, and vars at the top level of any game
+file. All top-level declarations become properties or children of `world`.
 
 ### 2. Properties and Kinds
 
@@ -384,7 +430,7 @@ internal has object:thing:
     fail not_here
 
 on open Ledger:ledger at number:page:    # player can type "open rolodex at 3"
-    fail unless {has ledger silently}
+    fail unless has ledger silently
     ...
 ```
 
@@ -443,24 +489,24 @@ play Sound:sound:
 Only the final argument may have an inline body. Earlier arguments must be
 references to existing objects.
 
-**Expression call** — `{handler args}` calls a handler as an expression.
-`silently` suppresses `say` throughout the call chain:
+Handler calls are written bare in code — no brackets needed. `silently`
+suppresses `say` throughout the call chain:
 
 ```
-fail unless {has ledger silently}
+fail unless has ledger silently
 
-if {traverse passage in the dark}:
+if traverse passage in the dark:
     say "You survived."
 
-say "You survived." if {traverse passage in the dark}
-say "Blocked." unless {traverse passage in the dark}
+say "You survived." if traverse passage in the dark
+say "Blocked." unless traverse passage in the dark
 ```
 
 `when` dispatches on the token from a handler call, or on any string expression.
 Arms may be identifier tokens or quoted strings. Unhandled tokens propagate to
 the caller:
 ```
-when {traverse passage in the dark}:
+when traverse passage in the dark:
     eaten_by_grue:
         say "It's even darker down here."
     fail:
@@ -478,6 +524,9 @@ when location.name:
     default:
         say "You look around."
 ```
+
+`{}` wrapping a handler call is never needed in code — write the call bare.
+`{}` after a dot remains valid for dynamic property access: `object.{variable}`.
 
 #### The game loop
 
@@ -591,19 +640,27 @@ Door iron door, gate "A heavy iron door."
 ```
 
 **Room-level (nested) door** — declared inline on a room exit using `leads to:`
-for the destination. The return connection is inferred:
+for the destination. `Door` carries `kind bidirectional: *true, false` — the
+compiler infers the reverse exit when `bidirectional` is `true` (the default).
+Set `is not bidirectional` for one-way passages:
 
 ```
 Room vestibule "A grand entrance hall."
     east: Door brass door
-        leads to: kitchen
+        leads to: kitchen       # reverse exit inferred automatically
         is lockable
         key: brass key
     west: garden
+
+Room cellar "A damp cellar."
+    up: Door trapdoor "A heavy trapdoor."
+        leads to: kitchen
+        is not bidirectional    # one-way — no reverse exit
 ```
 
-The player can refer to the door by name (`open brass door`) and the compiler
-infers the reverse exit from `kitchen` back to `vestibule`.
+The player can refer to the door by name (`open brass door`). For a
+bidirectional door the compiler adds the matching exit on the destination room;
+for a non-bidirectional door it does not.
 
 ### 6. Going Places
 
@@ -661,7 +718,7 @@ passing of a turn:
 ```
 on every turn:
     if location isnt last_room:    # room entry tracking
-        {entered location}
+        entered location
         last_room = location
 
 on every turn:
@@ -783,8 +840,9 @@ Output flows through the pipeline: `say → print → text buffer → [directive
 
 #### String interpolation
 
-`{}` evaluates either a Grue handler call or an expression. The compiler
-distinguishes the two at compile time by matching against declared handler signatures:
+`{}` inside a string evaluates a handler call or an expression and splices the
+result into the output. The compiler distinguishes handler calls from expressions
+by matching against declared handler signatures:
 
 ```
 say "The lamp flickers."
@@ -888,8 +946,9 @@ succeed "stored"
 ```
 
 Identifier tokens (no quotes, no spaces) let the compiler cross-reference
-`fail`, `succeed`, and `when` arms across the codebase. String tokens are
-arbitrary — the compiler cannot check them.
+`fail`, `succeed`, and `when` arms across the codebase. The compiler warns
+when an identifier token is emitted by a handler but no `when` arm in any
+caller catches it. String tokens are arbitrary — the compiler cannot check them.
 
 Guard clause forms:
 ```
@@ -901,7 +960,7 @@ succeed if player has self
 `when` dispatches on the token from a handler call, or on any string expression.
 Arms may be identifier tokens or quoted strings:
 ```
-when {traverse passage in the dark}:
+when traverse passage in the dark:
     eaten_by_grue:
         say "It's even darker down here."
     fail:
@@ -938,11 +997,6 @@ on examine self:
     say "Custom only."  # instead of — parent never runs
 ```
 
-`last_fail` and `last_succeed` hold the token from the most recent call:
-```
-last_fail               # token from the last failed handler call
-last_succeed            # token from the last successful handler call
-```
 
 
 ### 10. stop, save, quit, restart
@@ -1178,76 +1232,86 @@ score = round(score / 2)            # same as bare assignment, explicit
 score = absolute(score - target)    # absolute value
 score = biggest(score, 0)           # maximum of two values
 score = smallest(score, 100)        # minimum of two values
-score = random(0, 50)               # chooses a random integer between and including the two parameters given
+score = random(0, 50)               # random integer, min and max inclusive
+seed(42)                            # seed the RNG — use in tests for determinism, remove before publishing
 if turn modulo 5 == 0:              # modulo — infix operator
 ```
 ## 15. Styles
 
-Named styles group font and layout properties. Only `default` is predefined —
-all other styles are declared by the author or a library. Unset properties
-inherit from `default`.
+`Font` is a built-in class with all properties declared as `unset`. Authors
+create named styles by extending it — each subclass declares only the
+properties it changes. The renderer applies `text` first, then overlays any
+non-`unset` properties from the active style.
+
+`Font` properties:
+
+| Property    | Values                                              |
+|-------------|-----------------------------------------------------|
+| `family`    | `serif`, `sans`, `monospaced`                       |
+| `face`      | string — specific typeface name                     |
+| `size`      | integer — point size                                |
+| `bold`      | boolean kind                                        |
+| `italic`    | boolean kind                                        |
+| `underline` | boolean kind                                        |
+| `color`     | CSS named color (`black`, `tomato`, …) or `#abcdef` |
+| `align`     | `left`, `right`, `center`, `justified`              |
+
+All properties are `unset` on `Font` itself. `text` is the singleton base
+instance — it holds the concrete values all normal text renders with. Authors
+override it to change the game's base appearance:
 
 ```
-Style default
-    Font
-        family: serif
-        face: "Georgia"
-        size: 16
+Font text
+    family: serif
+    face: "Georgia"
+    size: 16
     align: left
     color: black
+```
 
-Style mono
-    Font
-        family: monospaced
-        face: "Courier New"
-        size: 13
-    align: left
+Named styles are classes that extend `Font`:
 
-Style key
-    Font
-        family: monospaced
-        bold: true
+```
+class mono extends Font
+    family: monospaced
+    face: "Courier New"
+    size: 13
+
+class key extends Font
+    family: monospaced
+    bold: true
     color: dodgerblue
+
+class italic extends Font
+    italic: true
 ```
 
-`Font` is a class with a fixed set of properties:
+The standard library pre-declares `italic`, `bold`, and `underline`. All
+others are author- or library-defined.
 
-| Property    | Values                          |
-|-------------|---------------------------------|
-| `family`    | `serif`, `sans`, `monospaced`   |
-| `face`      | string — specific typeface name |
-| `size`      | integer — point size            |
-| `bold`      | boolean kind                    |
-| `italic`    | boolean kind                    |
-| `underline` | boolean kind                    |
+`text` is a reserved instance name — the compiler rejects a second declaration.
 
-Style properties:
+#### Using styles
 
-| Property | Values                                              |
-|----------|-----------------------------------------------------|
-| `align`  | `left`, `right`, `center`, `justified`              |
-| `color`  | CSS named color (`black`, `tomato`, …) or `#abcdef` |
-
-Style properties are either **block-level** (apply to the whole `say`) or
-**span-level** (can open and close inline within a string).
-Block-level: `family`, `face`, `size`, `align`.
-Span-level: `bold`, `italic`, `underline`, `color`.
-When a span style is used inline, its block-level properties are ignored.
+A class name after `say` applies the style to the whole line (block form).
+A `[classname]...[/classname]` span applies it inline:
 
 ```
-say mono "SECTOR 7 status report."          # block style — whole line
+say mono "SECTOR 7 status report."          # block — whole line
 say "Press [key]ENTER[/key] to continue."   # inline span
 ```
 
+`[classname]` looks up a class extending `Font` by name. Unknown class names
+are a compiler error. Block-level properties (`family`, `face`, `size`,
+`align`) are ignored when a style is used as an inline span.
+
 #### Box (planned)
 
-`Box` will extend `Font` with a rendered box — background, shade, and padding,
-as seen in Inform 6 and 7 games. Deferred because it requires a dedicated
-JavaScript render handler:
+`Box` extends `Font` with a rendered box — background, shade, and padding.
+Deferred — requires a dedicated render handler:
 
 ```
-Box extends Font
-    style: box
+class mybox extends Box
     background: grey
     shade: 20
     padding: 20
@@ -1331,7 +1395,7 @@ internal interface ai Object:response Object:request:
     filename: "ai.js"
 
 on ask:
-    {ai air question}
+    ai air question
     say "{air.answer}"
 ```
 
@@ -1343,7 +1407,7 @@ async function askAi(response, request) {
 }
 ```
 
-The runtime populates `air` in place. After `{ai air question}` returns,
+The runtime populates `air` in place. After `ai air question` returns,
 `air.answer` holds the result and the game continues.
 
 ### 16. Tests

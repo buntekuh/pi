@@ -8,7 +8,7 @@ kind lockable: *false, true
 kind open: *false, true
 kind locked: *false, true
 
-class Container
+class Container extends Item
     openable: false
     lockable: false
     open: true

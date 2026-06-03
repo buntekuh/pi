@@ -29,6 +29,7 @@ var reserved = map[string]bool{
 	"filter": true, "silently": true, "modulo": true,
 	"floor": true, "ceiling": true, "round": true,
 	"absolute": true, "biggest": true, "smallest": true,
+	"random": true, "seed": true,
 	"extends": true, "internal": true,
 }
 
@@ -36,6 +37,7 @@ var reserved = map[string]bool{
 var builtinFuncs = map[string]bool{
 	"floor": true, "ceiling": true, "round": true,
 	"absolute": true, "biggest": true, "smallest": true,
+	"random": true, "seed": true,
 }
 
 // =============================================================================
@@ -2012,8 +2014,13 @@ func (p *parser) parseArrayLit() (*ast.ArrayLit, error) {
 		if err != nil {
 			return nil, err
 		}
-		items = append(items, item)
 		p.skipArrayWhitespace()
+		if p.at(lexer.COLON) {
+			tok := p.peek()
+			return nil, fmt.Errorf("%s: named properties are not allowed in array literals; use an Object instead",
+				p.pos2str(tok))
+		}
+		items = append(items, item)
 		if !p.match(lexer.COMMA) {
 			p.skipArrayWhitespace()
 			break
