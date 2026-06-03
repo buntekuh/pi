@@ -154,13 +154,13 @@ type ClassDecl struct {
 func (d *ClassDecl) Position() Pos { return d.Pos }
 func (d *ClassDecl) declNode()     {}
 
-// InstanceDecl is a Room, Door, Object, Ai, or any user-defined class instance:
+// InstanceDecl is a Room, Door, Object, or any user-defined class instance:
 //
 //	Room kitchen "The smell of burnt coffee lingers."
 //	Object brass lantern, lamp "A tarnished brass lantern."
 //	Robot Benson "A stocky iron robot."
 //
-// ClassName is "Room", "Object", "Door", "Ai", or any class name.
+// ClassName is "Room", "Object", "Door", or any class name.
 // Name is the instance name (may be multi-word).
 // Aliases is the comma-separated list of alternate names.
 // Desc is the optional description string.
@@ -744,9 +744,9 @@ func (e *IsSetExpr) exprNode()     {}
 //	floor(score / 2)
 //	absolute(score - target)
 //	biggest(score, 0)
-//	percentage(score, max)
+//	random(1, 6)
 //
-// Name is one of: floor, ceiling, round, absolute, biggest, smallest, percentage.
+// Name is one of: floor, ceiling, round, absolute, biggest, smallest, random, seed.
 type FuncCallExpr struct {
 	Pos  Pos
 	Name string

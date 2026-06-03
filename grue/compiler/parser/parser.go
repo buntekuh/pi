@@ -22,7 +22,7 @@ var reserved = map[string]bool{
 	"if": true, "unless": true, "on": true,
 	"fail": true, "succeed": true,
 	"parent": true, "self": true, "true": true, "false": true,
-	"unset": true, "set": true, "say": true, "print": true,
+	"unset": true, "set": true, "say": true,
 	"stop": true, "choose": true,
 	"when": true, "test": true, "interface": true, "library": true,
 	"include": true, "kind": true, "class": true, "var": true,
@@ -181,7 +181,7 @@ func (p *parser) parseTopLevelDecl() (ast.Decl, error) {
 		case "test":
 			return p.parseTestDecl()
 		default:
-			// Capitalised word — instance declaration (Room, Object, Door, Ai, etc.)
+			// Capitalised word — instance declaration (Room, Object, Door, or any class)
 			if isCapitalized(tok.Value) {
 				return p.parseInstanceDecl()
 			}
@@ -369,7 +369,7 @@ func (p *parser) parseClassDecl() (*ast.ClassDecl, error) {
 }
 
 // =============================================================================
-// Instance declaration (Room, Object, Door, Ai, user class)
+// Instance declaration (Room, Object, Door, or any user-defined class)
 // =============================================================================
 
 // Room kitchen "The smell of burnt coffee lingers."
@@ -549,6 +549,12 @@ func (p *parser) parsePropertyDecl() (*ast.PropertyDecl, error) {
 		value = &ast.ListLit{Pos: listPos, Items: items}
 	}
 
+	// Optional description string after an inline instance name (e.g. Door).
+	var inlineDesc string
+	if _, ok := value.(*ast.NameExpr); ok && p.at(lexer.STRING) {
+		inlineDesc = p.advance().Value
+	}
+
 	if err := p.expectNewline(); err != nil {
 		return nil, err
 	}
@@ -563,6 +569,17 @@ func (p *parser) parsePropertyDecl() (*ast.PropertyDecl, error) {
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	// Prepend description as a property so the rest of the pipeline sees it
+	// the same way as any other property.
+	if inlineDesc != "" {
+		descPos := value.Position()
+		body = append([]ast.Decl{&ast.PropertyDecl{
+			Pos:   descPos,
+			Key:   "description",
+			Value: &ast.StringLit{Pos: descPos, Value: inlineDesc},
+		}}, body...)
 	}
 
 	return &ast.PropertyDecl{Pos: pos, Key: key, Value: value, Body: body}, nil

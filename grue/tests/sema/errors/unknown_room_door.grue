@@ -1,0 +1,7 @@
+# expect: error unknown_room
+
+"Unknown Room Door" by Test
+
+Room hall "A hall."
+    east: Door oak door
+        leads to: nowhere

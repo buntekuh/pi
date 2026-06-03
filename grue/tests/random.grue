@@ -1,0 +1,53 @@
+# random and seed — randomness and determinism
+
+"Random" by Test
+
+var a
+var b
+
+on check random:
+    say "different" if random(0, 10000000) isnt random(0, 10000000)
+
+on compare seeded:
+    seed(42)
+    a = random(1, 1000000)
+    seed(42)
+    b = random(1, 1000000)
+    say "same" if a == b
+    say "different" if a isnt b
+
+on roll wide:
+    say "{random(0, 10000000)}"
+
+test
+    test "randomness".
+    test "seed reproducibility".
+    test "seed sequence".
+    test "seed known values".
+
+# Two independent calls on a range of 10 million should virtually never collide.
+test "randomness"
+    check random. "different"
+
+# Resetting to the same seed must reproduce the same first value.
+test "seed reproducibility"
+    compare seeded. "same"
+
+# Three rolls from the same seed must produce the same three values each time.
+# Placeholder expected values — replace once the runtime is implemented.
+test "seed sequence"
+    seed(1)
+    roll wide. "0"
+    roll wide. "0"
+    roll wide. "0"
+    seed(1)
+    roll wide. "0"
+    roll wide. "0"
+    roll wide. "0"
+
+# Specific seeded values — placeholders, update once runtime is implemented.
+test "seed known values"
+    seed(1000)
+    roll wide. "0"
+    roll wide. "0"
+    roll wide. "0"

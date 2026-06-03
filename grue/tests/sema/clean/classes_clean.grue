@@ -1,0 +1,21 @@
+# Valid class hierarchy: single inheritance, implicit Object base, subclass instances.
+
+"Classes Clean" by Test
+
+class Vehicle
+    speed: 0
+
+class Car extends Vehicle
+    doors: 4
+
+class SportsCar extends Car
+    doors: 2
+
+Room garage "A garage."
+
+Car family car "A sensible family car."
+    speed: 60
+
+SportsCar racer "A low-slung racer."
+    speed: 180
+    doors: 2

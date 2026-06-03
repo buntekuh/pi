@@ -1,0 +1,9 @@
+# expect: error door_no_destination line 8
+
+"Door No Destination" by Test
+
+Room hall "A hall."
+
+Room study "A study."
+    east: Door oak door
+        is lockable

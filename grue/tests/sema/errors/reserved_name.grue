@@ -1,0 +1,5 @@
+# expect: error reserved_name line 5
+
+"Reserved Name" by Test
+
+Room world "You cannot name a room 'world'."

@@ -1,0 +1,15 @@
+# expect: error door_too_many_sides
+
+"Door Too Many Sides" by Test
+
+Room hall "A hall."
+    east: Door oak door
+        leads to: study
+
+Room study "A study."
+    west: Door oak door
+        leads to: hall
+
+Room library "A library."
+    south: Door oak door
+        leads to: hall

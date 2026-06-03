@@ -1,0 +1,8 @@
+# expect: error duplicate_instance line 8
+
+"Duplicate Instance" by Test
+
+Room hall "A hall."
+
+Object brass lantern "A tarnished lantern."
+Object brass lantern "Another lantern."

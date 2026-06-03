@@ -1,4 +1,4 @@
-# doors — top-level doors, nested doors, inline doors
+# doors — top-level doors, one-way inline doors, shared inline doors
 
 "Doors" by Test
 
@@ -19,6 +19,12 @@ Room vestibule "A grand entrance hall."
         key: brass key
 
 Room kitchen "A kitchen."
+    west: Door brass door
+        leads to: vestibule
+
+Room cellar "A damp cellar."
+    up: Door trapdoor "A heavy trapdoor."
+        leads to: kitchen
 
 Door iron door, gate "A heavy iron door."
     east: landing
@@ -33,6 +39,7 @@ test
     test "inline door locked".
     test "inline door with key".
     test "top-level door".
+    test "one-way door".
 
 test "inline door locked"
     go north. "great hall"
@@ -46,3 +53,7 @@ test "inline door with key"
 test "top-level door"
     go east. "landing"
     go west. "bedroom"
+
+test "one-way door"
+    go down. "cellar"
+    go up. "kitchen"

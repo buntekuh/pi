@@ -63,7 +63,7 @@ var builtinKinds = map[string][]string{
 }
 
 // builtinBoolKinds are boolean (true/false) kinds pre-declared by the runtime.
-var builtinBoolKinds = []string{"bidirectional"}
+var builtinBoolKinds = []string{}
 
 // compassReverse maps each standard direction to its opposite.
 var compassReverse = map[string]string{
@@ -150,7 +150,7 @@ func (a *analyser) warnf(code string, line int, format string, args ...any) {
 func Analyse(file *ast.File) []Diagnostic {
 	a := newAnalyser()
 	a.collectDecls(file.Decls, "")
-	a.inferDoorExits(file.Decls) // mutates AST before other passes see it
+	a.mergeDoorDecls(file.Decls) // merges same-name inline doors; mutates AST
 	a.checkKinds(file.Decls)
 	a.checkInheritance()
 	a.checkHandlerSigs(file.Decls)
@@ -226,7 +226,12 @@ func (a *analyser) collectDecls(decls []ast.Decl, currentClass string) {
 					}
 				}
 			}
-			a.instances[d.Name] = instanceInfo{className: effectiveClass, line: d.Pos.Line}
+			if existing, exists := a.instances[d.Name]; exists && existing.line != 0 {
+				a.errorf("duplicate_instance", d.Pos.Line,
+					"instance %q already declared at line %d", d.Name, existing.line)
+			} else {
+				a.instances[d.Name] = instanceInfo{className: effectiveClass, line: d.Pos.Line}
+			}
 			a.collectDecls(d.Body, d.ClassName)
 
 		case *ast.HandlerDecl:
@@ -739,40 +744,40 @@ func (a *analyser) collectTokensInStmt(s ast.Stmt) {
 }
 
 // =============================================================================
-// Inline door reverse-exit inference
+// Inline door merging
 // =============================================================================
 
-// inferDoorExits walks all Room instances looking for inline door property
-// declarations (e.g. east: Door brass door / leads to: kitchen). For each
-// bidirectional inline door it adds a synthetic reverse-exit PropertyDecl to
-// the destination room so that both directions work without the author having
-// to declare them twice.
-func (a *analyser) inferDoorExits(decls []ast.Decl) {
-	// Index rooms by name for fast lookup.
+// mergeDoorDecls validates same-name inline doors. A door declared in one room
+// is one-way. A door declared in exactly two rooms must have cross-referencing
+// leads to: values (A→B and B→A) — the compiler treats them as one shared
+// object. More than two declarations of the same door name is an error.
+func (a *analyser) mergeDoorDecls(decls []ast.Decl) {
 	rooms := make(map[string]*ast.InstanceDecl)
 	for _, d := range decls {
 		inst, ok := d.(*ast.InstanceDecl)
-		if !ok {
+		if !ok || !a.isSubclassOf(inst.ClassName, "Room") {
 			continue
 		}
-		if a.isSubclassOf(inst.ClassName, "Room") {
-			rooms[inst.Name] = inst
-		}
+		rooms[inst.Name] = inst
 	}
+
+	type doorSide struct {
+		room        string
+		destination string
+		line        int
+	}
+	sides := make(map[string][]doorSide)
 
 	for _, d := range decls {
 		inst, ok := d.(*ast.InstanceDecl)
 		if !ok || !a.isSubclassOf(inst.ClassName, "Room") {
 			continue
 		}
-
 		for _, bodyDecl := range inst.Body {
 			prop, ok := bodyDecl.(*ast.PropertyDecl)
 			if !ok || len(prop.Body) == 0 {
 				continue
 			}
-
-			// Value must be a NameExpr starting with a capitalized class name.
 			nameExpr, ok := prop.Value.(*ast.NameExpr)
 			if !ok {
 				continue
@@ -781,55 +786,50 @@ func (a *analyser) inferDoorExits(decls []ast.Decl) {
 			if len(valueParts) < 2 || !isCapitalized(valueParts[0]) {
 				continue
 			}
-			className := valueParts[0]
-			instanceName := valueParts[1]
-
-			if !a.isSubclassOf(className, "Door") {
+			if !a.isSubclassOf(valueParts[0], "Door") {
 				continue
 			}
+			instanceName := valueParts[1]
 
-			// Scan the door's inline body for leads to: and is not bidirectional.
 			destination := ""
-			bidirectional := true
 			for _, item := range prop.Body {
 				if p, ok := item.(*ast.PropertyDecl); ok && p.Key == "leads to" {
 					if n, ok := p.Value.(*ast.NameExpr); ok {
 						destination = n.Name
 					}
 				}
-				if ku, ok := item.(*ast.KindUseDecl); ok &&
-					ku.Value == "bidirectional" && ku.Negate {
-					bidirectional = false
-				}
 			}
-
 			if destination == "" {
 				a.errorf("door_no_destination", prop.Pos.Line,
 					"inline door %q requires a 'leads to:' property", instanceName)
 				continue
 			}
-			if !bidirectional {
-				continue
-			}
-
-			reverseDir, known := compassReverse[prop.Key]
-			if !known {
-				continue // custom direction — author must declare reverse manually
-			}
-
-			destRoom, exists := rooms[destination]
-			if !exists {
-				a.errorf("unknown_room", prop.Pos.Line,
-					"door %q leads to unknown room %q", instanceName, destination)
-				continue
-			}
-
-			// Add a synthetic reverse exit: reverseDir: instanceName
-			destRoom.Body = append(destRoom.Body, &ast.PropertyDecl{
-				Pos:   prop.Pos,
-				Key:   reverseDir,
-				Value: &ast.NameExpr{Pos: prop.Pos, Name: instanceName},
+			sides[instanceName] = append(sides[instanceName], doorSide{
+				room:        inst.Name,
+				destination: destination,
+				line:        prop.Pos.Line,
 			})
+		}
+	}
+
+	for name, ss := range sides {
+		if len(ss) > 2 {
+			a.errorf("door_too_many_sides", ss[2].line,
+				"door %q declared in more than two rooms", name)
+			continue
+		}
+		if len(ss) == 1 {
+			if _, exists := rooms[ss[0].destination]; !exists {
+				a.errorf("unknown_room", ss[0].line,
+					"door %q leads to unknown room %q", name, ss[0].destination)
+			}
+			continue
+		}
+		sA, sB := ss[0], ss[1]
+		if sA.destination != sB.room || sB.destination != sA.room {
+			a.errorf("door_cross_ref_mismatch", sA.line,
+				"door %q: sides do not cross-reference (room %q leads to %q, room %q leads to %q)",
+				name, sA.room, sA.destination, sB.room, sB.destination)
 		}
 	}
 }

@@ -1,0 +1,7 @@
+# expect: error duplicate_singleton line 7
+
+"Duplicate Singleton" by Test
+
+Player player "Yourself."
+
+Player player "A second player."

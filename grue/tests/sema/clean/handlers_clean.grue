@@ -1,0 +1,22 @@
+# Valid handler forms: class handler, instance handler, world handler, parent call.
+
+"Handlers Clean" by Test
+
+class Widget
+    on examine self:
+        say "A widget."
+
+class Gadget extends Widget
+    on examine self:
+        parent
+        say "Also a gadget."
+
+Room lab "A lab."
+
+Object cog "A small cog."
+
+on examine Object:thing:
+    say "You see {thing}."
+
+on look:
+    say "You look around."

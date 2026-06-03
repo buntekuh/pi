@@ -1,0 +1,13 @@
+# Top-level door with two explicit exits.
+
+"Door Top-level" by Test
+
+kind lockable: *false, true
+
+Door iron door, gate "A heavy iron door."
+    east: landing
+    west: bedroom
+    is lockable
+
+Room landing "A landing."
+Room bedroom "A small bedroom."

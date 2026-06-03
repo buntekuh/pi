@@ -1,0 +1,14 @@
+# Shared inline door — same name in two rooms, cross-referencing leads to:.
+
+"Door Shared" by Test
+
+kind lockable: *false, true
+
+Room vestibule "A grand entrance hall."
+    east: Door brass door "A heavy brass door."
+        leads to: kitchen
+        is lockable
+
+Room kitchen "A kitchen."
+    west: Door brass door
+        leads to: vestibule

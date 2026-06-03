@@ -47,7 +47,6 @@ for arr in world.filter(Array):
 | Handlers | Global `on` handlers |
 | Internal handlers | Global `internal` handlers |
 | Turn handlers | `on every turn:` |
-| AI definitions | Named AI actor definitions |
 
 ### Class-level nodes
 
@@ -88,6 +87,29 @@ handler passes a reference to the original node, not a copy. Modifications
 inside the handler are immediately visible everywhere that holds a reference
 to the same node. There is no implicit copying of Objects.
 
+### Containment vs reference
+
+**Containment** is determined by declaration position. An instance declared
+inside another node's body is a child of that node — its `location` is set
+automatically:
+
+```
+Room kitchen "A cramped kitchen."
+    Item cookie jar "A ceramic jar."   # cookie jar.location = kitchen
+```
+
+**Reference** is a property value pointing to an existing instance. It does
+not affect the instance's location:
+
+```
+Room living room "A comfortable room."
+    jar: cookie jar    # reference only — cookie jar stays in kitchen
+```
+
+Declaring the same instance name a second time is a compiler error. Every
+instance has exactly one declaration point, which is its initial location.
+`item.location = X` in code moves the item at runtime.
+
 ### The tree as authoring tool
 
 Because the world is a single well-defined tree, the IDE can expose it as a
@@ -117,6 +139,11 @@ Object 3 wishes "A small brass lamp."
 
 The first word of any declaration is always the class name. Everything after
 (before the optional description string) is the instance name.
+
+**All instances must be named.** Anonymous objects are not allowed — this
+applies to world declarations, inline door declarations, and handler
+parameters. Handler parameters use the `Type:label` form where the label is
+the name within the handler scope (`Object:response`, `Object:request`).
 
 Single inheritance. Implicit `extends Object` if omitted.
 `Object` provides: name, keywords, description, location.
@@ -629,7 +656,8 @@ Room great hall "A vast echoing hall."
 `Door` extends `Room`. Doors are pass-through — the player moves through
 them transparently without feeling they have entered a separate room.
 
-**Top-level door** — two exit properties required, one for each connected room:
+**Top-level door** — two exit properties required, one for each connected room.
+Use this form for prominent doors that are naturally described at world level:
 
 ```
 Door iron door, gate "A heavy iron door."
@@ -639,28 +667,34 @@ Door iron door, gate "A heavy iron door."
     key: rusty key
 ```
 
-**Room-level (nested) door** — declared inline on a room exit using `leads to:`
-for the destination. `Door` carries `kind bidirectional: *true, false` — the
-compiler infers the reverse exit when `bidirectional` is `true` (the default).
-Set `is not bidirectional` for one-way passages:
+**Inline door** — declared on a room exit using `leads to:` for the
+destination. An inline door is one-directional on its own:
+
+```
+Room cellar "A damp cellar."
+    up: Door trapdoor "A heavy trapdoor."
+        leads to: kitchen
+```
+
+**Shared inline door** — declare the same named door in two rooms with
+matching `leads to:` properties. The compiler merges them into a single
+object; both sides share state (locked, open, etc.):
 
 ```
 Room vestibule "A grand entrance hall."
     east: Door brass door
-        leads to: kitchen       # reverse exit inferred automatically
+        leads to: kitchen
         is lockable
         key: brass key
     west: garden
 
-Room cellar "A damp cellar."
-    up: Door trapdoor "A heavy trapdoor."
-        leads to: kitchen
-        is not bidirectional    # one-way — no reverse exit
+Room kitchen "The smell of burnt coffee lingers."
+    west: Door brass door
+        leads to: vestibule
 ```
 
-The player can refer to the door by name (`open brass door`). For a
-bidirectional door the compiler adds the matching exit on the destination room;
-for a non-bidirectional door it does not.
+The compiler validates that the two `leads to:` values cross-reference each
+other. Declaring the same door name in more than two rooms is an error.
 
 ### 6. Going Places
 
@@ -808,7 +842,6 @@ The game declaration appears at the top of the main file:
 
 | Command | Purpose |
 |---------|---------|
-| `print` | Raw string output — the primitive |
 | `stop` | Disable all further player input |
 | `fail` | Exit handler with failure |
 | `succeed` | Exit handler with success |
@@ -817,17 +850,16 @@ The game declaration appears at the top of the main file:
 | `interface` | Interface to external capabilities |
 | `test` | Define / run tests |
 
-`say` is a standard library handler that wraps `print` with styles, inline
-directives, and string interpolation. Authors use `say`; `print` is for library
-authors and low-level output. `say` can be overridden like any handler.
+`say` is the output primitive. It appends text to the text buffer and can be
+overridden like any handler.
 
 #### Output pipeline
 
 ```
-say → print → text buffer → [resolve directives] → stdout
+say → text buffer → [resolve directives] → stdout
 ```
 
-`print` appends text to the text buffer. At the end of each turn, inline
+`say` appends text to the text buffer. At the end of each turn, inline
 directives (`[nobreak]`, `[comma]`, `[the]`, `[a]`, etc.) are resolved in a
 single pass over the buffer — at that point the full turn output is known,
 making deferred decisions like "last item in list" and article selection
@@ -835,8 +867,8 @@ possible. The resolved buffer then goes to stdout.
 
 ### say
 
-`say` is a standard library handler that formats a string and calls `print`.
-Output flows through the pipeline: `say → print → text buffer → [directives] → stdout`.
+`say` is the output primitive. It formats a string and appends it to the text buffer.
+Output flows through the pipeline: `say → text buffer → [directives] → stdout`.
 
 #### String interpolation
 
@@ -1377,38 +1409,38 @@ internal interface Object:event:
     filename: "analytics.js"
 ```
 
-#### Example — calling an AI function
+#### Example — calling an external service
 
 The response object is declared in advance so the caller has a named place to
 read the result. The `interface` handler wires up the JavaScript function. The
 call passes the pre-declared response object and a request object:
 
 ```
-class AiResponse
-    answer: unset
+class TranslationResult
+    text: unset
 
-AiResponse air
+TranslationResult result
 
-internal interface ai Object:response Object:request:
+internal interface translate Object:response Object:request:
     call: js
-    function: "askAi"
-    filename: "ai.js"
+    function: "translate"
+    filename: "translate.js"
 
 on ask:
-    ai air question
-    say "{air.answer}"
+    translate result question
+    say "{result.text}"
 ```
 
 ```javascript
-// ai.js
-async function askAi(response, request) {
-    const result = await callLanguageModel(request.text)
-    response.answer = result.text
+// translate.js
+async function translate(response, request) {
+    const out = await callTranslationApi(request.text)
+    response.text = out.text
 }
 ```
 
-The runtime populates `air` in place. After `ai air question` returns,
-`air.answer` holds the result and the game continues.
+The runtime populates `result` in place. After `translate result question`
+returns, `result.text` holds the response and the game continues.
 
 ### 16. Tests
 

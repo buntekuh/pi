@@ -7,3 +7,18 @@ internal Object:object has Item:item:
     for thing in object.filter(Item):
         succeed if thing is item
     fail
+
+# Room entry and leave hooks.
+# Authors override on enter/on leave in room bodies or at world level.
+# The guard on leave prevents it firing before the player has been anywhere.
+var last room: unset
+
+on every turn:
+    if last room isnt location:
+        leave last room if last room is set
+        enter location
+        last room = location
+
+on enter Room:room:
+
+on leave Room:room:

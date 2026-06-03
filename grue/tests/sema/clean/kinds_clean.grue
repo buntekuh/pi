@@ -1,0 +1,18 @@
+# Valid kind declarations with default, usage in handlers, and is/is not checks.
+
+"Kinds Clean" by Test
+
+kind mood: *neutral, happy, sad
+kind lit: *false, true
+
+Room hall "A hall."
+    is lit
+
+Object brass lantern "A tarnished lantern."
+    is lit
+
+on examine Object:item:
+    say "Bright." if item is lit
+    say "Dark." if item is not lit
+    say "Happy." if item is happy
+    say "Sad." if item is sad

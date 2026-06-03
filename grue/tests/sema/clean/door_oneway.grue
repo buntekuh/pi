@@ -1,0 +1,9 @@
+# One-way inline door — no reverse declaration, no error.
+
+"Door One-way" by Test
+
+Room cellar "A damp cellar."
+    up: Door trapdoor "A heavy trapdoor."
+        leads to: kitchen
+
+Room kitchen "A kitchen."
