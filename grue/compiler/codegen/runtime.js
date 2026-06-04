@@ -163,9 +163,12 @@ const GrueRuntime = (function () {
   }
 
   // _str(v) converts any Grue value to a display string for say interpolation.
-  // Node references become their canonical name; null becomes "".
+  // Floats are rounded to the nearest integer — division produces a float
+  // intermediate but Grue treats all values as integers at the surface level.
+  // Node references and kind values are already strings; null becomes "".
   function _str(v) {
     if (v === null || v === undefined) return "";
+    if (typeof v === "number" && !Number.isInteger(v)) return String(Math.round(v));
     return String(v);
   }
 
@@ -898,6 +901,7 @@ const GrueRuntime = (function () {
 
   return {
     say,
+    _str, // exposed for exprFn closures compiled into the game script
 
     init(game) {
       _game     = game;
