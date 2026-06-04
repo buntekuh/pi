@@ -1068,7 +1068,7 @@ func writeTrieNode(b *strings.Builder, node *grammar.TrieNode, depth int) {
 // can match case-insensitive player input directly.
 func writeVocab(b *strings.Builder, w *world.World) {
 	if len(w.Vocab) == 0 {
-		b.WriteString("  vocab: {}\n")
+		b.WriteString("  vocab: {},\n")
 		return
 	}
 	b.WriteString("  vocab: {\n")
@@ -1083,7 +1083,7 @@ func writeVocab(b *strings.Builder, w *world.World) {
 	for _, key := range sortedKeys(lower) {
 		fmt.Fprintf(b, "    %s: %s,\n", jsStr(key), jsStr(lower[key]))
 	}
-	b.WriteString("  }\n")
+	b.WriteString("  },\n")
 }
 
 // ── world tree helpers ─────────────────────────────────────────────────────

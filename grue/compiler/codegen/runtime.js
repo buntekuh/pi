@@ -819,19 +819,19 @@ const GrueRuntime = (function () {
 
   function runTests() {
     const tests = _game.tests || {};
-    if (!tests[“”]) { say(“No tests defined.”); return; }
+    if (!tests[""]) { say("No tests defined."); return; }
 
-    _out.innerHTML = “”;
+    _out.innerHTML = "";
     const steps = [];
-    _flattenTest(“”, tests, steps, new Set());
+    _flattenTest("", tests, steps, new Set());
 
     let idx = 0, passed = 0, failed = 0;
 
     function nextStep() {
       if (idx >= steps.length) {
         const ok = failed === 0;
-        const el = document.createElement(“p”);
-        el.style.cssText = `font-weight:bold; color:${ok ? “#080” : “#c00”}`;
+        const el = document.createElement("p");
+        el.style.cssText = `font-weight:bold; color:${ok ? "#080" : "#c00"}`;
         el.textContent = `${passed} passed, ${failed} failed`;
         _out.appendChild(el);
         return;
@@ -839,9 +839,9 @@ const GrueRuntime = (function () {
       const step = steps[idx++];
 
       if (step._header) {
-        const el = document.createElement(“p”);
-        el.style.cssText = “color:#888; margin-top:1em”;
-        el.textContent = `-- test “${step._header}”`;
+        const el = document.createElement("p");
+        el.style.cssText = "color:#888; margin-top:1em";
+        el.textContent = `-- test "${step._header}"`;
         _out.appendChild(el);
         setTimeout(nextStep, 0);
         return;
@@ -868,9 +868,9 @@ const GrueRuntime = (function () {
       // bare . (step.tick) fires turn handlers directly — wired in M8
 
       // Collect text from elements added by this step to check the assertion.
-      let outputText = “”;
+      let outputText = "";
       for (let j = before; j < _out.children.length; j++) {
-        outputText += “ “ + _out.children[j].textContent;
+        outputText += " " + _out.children[j].textContent;
       }
       outputText = outputText.trim();
 
@@ -878,13 +878,13 @@ const GrueRuntime = (function () {
         const hit = outputText.toLowerCase().includes(step.assert.toLowerCase());
         const pass = step.negate ? !hit : hit;
         if (pass) passed++; else failed++;
-        const el = document.createElement(“div”);
+        const el = document.createElement("div");
         el.style.cssText =
-          `font-family:monospace; color:${pass ? “#080” : “#c00”}`;
-        const sym = pass ? “OK” : “FAIL”;
-        const notStr = step.negate ? “ not” : “”;
-        el.textContent = `${sym}${notStr} “${step.assert}”` +
-          (pass ? “” : `  -- got: “${outputText}”`);
+          `font-family:monospace; color:${pass ? "#080" : "#c00"}`;
+        const sym = pass ? "OK" : "FAIL";
+        const notStr = step.negate ? " not" : "";
+        el.textContent = `${sym}${notStr} "${step.assert}"` +
+          (pass ? "" : `  -- got: "${outputText}"`);
         _out.appendChild(el);
       }
 
