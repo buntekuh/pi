@@ -537,12 +537,16 @@ func (s *CallStmt) stmtNode()     {}
 //	open rolodex at 3. "Opened rolodex at position 3."
 //	open rolodex at 10. not "Opened"
 //	test "other test".
+//	{3 + 4}. "7"
 //
 // Command is the player command (sequence of words/numbers/strings).
+// Expr is non-nil when the command is a {expression} — the expression is
+// evaluated and its string result is checked against the assertion.
 // Assertion is nil for a bare command. NotAssertion inverts the check.
 type TestCmdStmt struct {
 	Pos          Pos
-	Command      []string // words of the command
+	Command      []string // words of the command; empty when Expr is set
+	Expr         Expr     // non-nil for {expr} assertion form
 	Assertion    *string  // expected output substring; nil = no assertion
 	NotAssertion bool     // true for "not" form
 	SubTest      string   // non-empty if this is "test "name"."

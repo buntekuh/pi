@@ -1838,6 +1838,32 @@ func (p *parser) parseTestCmd() (*ast.TestCmdStmt, error) {
 		return cmd, nil
 	}
 
+	// {expr} command — evaluate a Grue expression and assert on its string value.
+	// The expression is compiled to a JS closure at code-gen time; at runtime
+	// the closure is called and its return value is checked against the assertion.
+	if p.at(lexer.LBRACE) {
+		p.advance() // consume {
+		expr, err := p.parseExpr()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.expect(lexer.RBRACE); err != nil {
+			return nil, err
+		}
+		cmd := &ast.TestCmdStmt{Pos: pos, Expr: expr}
+		if p.match(lexer.DOT) {
+			if !p.at(lexer.NEWLINE) {
+				if err := p.parseTestAssertion(cmd); err != nil {
+					return nil, err
+				}
+			}
+		}
+		if err := p.expectNewline(); err != nil {
+			return nil, err
+		}
+		return cmd, nil
+	}
+
 	// Normal command: collect words/numbers/strings until DOT
 	var parts []string
 	for !p.at(lexer.DOT) && !p.at(lexer.NEWLINE) && !p.at(lexer.EOF) {
@@ -1944,11 +1970,14 @@ var precedence = map[string]int{
 }
 
 func (p *parser) parseBinaryExpr(minPrec int) (ast.Expr, error) {
-	// Handle unary "not"
+	// Handle unary "not".
+	// Precedence 2 means "not" binds tighter than "and"/"or" (prec 1/2) but
+	// looser than comparison operators (prec 3+), so "not a is b" parses as
+	// "not (a is b)" and "not a and b" parses as "(not a) and b".
 	if p.atWord("not") {
 		pos := p.currentPos()
 		p.advance()
-		expr, err := p.parseBinaryExpr(8)
+		expr, err := p.parseBinaryExpr(2)
 		if err != nil {
 			return nil, err
 		}

@@ -123,7 +123,7 @@ func Emit(w *world.World, g *grammar.Grammar) string {
 	c.writeHandlers(&b)
 	writeGrammar(&b, g)
 	writeVocab(&b, w)
-	writeTests(&b, w)
+	c.writeTests(&b)
 	b.WriteString("});\n")
 	return b.String()
 }
@@ -930,18 +930,30 @@ func (c *cg) compileString(raw string, sc *scope) string {
 
 // ── tests ──────────────────────────────────────────────────────────────────
 
-func writeTests(b *strings.Builder, w *world.World) {
-	if len(w.Tests) == 0 {
+// emptyScope is used when compiling {expr} test assertions, which have no
+// handler parameters, class properties, or self reference.
+var emptyScope = &scope{vars: make(map[string]bool), clsProps: make(map[string]bool)}
+
+func (c *cg) writeTests(b *strings.Builder) {
+	if len(c.w.Tests) == 0 {
 		b.WriteString("  tests: {},\n")
 		return
 	}
 	b.WriteString("  tests: {\n")
-	for _, test := range w.Tests {
+	for _, test := range c.w.Tests {
 		fmt.Fprintf(b, "    %s: { room: %s, steps: [\n", jsStr(test.Name), jsStr(test.Room))
 		for _, step := range test.Steps {
 			switch {
 			case step.SubTest != "":
 				fmt.Fprintf(b, "      { sub: %s },\n", jsStr(step.SubTest))
+			case step.Expr != nil:
+				compiled := c.compileExpr(step.Expr, emptyScope)
+				if step.Assert != "" {
+					fmt.Fprintf(b, "      { exprFn: function() { return _str(%s); }, assert: %s, negate: %v },\n",
+						compiled, jsStr(step.Assert), step.Negate)
+				} else {
+					fmt.Fprintf(b, "      { exprFn: function() { return _str(%s); } },\n", compiled)
+				}
 			case step.Cmd == "":
 				if step.Assert != "" {
 					fmt.Fprintf(b, "      { tick: true, assert: %s, negate: %v },\n", jsStr(step.Assert), step.Negate)

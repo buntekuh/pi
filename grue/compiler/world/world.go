@@ -22,7 +22,9 @@
 //	└── Vocab      — surface form (name/alias) → canonical instance name
 package world
 
-import "gruc/ast"
+import (
+	"gruc/ast"
+)
 
 // =============================================================================
 // World — root structure
@@ -56,10 +58,11 @@ type Test struct {
 
 // TestStep is one command line inside a test body.
 type TestStep struct {
-	Cmd     string // player command words joined by spaces; empty for a bare-dot tick
-	SubTest string // non-empty for "test "name"." delegation lines
-	Assert  string // expected substring in turn output; empty means no assertion
-	Negate  bool   // true for the "not" assertion form
+	Cmd     string   // player command words joined by spaces; empty for expr or tick
+	Expr    ast.Expr // non-nil for {expr} steps — compiled to a JS closure by codegen
+	SubTest string   // non-empty for "test "name"." delegation lines
+	Assert  string   // expected substring in turn output; empty means no assertion
+	Negate  bool     // true for the "not" assertion form
 }
 
 // =============================================================================

@@ -841,7 +841,7 @@ const GrueRuntime = (function () {
       if (step._header) {
         const el = document.createElement(“p”);
         el.style.cssText = “color:#888; margin-top:1em”;
-        el.textContent = `── test “${step._header}”`;
+        el.textContent = `-- test “${step._header}”`;
         _out.appendChild(el);
         setTimeout(nextStep, 0);
         return;
@@ -856,7 +856,15 @@ const GrueRuntime = (function () {
       // Run through the normal player turn path so echo, say, and (in M8)
       // turn handlers all fire exactly as they would for a real player.
       const before = _out.children.length;
-      if (step.cmd) handleInput(step.cmd);
+      if (step.exprFn) {
+        // {expr} assertion — evaluate the compiled expression and display it.
+        const result = step.exprFn();
+        const el = document.createElement("p");
+        el.textContent = result;
+        _out.appendChild(el);
+      } else if (step.cmd) {
+        handleInput(step.cmd);
+      }
       // bare . (step.tick) fires turn handlers directly — wired in M8
 
       // Collect text from elements added by this step to check the assertion.
@@ -873,10 +881,10 @@ const GrueRuntime = (function () {
         const el = document.createElement(“div”);
         el.style.cssText =
           `font-family:monospace; color:${pass ? “#080” : “#c00”}`;
-        const sym = pass ? “✓” : “✗”;
+        const sym = pass ? “OK” : “FAIL”;
         const notStr = step.negate ? “ not” : “”;
         el.textContent = `${sym}${notStr} “${step.assert}”` +
-          (pass ? “” : `  — got: “${outputText}”`);
+          (pass ? “” : `  -- got: “${outputText}”`);
         _out.appendChild(el);
       }
 

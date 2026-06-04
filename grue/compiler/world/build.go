@@ -192,6 +192,7 @@ func (b *builder) buildTest(d *ast.TestDecl, room string) *Test {
 		}
 		step := TestStep{
 			Cmd:     strings.Join(cmd.Command, " "),
+			Expr:    cmd.Expr,
 			SubTest: cmd.SubTest,
 			Negate:  cmd.NotAssertion,
 		}

@@ -1,0 +1,41 @@
+# expressions — expression engine tests using {expr}. assertion syntax
+
+"Expressions" by Test
+
+test
+    test "arithmetic".
+    test "precedence".
+    test "functions".
+    test "comparison".
+    test "boolean".
+
+test "arithmetic"
+    {3 + 4}. "7"
+    {10 - 3}. "7"
+    {3 * 4}. "12"
+    {10 / 4}. "3"
+    {10 modulo 3}. "1"
+
+test "precedence"
+    {2 + 3 * 4}. "14"
+    {10 - 2 - 3}. "5"
+
+test "functions"
+    {floor(7 / 2)}. "3"
+    {ceiling(7 / 2)}. "4"
+    {round(7 / 2)}. "4"
+    {absolute(-5)}. "5"
+    {biggest(3, 7)}. "7"
+    {smallest(3, 7)}. "3"
+
+test "comparison"
+    {3 == 3}. "true"
+    {3 == 4}. "false"
+    {3 < 4}. "true"
+    {4 > 3}. "true"
+
+test "boolean"
+    {3 == 3 and 4 == 4}. "true"
+    {3 == 3 and 4 == 5}. "false"
+    {3 == 4 or 4 == 4}. "true"
+    {not 3 == 4}. "true"
