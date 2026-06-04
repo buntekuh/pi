@@ -145,6 +145,63 @@ const GrueRuntime = (function () {
       .replace(/>/g, "&gt;");
   }
 
+  // renderMap builds the Map section of the tree panel.
+  // Rooms are listed with their exits; doors show both sides they connect.
+  function renderMap(nodes) {
+    const rooms = Object.entries(nodes).filter(([, n]) => n.class === "Room");
+    const doors = Object.entries(nodes).filter(([, n]) => n.class === "Door");
+    if (rooms.length === 0 && doors.length === 0) return "";
+
+    let html = `<h3>Map</h3><ul style="list-style:none;padding:0">`;
+
+    for (const [name, node] of rooms) {
+      const isHere = name === _location;
+      const style = isHere ? " style='font-weight:bold;background:#ffe;padding:1px 3px'" : "";
+      html += `<li${style}>&#9679; <span class='cls'>Room</span> <b>${esc(name)}</b>`;
+      if (node.desc) {
+        const short = node.desc.replace(/\n/g, " ");
+        html += ` <span class='desc'>"${esc(short.length > 55 ? short.slice(0, 55) + "…" : short)}"</span>`;
+      }
+      const exits = node.exits || {};
+      if (Object.keys(exits).length > 0) {
+        html += `<ul style="list-style:none;margin:2px 0 4px 1.5em;padding:0">`;
+        for (const [dir, dest] of Object.entries(exits)) {
+          const destNode = nodes[dest];
+          if (destNode && destNode.class === "Door") {
+            // Exit leads through a door — find the other side
+            const connects = destNode.connects || [];
+            const other = connects.filter(r => r !== name);
+            html += `<li>${dir} &rarr; <em>${esc(dest)}</em> (door)`;
+            if (other.length) html += ` &rarr; ${other.map(esc).join(", ")}`;
+            html += `</li>`;
+          } else {
+            html += `<li>${dir} &rarr; ${esc(dest)}</li>`;
+          }
+        }
+        html += `</ul>`;
+      }
+      html += `</li>`;
+    }
+    html += `</ul>`;
+
+    // Standalone doors (declared at top level, not inline)
+    if (doors.length > 0) {
+      html += `<ul style="list-style:none;padding:0">`;
+      for (const [name, node] of doors) {
+        const connects = node.connects || [];
+        html += `<li>&#9670; <span class='cls'>Door</span> <b>${esc(name)}</b>`;
+        if (node.desc) html += ` <span class='desc'>"${esc(node.desc)}"</span>`;
+        if (connects.length) {
+          html += ` &nbsp; ${connects.map(esc).join(" &#8596; ")}`;
+        }
+        html += `</li>`;
+      }
+      html += `</ul>`;
+    }
+
+    return html;
+  }
+
   // renderTree rebuilds the tree panel from current runtime state.
   // In later milestones this will reflect live property values and locations.
   function renderTree() {
@@ -206,6 +263,9 @@ const GrueRuntime = (function () {
       html += `<h3>Global handlers</h3>`;
       html += global.map(s => `<span class='sig'>${esc(s)}</span>`).join(" ");
     }
+
+    // Map
+    html += renderMap(nodes);
 
     // Vocab
     const vocab = _game.vocab || {};
