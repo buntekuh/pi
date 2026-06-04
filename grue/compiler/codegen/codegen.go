@@ -949,10 +949,10 @@ func (c *cg) writeTests(b *strings.Builder) {
 			case step.Expr != nil:
 				compiled := c.compileExpr(step.Expr, emptyScope)
 				if step.Assert != "" {
-					fmt.Fprintf(b, "      { exprFn: function() { return _str(%s); }, assert: %s, negate: %v },\n",
+					fmt.Fprintf(b, "      { exprFn: function() { return String(%s ?? \"\"); }, assert: %s, negate: %v },\n",
 						compiled, jsStr(step.Assert), step.Negate)
 				} else {
-					fmt.Fprintf(b, "      { exprFn: function() { return _str(%s); } },\n", compiled)
+					fmt.Fprintf(b, "      { exprFn: function() { return String(%s ?? \"\"); } },\n", compiled)
 				}
 			case step.Cmd == "":
 				if step.Assert != "" {
