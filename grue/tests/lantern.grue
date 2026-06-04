@@ -8,9 +8,21 @@ Room kitchen "The kitchen smells of burnt coffee. A brass lantern sits on the ta
     north: hallway
     Object brass lantern, lamp "A tarnished brass lantern. The wick is dry."
     Object table "A sturdy wooden table."
+    Object red apple "A shiny red apple."
+    Object red balloon "A bright red balloon."
 
 Room hallway "A narrow hallway leading south to the kitchen."
     south: kitchen
+    north: Door red door
+        leads to: garden
+    Person Lady Hampstead, hampy, iron lady "Has a bad mood."
+
+Room garden "A walled garden. Sunlight and weeds."
+    south: Door red door
+        leads to: hallway
+
+Door red gate, gate "A large red iron gate set into the garden wall."
+    west: garden
 
 test
     look. "You look around"

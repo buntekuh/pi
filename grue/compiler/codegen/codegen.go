@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"html"
 	"sort"
+	"strconv"
 	"strings"
 
 	"gruc/ast"
@@ -34,6 +35,8 @@ func Emit(w *world.World, g *grammar.Grammar) string {
 	var b strings.Builder
 	b.WriteString("GrueRuntime.init({\n")
 	writeMeta(&b, w.Game)
+	writeKinds(&b, w)
+	writeClasses(&b, w)
 	writeNodes(&b, w)
 	writeStart(&b, w)
 	writeHandlers(&b, w)
@@ -83,6 +86,54 @@ func writeMeta(b *strings.Builder, game world.GameInfo) {
 	b.WriteString("  },\n")
 }
 
+// ── kinds ──────────────────────────────────────────────────────────────────
+
+func writeKinds(b *strings.Builder, w *world.World) {
+	if len(w.Kinds) == 0 {
+		b.WriteString("  kinds: [],\n")
+		return
+	}
+	b.WriteString("  kinds: [\n")
+	for _, k := range w.Kinds {
+		vals := make([]string, len(k.Values))
+		for i, v := range k.Values {
+			vals[i] = jsStr(v)
+		}
+		fmt.Fprintf(b, "    { name: %s, values: [%s], defaultIdx: %d },\n",
+			jsStr(k.Name), strings.Join(vals, ", "), k.DefaultIdx)
+	}
+	b.WriteString("  ],\n")
+}
+
+// ── classes ────────────────────────────────────────────────────────────────
+
+func writeClasses(b *strings.Builder, w *world.World) {
+	if len(w.Classes) == 0 {
+		b.WriteString("  classes: {},\n")
+		return
+	}
+	b.WriteString("  classes: {\n")
+	for _, cls := range w.Classes {
+		fmt.Fprintf(b, "    %s: {\n", jsStr(cls.Name))
+		fmt.Fprintf(b, "      parent: %s,\n", jsStr(cls.Parent))
+		fmt.Fprintf(b, "      isLibrary: %v,\n", cls.IsLibrary)
+		b.WriteString("      props: ")
+		writePropsObject(b, cls.Props)
+		b.WriteString(",\n")
+		// handler sigkeys
+		var sigs []string
+		for _, h := range cls.Handlers {
+			sigs = append(sigs, jsStr(h.SigKey))
+		}
+		if len(cls.EveryTurn) > 0 {
+			sigs = append(sigs, jsStr("(every turn)"))
+		}
+		fmt.Fprintf(b, "      handlers: [%s]\n", strings.Join(sigs, ", "))
+		b.WriteString("    },\n")
+	}
+	b.WriteString("  },\n")
+}
+
 // ── nodes ──────────────────────────────────────────────────────────────────
 
 func writeNodes(b *strings.Builder, w *world.World) {
@@ -100,11 +151,74 @@ func writeNodes(b *strings.Builder, w *world.World) {
 		if loc := locationOf(node); loc != "" {
 			fmt.Fprintf(b, ", location: %s", jsStr(loc))
 		}
+		if len(node.Aliases) > 0 {
+			parts := make([]string, len(node.Aliases))
+			for i, a := range node.Aliases {
+				parts[i] = jsStr(a)
+			}
+			fmt.Fprintf(b, ", aliases: [%s]", strings.Join(parts, ", "))
+		}
 		writeExits(b, node)
 		writeConnects(b, node)
+		b.WriteString(", props: ")
+		writePropsObject(b, node.Props)
 		b.WriteString(" },\n")
 	}
 	b.WriteString("  },\n")
+}
+
+// writePropsObject emits a JS object literal for a slice of Props.
+// If the same key appears more than once (e.g. "leads to" on both sides of a
+// door), the values are collected into an array.
+func writePropsObject(b *strings.Builder, props []*world.Prop) {
+	// Group values by key, preserving first-occurrence order.
+	keys := []string{}
+	groups := map[string][]string{}
+	for _, p := range props {
+		v := propValJS(p.Value)
+		if v == "" {
+			continue
+		}
+		if _, seen := groups[p.Key]; !seen {
+			keys = append(keys, p.Key)
+		}
+		groups[p.Key] = append(groups[p.Key], v)
+	}
+	if len(keys) == 0 {
+		b.WriteString("{}")
+		return
+	}
+	b.WriteString("{")
+	for i, k := range keys {
+		vals := groups[k]
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		if len(vals) == 1 {
+			fmt.Fprintf(b, "%s: %s", jsStr(k), vals[0])
+		} else {
+			fmt.Fprintf(b, "%s: [%s]", jsStr(k), strings.Join(vals, ", "))
+		}
+	}
+	b.WriteString("}")
+}
+
+// propValJS converts a world.Value to its JS literal representation.
+// Complex values (Array, List) are omitted for now — emitted in M5.
+func propValJS(v world.Value) string {
+	switch val := v.(type) {
+	case world.NumberValue:
+		return strconv.Itoa(val.V)
+	case world.StringValue:
+		return jsStr(val.V)
+	case world.RefValue:
+		return jsStr(val.Name)
+	case world.KindValue:
+		return jsStr(val.Name)
+	case world.UnsetValue:
+		return "null"
+	}
+	return ""
 }
 
 // ── start ──────────────────────────────────────────────────────────────────
