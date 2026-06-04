@@ -210,6 +210,191 @@ func TestHTMLRuntimeInlined(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// M2 — handlers
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestEmitHandlersField(t *testing.T) {
+	out := emit(t, `
+on look:
+    say "You look around."
+`)
+	if !strings.Contains(out, "handlers:") {
+		t.Errorf("handlers field missing:\n%s", out)
+	}
+}
+
+func TestEmitHandlerSigKey(t *testing.T) {
+	out := emit(t, `
+on look:
+    say "You look around."
+`)
+	if !strings.Contains(out, `"look"`) {
+		t.Errorf("look sigKey missing from handlers:\n%s", out)
+	}
+}
+
+func TestEmitHandlerSayCompiled(t *testing.T) {
+	out := emit(t, `
+on look:
+    say "You look around the room."
+`)
+	if !strings.Contains(out, `say("You look around the room.")`) {
+		t.Errorf("compiled say call missing:\n%s", out)
+	}
+}
+
+func TestEmitHandlerWithParam(t *testing.T) {
+	out := emit(t, `
+on examine Object:thing:
+    say "Nothing special."
+`)
+	if !strings.Contains(out, `"examine Object"`) {
+		t.Errorf("examine Object sigKey missing:\n%s", out)
+	}
+	if !strings.Contains(out, "function(thing)") {
+		t.Errorf("param name 'thing' missing in function signature:\n%s", out)
+	}
+}
+
+func TestEmitHandlerOwnerInstance(t *testing.T) {
+	out := emit(t, `
+Room kitchen "The kitchen."
+    on look:
+        say "A small kitchen."
+`)
+	if !strings.Contains(out, `"kitchen"`) {
+		t.Errorf("instance owner 'kitchen' missing:\n%s", out)
+	}
+}
+
+func TestEmitHandlerOwnerClass(t *testing.T) {
+	out := emit(t, `
+class Container
+    on open self:
+        say "Opened."
+`)
+	if !strings.Contains(out, `"Container"`) {
+		t.Errorf("class owner 'Container' missing:\n%s", out)
+	}
+}
+
+func TestEmitHandlerChainOrder(t *testing.T) {
+	// Instance handler must appear before global handler in the chain.
+	out := emit(t, `
+Room kitchen "The kitchen."
+    on look:
+        say "Kitchen specific look."
+
+on look:
+    say "Generic look."
+`)
+	kitchenIdx := strings.Index(out, `"Kitchen specific look."`)
+	globalIdx := strings.Index(out, `"Generic look."`)
+	if kitchenIdx == -1 || globalIdx == -1 {
+		t.Fatal("one or both say strings missing")
+	}
+	if kitchenIdx > globalIdx {
+		t.Error("instance handler should appear before global handler in chain")
+	}
+}
+
+func TestEmitInternalHandlerExcluded(t *testing.T) {
+	out := emit(t, `
+internal check Object:thing:
+    succeed
+
+on take Object:thing:
+    say "Taken."
+`)
+	if strings.Contains(out, `"check Object"`) {
+		t.Error("internal handler should not appear in handlers map")
+	}
+	if !strings.Contains(out, `"take Object"`) {
+		t.Error("public handler should appear in handlers map")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// M2 — grammar
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestEmitGrammarField(t *testing.T) {
+	out := emit(t, `on look:
+    say "You look around."
+`)
+	if !strings.Contains(out, "grammar:") {
+		t.Errorf("grammar field missing:\n%s", out)
+	}
+}
+
+func TestEmitGrammarContainsSigKey(t *testing.T) {
+	out := emit(t, `on look:
+    say "You look around."
+`)
+	// The trie should contain the "look" sigKey
+	if !strings.Contains(out, `"look"`) {
+		t.Errorf("look sigKey missing from grammar:\n%s", out)
+	}
+}
+
+func TestEmitGrammarWithParam(t *testing.T) {
+	out := emit(t, `on examine Object:thing:
+    say "Nothing special."
+`)
+	if !strings.Contains(out, `"examine"`) {
+		t.Errorf("examine keyword missing from grammar:\n%s", out)
+	}
+	if !strings.Contains(out, `"Object"`) {
+		t.Errorf("Object param type missing from grammar:\n%s", out)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// M2 — vocab
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestEmitVocabField(t *testing.T) {
+	out := emit(t, `Room kitchen "The kitchen."`)
+	if !strings.Contains(out, "vocab:") {
+		t.Errorf("vocab field missing:\n%s", out)
+	}
+}
+
+func TestEmitVocabRoomEntry(t *testing.T) {
+	out := emit(t, `Room kitchen "The kitchen."`)
+	if !strings.Contains(out, `"kitchen"`) {
+		t.Errorf("kitchen missing from vocab:\n%s", out)
+	}
+}
+
+func TestEmitVocabAlias(t *testing.T) {
+	out := emit(t, `
+Room kitchen "The kitchen."
+    Object brass lantern, lamp "A lantern."
+`)
+	// Alias "lamp" should appear as a vocab entry pointing to "brass lantern"
+	if !strings.Contains(out, `"lamp"`) {
+		t.Errorf("alias 'lamp' missing from vocab:\n%s", out)
+	}
+	if !strings.Contains(out, `"brass lantern"`) {
+		t.Errorf("canonical 'brass lantern' missing from vocab:\n%s", out)
+	}
+}
+
+func TestEmitVocabKeysLowercased(t *testing.T) {
+	// Instance names are lowercased in vocab keys for case-insensitive input.
+	out := emit(t, `
+class Robot
+
+Robot Benson "A robot."
+`)
+	// The vocab key for "Benson" should be lowercased: "benson"
+	if !strings.Contains(out, `"benson"`) {
+		t.Errorf("vocab key should be lowercase 'benson':\n%s", out)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // determinism
 // ─────────────────────────────────────────────────────────────────────────────
 

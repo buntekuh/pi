@@ -17,8 +17,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"sort"
 	"strings"
 
+	"gruc/ast"
 	"gruc/grammar"
 	"gruc/world"
 )
@@ -28,20 +30,21 @@ var RuntimeJS string
 
 // Emit generates the game-script JS for the given world and grammar.
 // The output is a single GrueRuntime.init({...}) call.
-// Fields not yet implemented for the current milestone are omitted; the
-// runtime ignores unknown fields, so older scripts run against newer runtimes.
-func Emit(w *world.World, _ *grammar.Grammar) string {
+func Emit(w *world.World, g *grammar.Grammar) string {
 	var b strings.Builder
 	b.WriteString("GrueRuntime.init({\n")
 	writeMeta(&b, w.Game)
 	writeNodes(&b, w)
 	writeStart(&b, w)
+	writeHandlers(&b, w)
+	writeGrammar(&b, g)
+	writeVocab(&b, w)
 	b.WriteString("});\n")
 	return b.String()
 }
 
-// HTML returns a complete self-contained HTML page: the runtime and the
-// game script are both inlined. No external resources are referenced.
+// HTML returns a complete self-contained HTML page with the runtime and
+// game script inlined. No external resources are referenced.
 func HTML(w *world.World, g *grammar.Grammar) string {
 	title := w.Game.Title
 	if title == "" {
@@ -55,6 +58,10 @@ func HTML(w *world.World, g *grammar.Grammar) string {
 </head>
 <body>
 <div id="output"></div>
+<div id="input-area">
+  <input id="cmd" type="text" autofocus>
+  <button id="go">Go</button>
+</div>
 <script>
 %s</script>
 <script>
@@ -64,7 +71,7 @@ func HTML(w *world.World, g *grammar.Grammar) string {
 `, html.EscapeString(title), RuntimeJS, Emit(w, g))
 }
 
-// ── Descriptor sections ────────────────────────────────────────────────────
+// ── meta ───────────────────────────────────────────────────────────────────
 
 func writeMeta(b *strings.Builder, game world.GameInfo) {
 	b.WriteString("  meta: {\n")
@@ -74,6 +81,8 @@ func writeMeta(b *strings.Builder, game world.GameInfo) {
 	b.WriteString("  },\n")
 }
 
+// ── nodes ──────────────────────────────────────────────────────────────────
+
 func writeNodes(b *strings.Builder, w *world.World) {
 	nodes := worldNodes(w)
 	if len(nodes) == 0 {
@@ -81,7 +90,7 @@ func writeNodes(b *strings.Builder, w *world.World) {
 		return
 	}
 	b.WriteString("  nodes: {\n")
-	for i, node := range nodes {
+	for _, node := range nodes {
 		fmt.Fprintf(b, "    %s: { class: %s", jsStr(node.Name), jsStr(node.ClassName))
 		if node.Desc != "" {
 			fmt.Fprintf(b, ", desc: %s", jsStr(node.Desc))
@@ -89,24 +98,192 @@ func writeNodes(b *strings.Builder, w *world.World) {
 		if loc := locationOf(node); loc != "" {
 			fmt.Fprintf(b, ", location: %s", jsStr(loc))
 		}
-		b.WriteString(" }")
-		if i < len(nodes)-1 {
-			b.WriteString(",")
-		}
-		b.WriteString("\n")
+		b.WriteString(" },\n")
 	}
 	b.WriteString("  },\n")
 }
 
+// ── start ──────────────────────────────────────────────────────────────────
+
 func writeStart(b *strings.Builder, w *world.World) {
-	fmt.Fprintf(b, "  start: %s\n", jsStr(findStart(w)))
+	fmt.Fprintf(b, "  start: %s,\n", jsStr(findStart(w)))
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// ── handlers ───────────────────────────────────────────────────────────────
+
+// handlerEntry pairs an owner label with a compiled handler.
+type handlerEntry struct {
+	owner   string
+	handler *world.Handler
+}
+
+// writeHandlers emits the handlers map: sigKey → ordered list of {owner, fn}.
+// Chain order: instance → class → global own → global library.
+func writeHandlers(b *strings.Builder, w *world.World) {
+	chains := buildHandlerChains(w)
+	if len(chains) == 0 {
+		b.WriteString("  handlers: {},\n")
+		return
+	}
+	sigKeys := sortedKeys(chains)
+	b.WriteString("  handlers: {\n")
+	for _, sigKey := range sigKeys {
+		entries := chains[sigKey]
+		fmt.Fprintf(b, "    %s: [\n", jsStr(sigKey))
+		for _, e := range entries {
+			owner := "null"
+			if e.owner != "" {
+				owner = jsStr(e.owner)
+			}
+			fmt.Fprintf(b, "      { owner: %s, fn: %s },\n",
+				owner, compileHandler(e.handler))
+		}
+		b.WriteString("    ],\n")
+	}
+	b.WriteString("  },\n")
+}
+
+func buildHandlerChains(w *world.World) map[string][]handlerEntry {
+	chains := make(map[string][]handlerEntry)
+	add := func(sigKey, owner string, h *world.Handler) {
+		chains[sigKey] = append(chains[sigKey], handlerEntry{owner, h})
+	}
+	// Instance handlers (most specific)
+	for _, node := range worldNodes(w) {
+		for _, h := range node.Handlers {
+			if !h.Internal {
+				add(h.SigKey, node.Name, h)
+			}
+		}
+	}
+	// Class handlers
+	for _, cls := range w.Classes {
+		for _, h := range cls.Handlers {
+			if !h.Internal {
+				add(h.SigKey, cls.Name, h)
+			}
+		}
+	}
+	// Global own-game handlers
+	for _, h := range w.Root.Handlers {
+		if !h.Internal && !h.IsLibrary {
+			add(h.SigKey, "", h)
+		}
+	}
+	// Global library handlers (last)
+	for _, h := range w.Root.Handlers {
+		if !h.Internal && h.IsLibrary {
+			add(h.SigKey, "", h)
+		}
+	}
+	return chains
+}
+
+// ── handler compilation ────────────────────────────────────────────────────
+
+// compileHandler emits a JS function expression for a single handler.
+// For M2, only SayStmt with a plain string literal is compiled; all other
+// statement types are left as stubs and will be filled in later milestones.
+func compileHandler(h *world.Handler) string {
+	var params []string
+	for _, part := range h.ResolvedSig {
+		if p, ok := part.(ast.SigParam); ok {
+			params = append(params, p.Name)
+		}
+	}
+	body := compileStmts(h.Body)
+	if body == "" {
+		return fmt.Sprintf("function(%s) {}", strings.Join(params, ", "))
+	}
+	return fmt.Sprintf("function(%s) {\n%s      }",
+		strings.Join(params, ", "), body)
+}
+
+func compileStmts(stmts []ast.Stmt) string {
+	var b strings.Builder
+	for _, stmt := range stmts {
+		switch s := stmt.(type) {
+		case *ast.SayStmt:
+			if lit, ok := s.Text.(*ast.StringLit); ok {
+				fmt.Fprintf(&b, "        say(%s);\n", jsStr(lit.Value))
+			}
+			// M4: non-literal (interpolated) say expressions
+		// M3+: assign, if, for, fail, succeed, call, parent, …
+		}
+	}
+	return b.String()
+}
+
+// ── grammar ────────────────────────────────────────────────────────────────
+
+func writeGrammar(b *strings.Builder, g *grammar.Grammar) {
+	b.WriteString("  grammar: ")
+	writeTrieNode(b, g.Root, 1)
+	b.WriteString(",\n")
+}
+
+func writeTrieNode(b *strings.Builder, node *grammar.TrieNode, depth int) {
+	pad := strings.Repeat("  ", depth)
+	b.WriteString("{\n")
+	fmt.Fprintf(b, "%s  sigKey: %s,\n", pad, jsStr(node.SigKey))
+
+	// keywords (sorted for determinism)
+	if len(node.Keywords) == 0 {
+		fmt.Fprintf(b, "%s  keywords: {},\n", pad)
+	} else {
+		fmt.Fprintf(b, "%s  keywords: {\n", pad)
+		for _, word := range sortedKeys(node.Keywords) {
+			fmt.Fprintf(b, "%s    %s: ", pad, jsStr(word))
+			writeTrieNode(b, node.Keywords[word], depth+2)
+			b.WriteString(",\n")
+		}
+		fmt.Fprintf(b, "%s  },\n", pad)
+	}
+
+	// params
+	if len(node.Params) == 0 {
+		fmt.Fprintf(b, "%s  params: []\n", pad)
+	} else {
+		fmt.Fprintf(b, "%s  params: [\n", pad)
+		for _, edge := range node.Params {
+			fmt.Fprintf(b, "%s    { type: %s, next: ", pad, jsStr(edge.Type))
+			writeTrieNode(b, edge.Next, depth+2)
+			b.WriteString(" },\n")
+		}
+		fmt.Fprintf(b, "%s  ]\n", pad)
+	}
+
+	fmt.Fprintf(b, "%s}", pad)
+}
+
+// ── vocab ──────────────────────────────────────────────────────────────────
+
+// writeVocab emits the vocabulary map. Keys are lowercased so the runtime
+// can match case-insensitive player input directly.
+func writeVocab(b *strings.Builder, w *world.World) {
+	if len(w.Vocab) == 0 {
+		b.WriteString("  vocab: {}\n")
+		return
+	}
+	b.WriteString("  vocab: {\n")
+	// Deduplicate after lowercasing (first canonical name wins).
+	lower := make(map[string]string, len(w.Vocab))
+	for form, canonical := range w.Vocab {
+		key := strings.ToLower(form)
+		if _, exists := lower[key]; !exists {
+			lower[key] = canonical
+		}
+	}
+	for _, key := range sortedKeys(lower) {
+		fmt.Fprintf(b, "    %s: %s,\n", jsStr(key), jsStr(lower[key]))
+	}
+	b.WriteString("  }\n")
+}
+
+// ── world tree helpers ─────────────────────────────────────────────────────
 
 // worldNodes returns all instance nodes in document order (depth-first walk
-// of Root.Children). Class template children are excluded — they are not
-// live world instances.
+// of Root.Children). Class template children are excluded.
 func worldNodes(w *world.World) []*world.Node {
 	var nodes []*world.Node
 	for _, child := range w.Root.Children {
@@ -122,9 +299,7 @@ func collectNodes(out *[]*world.Node, node *world.Node) {
 	}
 }
 
-// locationOf returns the initial location of a node: the value of its
-// explicit "location" property if present, otherwise the name of its
-// parent node (i.e. it was declared inside another instance's body).
+// locationOf returns the initial location of a node.
 func locationOf(node *world.Node) string {
 	for _, prop := range node.Props {
 		if prop.Key == "location" {
@@ -139,9 +314,7 @@ func locationOf(node *world.Node) string {
 	return ""
 }
 
-// findStart returns the name of the player's starting room.
-// It checks for an explicit player.location prop first, then falls back
-// to the first Room declared at the top level.
+// findStart returns the player's starting room name.
 func findStart(w *world.World) string {
 	if player, ok := w.NodeMap["player"]; ok {
 		if loc := locationOf(player); loc != "" {
@@ -156,8 +329,18 @@ func findStart(w *world.World) string {
 	return ""
 }
 
-// jsStr returns the JSON encoding of s, which is also valid JavaScript.
+// ── JS helpers ─────────────────────────────────────────────────────────────
+
 func jsStr(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

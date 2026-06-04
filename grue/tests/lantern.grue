@@ -1,0 +1,19 @@
+# lantern — minimal smoke test for M2 (input loop, look, examine)
+
+"Passing the Brass Lantern" by Bernd Eickhoff
+
+Room kitchen "The kitchen smells of burnt coffee. A brass lantern sits on the table."
+    north: hallway
+    Object brass lantern, lamp "A tarnished brass lantern. The wick is dry."
+    Object table "A sturdy wooden table."
+
+Room hallway "A narrow hallway leading south to the kitchen."
+    south: kitchen
+
+on examine Object:thing:
+    say "You see nothing special."
+
+test
+    look. "You look around"
+    examine brass lantern. "nothing special"
+    examine lamp. "nothing special"
