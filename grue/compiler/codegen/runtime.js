@@ -328,29 +328,20 @@ const GrueRuntime = (function () {
   }
 
   const _builtins = {
-    "look":  () => describeLocation(),
-    "test":  () => runTests(),
+    "look": () => describeLocation(),
   };
 
   // ── Turn loop ────────────────────────────────────────────────────────────────
 
-  // _dispatchInput runs a command string through the parser and handler chain
-  // without echoing it. Used by both handleInput (which adds the echo) and the
-  // test runner (which renders the command itself).
-  function _dispatchInput(raw) {
+  function handleInput(raw) {
     const input = raw.trim();
     if (!input) return;
+    echo(input);
     const parsed = parseInput(input);
     if (parsed) { dispatch(parsed.sigKey, parsed.args); return; }
     const key = tokenize(input).join(" ");
     if (_builtins[key]) { _builtins[key](); return; }
     say("You don't know how to do that.");
-  }
-
-  function handleInput(raw) {
-    if (!raw.trim()) return;
-    echo(raw);
-    _dispatchInput(raw);
   }
 
   // ── Tree / inspector helpers ─────────────────────────────────────────────────
@@ -807,18 +798,11 @@ const GrueRuntime = (function () {
 
   // ── Test runner ──────────────────────────────────────────────────────────────
   //
-  // Tests are stored as flat lists of steps in the descriptor. The runner
-  // flattens the default test ("") by recursively splicing in named sub-tests,
-  // then drains the step list one entry per setTimeout tick so the browser
-  // renders each step before the next one runs.
-  //
-  // No world-state reset occurs between steps — tests accumulate state exactly
-  // as a human player would. Scoped tests (declared inside a room) get a
-  // teleport step prepended so the player starts in the right place.
+  // Each test step is fed through handleInput — the same path a real player
+  // uses. The echo shows the command, say() shows the response, and the turn
+  // handler machinery (on every turn:, on turn N:) fires between steps once M8
+  // lands. The runner only adds assertion results on top of that normal output.
 
-  // _flattenTest recursively expands sub: references into a flat step list.
-  // stack guards against circular references without preventing the same test
-  // from being called from two independent paths.
   function _flattenTest(name, tests, out, stack) {
     if (stack.has(name)) return;
     const test = tests[name];
@@ -833,41 +817,32 @@ const GrueRuntime = (function () {
     }
   }
 
-  function _testEl(text, style) {
-    const el = document.createElement("div");
-    el.style.cssText = style;
-    el.textContent = text;
-    _out.appendChild(el);
-  }
-
   function runTests() {
     const tests = _game.tests || {};
-    if (!tests[""]) { say("No tests defined."); return; }
+    if (!tests[“”]) { say(“No tests defined.”); return; }
 
-    _out.innerHTML = "";
+    _out.innerHTML = “”;
     const steps = [];
-    _flattenTest("", tests, steps, new Set());
+    _flattenTest(“”, tests, steps, new Set());
 
     let idx = 0, passed = 0, failed = 0;
 
     function nextStep() {
       if (idx >= steps.length) {
         const ok = failed === 0;
-        _testEl(
-          `${passed} passed, ${failed} failed`,
-          `font-family:monospace; font-weight:bold; color:${ok ? "#080" : "#c00"};` +
-          `margin-top:1em; border-top:1px solid #ccc; padding-top:4px`
-        );
+        const el = document.createElement(“p”);
+        el.style.cssText = `font-weight:bold; color:${ok ? “#080” : “#c00”}`;
+        el.textContent = `${passed} passed, ${failed} failed`;
+        _out.appendChild(el);
         return;
       }
       const step = steps[idx++];
 
       if (step._header) {
-        _testEl(
-          `── test “${step._header}” ──`,
-          "font-family:monospace; color:#555; margin-top:1em;" +
-          "border-bottom:1px solid #eee; padding-bottom:2px"
-        );
+        const el = document.createElement(“p”);
+        el.style.cssText = “color:#888; margin-top:1em”;
+        el.textContent = `── test “${step._header}”`;
+        _out.appendChild(el);
         setTimeout(nextStep, 0);
         return;
       }
@@ -878,39 +853,31 @@ const GrueRuntime = (function () {
         return;
       }
 
-      // Show command label
-      const label = step.tick ? "." : (step.cmd || "");
-      _testEl("▶ " + label,
-        "font-family:monospace; font-weight:bold; margin-top:0.5em; color:#333");
-
-      // Dispatch and capture any new say() output
+      // Run through the normal player turn path so echo, say, and (in M8)
+      // turn handlers all fire exactly as they would for a real player.
       const before = _out.children.length;
-      if (!step.tick && step.cmd) _dispatchInput(step.cmd);
-      // (tick = bare dot, reserved for turn-handler advance in M8)
+      if (step.cmd) handleInput(step.cmd);
+      // bare . (step.tick) fires turn handlers directly — wired in M8
 
-      let outputText = "";
+      // Collect text from elements added by this step to check the assertion.
+      let outputText = “”;
       for (let j = before; j < _out.children.length; j++) {
-        outputText += " " + _out.children[j].textContent;
+        outputText += “ “ + _out.children[j].textContent;
       }
       outputText = outputText.trim();
 
-      // Check assertion
       if (step.assert !== undefined) {
         const hit = outputText.toLowerCase().includes(step.assert.toLowerCase());
         const pass = step.negate ? !hit : hit;
         if (pass) passed++; else failed++;
-        const sym = pass ? "✓" : "✗";
-        const notStr = step.negate ? " not" : "";
-        _testEl(
-          `${sym}${notStr} “${step.assert}”`,
-          `font-family:monospace; margin-left:1.5em; color:${pass ? "#080" : "#c00"}`
-        );
-        if (!pass) {
-          _testEl(
-            `  got: “${outputText}”`,
-            "font-family:monospace; margin-left:1.5em; color:#c00; font-size:0.9em"
-          );
-        }
+        const el = document.createElement(“div”);
+        el.style.cssText =
+          `font-family:monospace; color:${pass ? “#080” : “#c00”}`;
+        const sym = pass ? “✓” : “✗”;
+        const notStr = step.negate ? “ not” : “”;
+        el.textContent = `${sym}${notStr} “${step.assert}”` +
+          (pass ? “” : `  — got: “${outputText}”`);
+        _out.appendChild(el);
       }
 
       setTimeout(nextStep, 0);
