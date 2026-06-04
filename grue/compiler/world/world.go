@@ -38,6 +38,28 @@ type World struct {
 	Root     *Node             // singleton world root; children are top-level instances
 	NodeMap  map[string]*Node  // instance name → *Node (all instances, including children)
 	Vocab    map[string]string // surface form (name or alias) → canonical instance name
+	Tests    []*Test           // all test blocks in declaration order
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+// Test is a compiled test block — a named sequence of test steps.
+// Room is non-empty when the test was declared inside an instance body; the
+// test runner teleports the player to that location before running the steps.
+type Test struct {
+	Name  string
+	Room  string
+	Steps []TestStep
+}
+
+// TestStep is one command line inside a test body.
+type TestStep struct {
+	Cmd     string // player command words joined by spaces; empty for a bare-dot tick
+	SubTest string // non-empty for "test "name"." delegation lines
+	Assert  string // expected substring in turn output; empty means no assertion
+	Negate  bool   // true for the "not" assertion form
 }
 
 // =============================================================================

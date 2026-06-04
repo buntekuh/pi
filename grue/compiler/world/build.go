@@ -180,6 +180,29 @@ func (b *builder) pass3TopLevel(files []*ast.File, isLibrary bool) {
 	}
 }
 
+// buildTest converts a TestDecl AST node into a Test IR value.
+// room is the name of the enclosing instance when the test is scoped
+// (declared inside a room or object body), or "" for top-level tests.
+func (b *builder) buildTest(d *ast.TestDecl, room string) *Test {
+	t := &Test{Name: d.Name, Room: room}
+	for _, stmt := range d.Body {
+		cmd, ok := stmt.(*ast.TestCmdStmt)
+		if !ok {
+			continue
+		}
+		step := TestStep{
+			Cmd:     strings.Join(cmd.Command, " "),
+			SubTest: cmd.SubTest,
+			Negate:  cmd.NotAssertion,
+		}
+		if cmd.Assertion != nil {
+			step.Assert = *cmd.Assertion
+		}
+		t.Steps = append(t.Steps, step)
+	}
+	return t
+}
+
 func (b *builder) addToRoot(d ast.Decl, isLibrary bool) {
 	root := b.w.Root
 	switch d := d.(type) {
@@ -220,6 +243,11 @@ func (b *builder) addToRoot(d ast.Decl, isLibrary bool) {
 
 	case *ast.InterfaceHandlerDecl:
 		root.Interfaces = append(root.Interfaces, b.buildInterface(d, "", isLibrary))
+
+	case *ast.TestDecl:
+		if !isLibrary {
+			b.w.Tests = append(b.w.Tests, b.buildTest(d, ""))
+		}
 
 	// ClassDecl handled in pass 2; IncludeDecl/LibraryImport handled by driver.
 	}
@@ -273,6 +301,11 @@ func (b *builder) addToNode(node *Node, d ast.Decl, ownerClass string, isLibrary
 		child.Parent = node
 		node.Children = append(node.Children, child)
 		b.registerNode(child)
+
+	case *ast.TestDecl:
+		if !isLibrary {
+			b.w.Tests = append(b.w.Tests, b.buildTest(d, node.Name))
+		}
 	}
 }
 

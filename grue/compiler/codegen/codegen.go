@@ -123,6 +123,7 @@ func Emit(w *world.World, g *grammar.Grammar) string {
 	c.writeHandlers(&b)
 	writeGrammar(&b, g)
 	writeVocab(&b, w)
+	writeTests(&b, w)
 	b.WriteString("});\n")
 	return b.String()
 }
@@ -147,6 +148,7 @@ func HTML(w *world.World, g *grammar.Grammar) string {
   <input id="cmd" type="text" autofocus>
   <button id="go">Go</button>
   <button id="tree-btn">Tree</button>
+  <button id="tests-btn">Tests</button>
 </div>
 <script>
 %s</script>
@@ -924,6 +926,40 @@ func (c *cg) compileString(raw string, sc *scope) string {
 	}
 	b.WriteRune('`')
 	return b.String()
+}
+
+// ── tests ──────────────────────────────────────────────────────────────────
+
+func writeTests(b *strings.Builder, w *world.World) {
+	if len(w.Tests) == 0 {
+		b.WriteString("  tests: {},\n")
+		return
+	}
+	b.WriteString("  tests: {\n")
+	for _, test := range w.Tests {
+		fmt.Fprintf(b, "    %s: { room: %s, steps: [\n", jsStr(test.Name), jsStr(test.Room))
+		for _, step := range test.Steps {
+			switch {
+			case step.SubTest != "":
+				fmt.Fprintf(b, "      { sub: %s },\n", jsStr(step.SubTest))
+			case step.Cmd == "":
+				if step.Assert != "" {
+					fmt.Fprintf(b, "      { tick: true, assert: %s, negate: %v },\n", jsStr(step.Assert), step.Negate)
+				} else {
+					b.WriteString("      { tick: true },\n")
+				}
+			default:
+				if step.Assert != "" {
+					fmt.Fprintf(b, "      { cmd: %s, assert: %s, negate: %v },\n",
+						jsStr(step.Cmd), jsStr(step.Assert), step.Negate)
+				} else {
+					fmt.Fprintf(b, "      { cmd: %s },\n", jsStr(step.Cmd))
+				}
+			}
+		}
+		b.WriteString("    ] },\n")
+	}
+	b.WriteString("  },\n")
 }
 
 // ── exits and door connections ─────────────────────────────────────────────
