@@ -1,0 +1,12 @@
+# expect: error kind_comparison_mismatch line 12
+
+"Kind Comparison Mismatch" by Test
+
+kind mood: *neutral, happy, sad
+kind wetness: *dry, damp, wet
+
+Object peter "A man."
+
+on examine Object:peter:
+    if peter.mood < wet:
+        say "Cross-kind comparison."

@@ -94,6 +94,19 @@ func Parse(tokens []lexer.Token) (*ast.File, error) {
 	return p.parseFile()
 }
 
+// ParseExpr parses a single Grue expression from a source fragment.
+// Used by the code generator to compile {expression} segments inside string
+// interpolations. The source should be a bare expression — no surrounding
+// quotes and no trailing newline required.
+func ParseExpr(source string) (ast.Expr, error) {
+	tokens, err := lexer.Tokenize(source)
+	if err != nil {
+		return nil, err
+	}
+	p := &parser{tokens: tokens}
+	return p.parseExpr()
+}
+
 // =============================================================================
 // Navigation helpers
 // =============================================================================

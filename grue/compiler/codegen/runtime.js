@@ -39,6 +39,205 @@ const GrueRuntime = (function () {
     _out.appendChild(p);
   }
 
+  // ── World-state helpers ──────────────────────────────────────────────────────
+
+  // _worldState holds mutable world-level property values (score, turn, kind
+  // variables declared at world scope). Initialised lazily on first write.
+  const _worldState = {};
+
+  // _nodeOf returns the live node object for a name, or null.
+  function _nodeOf(nameOrRef) {
+    if (nameOrRef === null || nameOrRef === undefined) return null;
+    return (_game.nodes || {})[nameOrRef] || null;
+  }
+
+  // _prop(node, key) reads a property from a named node, falling back to the
+  // class default then to parent class defaults. Key may be a number (array
+  // index) — it is coerced to a string for the lookup.
+  function _prop(nameOrRef, key) {
+    const k = String(key);
+    const node = _nodeOf(nameOrRef);
+    if (node) {
+      if (node.props && k in node.props) return node.props[k];
+      // Walk class hierarchy for defaults.
+      let clsName = node.class;
+      while (clsName) {
+        const cls = (_game.classes || {})[clsName];
+        if (!cls) break;
+        if (cls.props && k in cls.props) return cls.props[k];
+        clsName = cls.parent;
+      }
+    }
+    // World-level property fallback.
+    if (k in _worldState) return _worldState[k];
+    return null;
+  }
+
+  // _setProp(node, key, value) writes a property on a named node.
+  function _setProp(nameOrRef, key, value) {
+    const k = String(key);
+    const node = _nodeOf(nameOrRef);
+    if (!node) return;
+    if (!node.props) node.props = {};
+    node.props[k] = value;
+  }
+
+  // _get / _set access world-level (root) properties by name.
+  function _get(key) {
+    if (key in _worldState) return _worldState[key];
+    // Fall back to root node props emitted by the compiler.
+    const root = (_game.nodes || {})["world"];
+    if (root && root.props && key in root.props) return root.props[key];
+    return null;
+  }
+  function _set(key, value) { _worldState[key] = value; }
+
+  // _kindOrd(value) returns the ordinal (integer index) of a kind value name.
+  // Used for ordering comparisons such as peter.wet < damp.
+  let _kindOrdCache = null;
+  function _kindOrd(v) {
+    if (!_kindOrdCache) {
+      _kindOrdCache = {};
+      for (const k of (_game.kinds || [])) {
+        k.values.forEach((val, i) => { _kindOrdCache[val] = i; });
+      }
+    }
+    return _kindOrdCache[v] ?? 0;
+  }
+
+  // _isset(v) is Grue's set/unset test — only null (unset) is false.
+  function _isset(v) { return v !== null && v !== undefined; }
+
+  // _length(node) returns the count of set properties on a node.
+  function _length(nameOrRef) {
+    const node = _nodeOf(nameOrRef);
+    if (!node || !node.props) return 0;
+    return Object.values(node.props).filter(v => v !== null).length;
+  }
+
+  // _class(node) returns the class name of a node.
+  function _class(nameOrRef) {
+    const node = _nodeOf(nameOrRef);
+    return node ? node.class : null;
+  }
+
+  // _name(node) returns the canonical name string of a node reference.
+  function _name(nameOrRef) { return nameOrRef ?? ""; }
+
+  // _instanceof(node, className) checks whether a node is an instance of a
+  // class or any of its subclasses.
+  function _instanceof(nameOrRef, className) {
+    const node = _nodeOf(nameOrRef);
+    if (!node) return false;
+    let clsName = node.class;
+    while (clsName) {
+      if (clsName === className) return true;
+      const cls = (_game.classes || {})[clsName];
+      clsName = cls ? cls.parent : null;
+    }
+    return false;
+  }
+
+  // _filter(node, className) returns an array of child node names that are
+  // instances of the given class (or any subclass).
+  function _filter(nameOrRef, className) {
+    const nodes = _game.nodes || {};
+    return Object.entries(nodes)
+      .filter(([, n]) => n.location === nameOrRef && _instanceof(nameOrRef === nameOrRef ? Object.keys(nodes).find(k => nodes[k] === n) : null, className))
+      .map(([name]) => name);
+  }
+
+  // _children(node) returns an iterable of child node names.
+  function _children(nameOrRef) {
+    const nodes = _game.nodes || {};
+    return Object.entries(nodes)
+      .filter(([, n]) => n.location === nameOrRef)
+      .map(([name]) => name);
+  }
+
+  // _entries(node) returns an iterable of [key, value] pairs for node props.
+  function _entries(nameOrRef) {
+    const node = _nodeOf(nameOrRef);
+    if (!node || !node.props) return [];
+    return Object.entries(node.props).filter(([, v]) => v !== null);
+  }
+
+  // _str(v) converts any Grue value to a display string for say interpolation.
+  // Node references become their canonical name; null becomes "".
+  function _str(v) {
+    if (v === null || v === undefined) return "";
+    return String(v);
+  }
+
+  // ── Chain control ────────────────────────────────────────────────────────────
+
+  // Fail and succeed exit the current handler by throwing a signal object.
+  // The dispatch loop catches these and continues to the next handler in the
+  // chain (fail/succeed do NOT stop the chain — parent handlers still run).
+  class _FailSignal    { constructor(t) { this.token = t; } }
+  class _SucceedSignal { constructor(t) { this.token = t; } }
+
+  function _fail(token)    { throw new _FailSignal(token); }
+  function _succeed(token) { throw new _SucceedSignal(token); }
+  function _stop()         { /* TODO: disable input */ }
+
+  // _callDepth / _chainPos track which entry in the current chain is running,
+  // so _parent() can invoke the next one.
+  let _currentChain = null;
+  let _currentChainPos = 0;
+  let _currentArgs = null;
+
+  function _parent() {
+    if (!_currentChain) return;
+    const next = _currentChainPos + 1;
+    if (next >= _currentChain.length) return;
+    const saved = _currentChainPos;
+    _currentChainPos = next;
+    try {
+      _currentChain[next].fn(..._currentArgs);
+    } catch (e) {
+      if (e instanceof _FailSignal || e instanceof _SucceedSignal) { /* absorbed */ }
+      else throw e;
+    } finally {
+      _currentChainPos = saved;
+    }
+  }
+
+  // _call(sigKey, ...args) dispatches a handler call from within handler code.
+  function _call(sigKey, ...args) {
+    const chain = (_game.handlers || {})[sigKey];
+    if (!chain || chain.length === 0) return null;
+    const savedChain = _currentChain;
+    const savedPos   = _currentChainPos;
+    const savedArgs  = _currentArgs;
+    _currentChain    = chain;
+    _currentChainPos = 0;
+    _currentArgs     = args;
+    let result = null;
+    try {
+      chain[0].fn(...args);
+    } catch (e) {
+      if (e instanceof _SucceedSignal) result = e.token;
+      else if (!(e instanceof _FailSignal)) throw e;
+    } finally {
+      _currentChain    = savedChain;
+      _currentChainPos = savedPos;
+      _currentArgs     = savedArgs;
+    }
+    return result;
+  }
+  function _callS(sigKey, ...args) { return _call(sigKey, ...args); }
+
+  // ── RNG ──────────────────────────────────────────────────────────────────────
+
+  let _rngSeed = Date.now();
+  function _seed(n) { _rngSeed = n; }
+  function _random(min, max) {
+    _rngSeed = (_rngSeed * 1664525 + 1013904223) & 0xffffffff;
+    const t = ((_rngSeed >>> 0) / 0x100000000);
+    return Math.floor(t * (max - min + 1)) + min;
+  }
+
   // ── Input parsing ────────────────────────────────────────────────────────────
 
   function tokenize(input) {
@@ -109,7 +308,23 @@ const GrueRuntime = (function () {
       say("You can't do that.");
       return;
     }
-    for (const h of chain) h.fn(...args);
+    const savedChain = _currentChain;
+    const savedPos   = _currentChainPos;
+    const savedArgs  = _currentArgs;
+    _currentChain    = chain;
+    _currentArgs     = args;
+    for (let i = 0; i < chain.length; i++) {
+      _currentChainPos = i;
+      try {
+        chain[i].fn(...args);
+      } catch (e) {
+        if (e instanceof _FailSignal || e instanceof _SucceedSignal) continue;
+        throw e;
+      }
+    }
+    _currentChain    = savedChain;
+    _currentChainPos = savedPos;
+    _currentArgs     = savedArgs;
   }
 
   const _builtins = {

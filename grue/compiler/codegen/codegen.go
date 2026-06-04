@@ -23,15 +23,96 @@ import (
 
 	"gruc/ast"
 	"gruc/grammar"
+	"gruc/parser"
 	"gruc/world"
 )
 
 //go:embed runtime.js
 var RuntimeJS string
 
+// cg is the code generation context shared across all handler-compilation
+// functions. It is built once per Emit call and threaded through as a receiver.
+type cg struct {
+	w   *world.World
+	kof map[string]string // kind value name → kind name (excludes true/false)
+	nod map[string]bool   // all known instance names
+}
+
+func newCG(w *world.World) *cg {
+	c := &cg{
+		w:   w,
+		kof: make(map[string]string),
+		nod: make(map[string]bool, len(w.NodeMap)),
+	}
+	for _, k := range w.Kinds {
+		for _, v := range k.Values {
+			if v != "true" && v != "false" {
+				c.kof[v] = k.Name
+			}
+		}
+	}
+	for name := range w.NodeMap {
+		c.nod[name] = true
+	}
+	return c
+}
+
+// scope tracks which names are local JS variables in the current handler frame
+// (handler parameters, loop variables, local var declarations) and which names
+// are class-level properties accessible on self without qualification.
+type scope struct {
+	vars     map[string]bool // local JS variables — compiled as bare identifiers
+	clsProps map[string]bool // class property names — compiled as _prop(self, key)
+	selfName string          // name of the self parameter, or "" if none
+}
+
+func newScope(h *world.Handler, ownerClass string, w *world.World) *scope {
+	sc := &scope{
+		vars:     make(map[string]bool),
+		clsProps: make(map[string]bool),
+	}
+	for _, part := range h.ResolvedSig {
+		if p, ok := part.(ast.SigParam); ok {
+			sc.vars[p.Name] = true
+			if p.Type == ownerClass || p.Name == "self" {
+				sc.selfName = p.Name
+			}
+		}
+	}
+	// Collect all property names reachable on self through the class hierarchy.
+	if ownerClass != "" {
+		cls := ownerClass
+		for cls != "" {
+			if cd, ok := w.ClassMap[cls]; ok {
+				for _, prop := range cd.Props {
+					sc.clsProps[prop.Key] = true
+				}
+				cls = cd.Parent
+			} else {
+				break
+			}
+		}
+	}
+	return sc
+}
+
+func (sc *scope) extend(name string) *scope {
+	next := &scope{
+		vars:     make(map[string]bool, len(sc.vars)+1),
+		clsProps: sc.clsProps,
+		selfName: sc.selfName,
+	}
+	for k := range sc.vars {
+		next.vars[k] = true
+	}
+	next.vars[name] = true
+	return next
+}
+
 // Emit generates the game-script JS for the given world and grammar.
 // The output is a single GrueRuntime.init({...}) call.
 func Emit(w *world.World, g *grammar.Grammar) string {
+	c := newCG(w)
 	var b strings.Builder
 	b.WriteString("GrueRuntime.init({\n")
 	writeMeta(&b, w.Game)
@@ -39,7 +120,7 @@ func Emit(w *world.World, g *grammar.Grammar) string {
 	writeClasses(&b, w)
 	writeNodes(&b, w)
 	writeStart(&b, w)
-	writeHandlers(&b, w)
+	c.writeHandlers(&b)
 	writeGrammar(&b, g)
 	writeVocab(&b, w)
 	b.WriteString("});\n")
@@ -231,14 +312,15 @@ func writeStart(b *strings.Builder, w *world.World) {
 
 // handlerEntry pairs an owner label with a compiled handler.
 type handlerEntry struct {
-	owner   string
-	handler *world.Handler
+	owner      string
+	handler    *world.Handler
+	ownerClass string // class name when owner is a class, else ""
 }
 
 // writeHandlers emits the handlers map: sigKey → ordered list of {owner, fn}.
 // Chain order: instance → class → global own → global library.
-func writeHandlers(b *strings.Builder, w *world.World) {
-	chains := buildHandlerChains(w)
+func (c *cg) writeHandlers(b *strings.Builder) {
+	chains := c.buildHandlerChains()
 	if len(chains) == 0 {
 		b.WriteString("  handlers: {},\n")
 		return
@@ -254,44 +336,40 @@ func writeHandlers(b *strings.Builder, w *world.World) {
 				owner = jsStr(e.owner)
 			}
 			fmt.Fprintf(b, "      { owner: %s, fn: %s },\n",
-				owner, compileHandler(e.handler))
+				owner, c.compileHandler(e.handler, e.ownerClass))
 		}
 		b.WriteString("    ],\n")
 	}
 	b.WriteString("  },\n")
 }
 
-func buildHandlerChains(w *world.World) map[string][]handlerEntry {
+func (c *cg) buildHandlerChains() map[string][]handlerEntry {
 	chains := make(map[string][]handlerEntry)
-	add := func(sigKey, owner string, h *world.Handler) {
-		chains[sigKey] = append(chains[sigKey], handlerEntry{owner, h})
+	add := func(sigKey, owner, ownerClass string, h *world.Handler) {
+		chains[sigKey] = append(chains[sigKey], handlerEntry{owner, h, ownerClass})
 	}
-	// Instance handlers (most specific)
-	for _, node := range worldNodes(w) {
+	for _, node := range worldNodes(c.w) {
 		for _, h := range node.Handlers {
 			if !h.Internal {
-				add(h.SigKey, node.Name, h)
+				add(h.SigKey, node.Name, node.ClassName, h)
 			}
 		}
 	}
-	// Class handlers
-	for _, cls := range w.Classes {
+	for _, cls := range c.w.Classes {
 		for _, h := range cls.Handlers {
 			if !h.Internal {
-				add(h.SigKey, cls.Name, h)
+				add(h.SigKey, cls.Name, cls.Name, h)
 			}
 		}
 	}
-	// Global own-game handlers
-	for _, h := range w.Root.Handlers {
+	for _, h := range c.w.Root.Handlers {
 		if !h.Internal && !h.IsLibrary {
-			add(h.SigKey, "", h)
+			add(h.SigKey, "", "", h)
 		}
 	}
-	// Global library handlers (last)
-	for _, h := range w.Root.Handlers {
+	for _, h := range c.w.Root.Handlers {
 		if !h.Internal && h.IsLibrary {
-			add(h.SigKey, "", h)
+			add(h.SigKey, "", "", h)
 		}
 	}
 	return chains
@@ -299,17 +377,15 @@ func buildHandlerChains(w *world.World) map[string][]handlerEntry {
 
 // ── handler compilation ────────────────────────────────────────────────────
 
-// compileHandler emits a JS function expression for a single handler.
-// For M2, only SayStmt with a plain string literal is compiled; all other
-// statement types are left as stubs and will be filled in later milestones.
-func compileHandler(h *world.Handler) string {
+func (c *cg) compileHandler(h *world.Handler, ownerClass string) string {
 	var params []string
 	for _, part := range h.ResolvedSig {
 		if p, ok := part.(ast.SigParam); ok {
 			params = append(params, p.Name)
 		}
 	}
-	body := compileStmts(h.Body)
+	sc := newScope(h, ownerClass, c.w)
+	body := c.compileStmts(h.Body, sc, "        ")
 	if body == "" {
 		return fmt.Sprintf("function(%s) {}", strings.Join(params, ", "))
 	}
@@ -317,18 +393,536 @@ func compileHandler(h *world.Handler) string {
 		strings.Join(params, ", "), body)
 }
 
-func compileStmts(stmts []ast.Stmt) string {
+func (c *cg) compileStmts(stmts []ast.Stmt, sc *scope, indent string) string {
 	var b strings.Builder
 	for _, stmt := range stmts {
-		switch s := stmt.(type) {
-		case *ast.SayStmt:
-			if lit, ok := s.Text.(*ast.StringLit); ok {
-				fmt.Fprintf(&b, "        say(%s);\n", jsStr(lit.Value))
+		b.WriteString(c.compileStmt(stmt, sc, indent))
+	}
+	return b.String()
+}
+
+func (c *cg) compileStmt(stmt ast.Stmt, sc *scope, indent string) string {
+	if stmt == nil {
+		return ""
+	}
+	switch s := stmt.(type) {
+
+	case *ast.SayStmt:
+		lit, ok := s.Text.(*ast.StringLit)
+		if !ok {
+			return ""
+		}
+		text := c.compileString(lit.Value, sc)
+		line := fmt.Sprintf("%ssay(%s);", indent, text)
+		return c.withGuard(line, s.Guard, sc, indent) + "\n"
+
+	case *ast.FailStmt:
+		var tok string
+		if s.Token == nil {
+			tok = `""`
+		} else {
+			tok = c.compileExpr(s.Token, sc)
+		}
+		line := fmt.Sprintf("%s_fail(%s);", indent, tok)
+		return c.withGuard(line, s.Guard, sc, indent) + "\n"
+
+	case *ast.SucceedStmt:
+		var tok string
+		if s.Token == nil {
+			tok = `""`
+		} else {
+			tok = c.compileExpr(s.Token, sc)
+		}
+		line := fmt.Sprintf("%s_succeed(%s);", indent, tok)
+		return c.withGuard(line, s.Guard, sc, indent) + "\n"
+
+	case *ast.ParentStmt:
+		return fmt.Sprintf("%s_parent();\n", indent)
+
+	case *ast.StopStmt:
+		return fmt.Sprintf("%s_stop();\n", indent)
+
+	case *ast.AssignStmt:
+		rhs := c.compileExpr(s.Value, sc)
+		line := c.compileAssign(s.Target, s.Operator, rhs, sc, indent)
+		return c.withGuard(line, s.Guard, sc, indent) + "\n"
+
+	case *ast.MutateStmt:
+		rhs := c.compileExpr(s.Value, sc)
+		op := "+="
+		if s.Operator == "-" {
+			op = "-="
+		}
+		line := c.compileAssign(s.Target, op, rhs, sc, indent)
+		return c.withGuard(line, s.Guard, sc, indent) + "\n"
+
+	case *ast.VarStmt:
+		if s.Initial != nil {
+			init := c.compileExpr(s.Initial, sc)
+			return fmt.Sprintf("%slet %s = %s;\n", indent, s.Name, init)
+		}
+		return fmt.Sprintf("%slet %s = 0;\n", indent, s.Name)
+
+	case *ast.IfStmt:
+		return c.compileIf(s, sc, indent)
+
+	case *ast.ForFromStmt:
+		inner := sc.extend(s.Var)
+		from := c.compileExpr(s.From, sc)
+		to := c.compileExpr(s.To, sc)
+		body := c.compileStmts(s.Body, inner, indent+"    ")
+		return fmt.Sprintf("%sfor (let %s = %s; %s < %s; %s++) {\n%s%s}\n",
+			indent, s.Var, from, s.Var, to, s.Var, body, indent)
+
+	case *ast.RepeatStmt:
+		from := c.compileExpr(s.From, sc)
+		to := c.compileExpr(s.To, sc)
+		body := c.compileStmts(s.Body, sc, indent+"    ")
+		return fmt.Sprintf("%sfor (let _i = %s; _i < %s; _i++) {\n%s%s}\n",
+			indent, from, to, body, indent)
+
+	case *ast.ForInStmt:
+		return c.compileForIn(s, sc, indent)
+
+	case *ast.WhenStmt:
+		return c.compileWhen(s, sc, indent)
+
+	case *ast.ChooseStmt:
+		return fmt.Sprintf("%s_choose(%s);\n", indent, jsStr(s.Prompt))
+
+	case *ast.CallStmt:
+		expr := c.compileExpr(s.Call, sc)
+		line := fmt.Sprintf("%s%s;", indent, expr)
+		return c.withGuard(line, s.Guard, sc, indent) + "\n"
+
+	case *ast.BareCallStmt:
+		expr := c.compileExpr(s.Expr, sc)
+		return fmt.Sprintf("%s%s;\n", indent, expr)
+
+	case *ast.BareCallWithBodyStmt:
+		expr := c.compileExpr(s.Expr, sc)
+		return fmt.Sprintf("%s%s;\n", indent, expr)
+	}
+	return ""
+}
+
+func (c *cg) compileIf(s *ast.IfStmt, sc *scope, indent string) string {
+	cond := c.compileExpr(s.Cond, sc)
+	if s.Unless {
+		cond = "!(" + cond + ")"
+	}
+	body := c.compileStmts(s.Body, sc, indent+"    ")
+	var b strings.Builder
+	fmt.Fprintf(&b, "%sif (%s) {\n%s%s}", indent, cond, body, indent)
+	for _, elif := range s.ElseIf {
+		elifCond := c.compileExpr(elif.Cond, sc)
+		if elif.Unless {
+			elifCond = "!(" + elifCond + ")"
+		}
+		elifBody := c.compileStmts(elif.Body, sc, indent+"    ")
+		fmt.Fprintf(&b, " else if (%s) {\n%s%s}", elifCond, elifBody, indent)
+	}
+	if len(s.Else) > 0 {
+		elseBody := c.compileStmts(s.Else, sc, indent+"    ")
+		fmt.Fprintf(&b, " else {\n%s%s}", elseBody, indent)
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+func (c *cg) compileForIn(s *ast.ForInStmt, sc *scope, indent string) string {
+	coll := c.compileExpr(s.Collection, sc)
+	if s.Value == "" {
+		inner := sc.extend(s.Key)
+		body := c.compileStmts(s.Body, inner, indent+"    ")
+		return fmt.Sprintf("%sfor (const %s of _children(%s)) {\n%s%s}\n",
+			indent, s.Key, coll, body, indent)
+	}
+	inner := sc.extend(s.Key).extend(s.Value)
+	body := c.compileStmts(s.Body, inner, indent+"    ")
+	return fmt.Sprintf("%sfor (const [%s, %s] of _entries(%s)) {\n%s%s}\n",
+		indent, s.Key, s.Value, coll, body, indent)
+}
+
+func (c *cg) compileWhen(s *ast.WhenStmt, sc *scope, indent string) string {
+	expr := c.compileExpr(s.Expr, sc)
+	var b strings.Builder
+	fmt.Fprintf(&b, "%sswitch (%s) {\n", indent, expr)
+	for _, arm := range s.Arms {
+		if arm.Label == "default" {
+			fmt.Fprintf(&b, "%s  default: {\n", indent)
+		} else if arm.Quoted {
+			fmt.Fprintf(&b, "%s  case %s: {\n", indent, jsStr(arm.Label))
+		} else {
+			fmt.Fprintf(&b, "%s  case %s: {\n", indent, jsStr(arm.Label))
+		}
+		b.WriteString(c.compileStmts(arm.Body, sc, indent+"      "))
+		fmt.Fprintf(&b, "%s    break;\n%s  }\n", indent, indent)
+	}
+	fmt.Fprintf(&b, "%s}\n", indent)
+	return b.String()
+}
+
+// compileAssign emits the JS for an assignment or compound-assignment to a
+// target expression. op is "=", "+=", "-=", or "is" (kind assignment).
+func (c *cg) compileAssign(target ast.Expr, op, rhs string, sc *scope, indent string) string {
+	switch t := target.(type) {
+	case *ast.NameExpr:
+		name := t.Name
+		if sc.vars[name] {
+			jsOp := op
+			if op == "is" {
+				jsOp = "="
 			}
-			// M4: non-literal (interpolated) say expressions
-		// M3+: assign, if, for, fail, succeed, call, parent, …
+			return fmt.Sprintf("%s%s %s %s;", indent, name, jsOp, rhs)
+		}
+		if sc.clsProps[name] && sc.selfName != "" {
+			switch op {
+			case "=", "is":
+				return fmt.Sprintf("%s_setProp(%s, %s, %s);", indent, sc.selfName, jsStr(name), rhs)
+			case "+=":
+				return fmt.Sprintf("%s_setProp(%s, %s, _prop(%s, %s) + %s);", indent, sc.selfName, jsStr(name), sc.selfName, jsStr(name), rhs)
+			case "-=":
+				return fmt.Sprintf("%s_setProp(%s, %s, _prop(%s, %s) - %s);", indent, sc.selfName, jsStr(name), sc.selfName, jsStr(name), rhs)
+			}
+		}
+		switch op {
+		case "=", "is":
+			return fmt.Sprintf("%s_set(%s, %s);", indent, jsStr(name), rhs)
+		case "+=":
+			return fmt.Sprintf("%s_set(%s, _get(%s) + %s);", indent, jsStr(name), jsStr(name), rhs)
+		case "-=":
+			return fmt.Sprintf("%s_set(%s, _get(%s) - %s);", indent, jsStr(name), jsStr(name), rhs)
+		}
+	case *ast.PropertyAccess:
+		obj := c.compileExpr(t.Object, sc)
+		var key string
+		if t.KeyExpr != nil {
+			key = c.compileExpr(t.KeyExpr, sc)
+		} else {
+			key = jsStr(t.Key)
+		}
+		switch op {
+		case "=", "is":
+			return fmt.Sprintf("%s_setProp(%s, %s, %s);", indent, obj, key, rhs)
+		case "+=":
+			return fmt.Sprintf("%s_setProp(%s, %s, _prop(%s, %s) + %s);", indent, obj, key, obj, key, rhs)
+		case "-=":
+			return fmt.Sprintf("%s_setProp(%s, %s, _prop(%s, %s) - %s);", indent, obj, key, obj, key, rhs)
 		}
 	}
+	return fmt.Sprintf("%s/* unhandled assign */;", indent)
+}
+
+// withGuard wraps a single-line JS statement with a postfix if/unless guard.
+// The statement already contains indent; the guard condition is inlined.
+func (c *cg) withGuard(line string, g *ast.Guard, sc *scope, indent string) string {
+	if g == nil {
+		return line
+	}
+	cond := c.compileExpr(g.Cond, sc)
+	if g.Unless {
+		return fmt.Sprintf("%sif (!(%s)) { %s }", indent, cond, strings.TrimLeft(line, " \t"))
+	}
+	return fmt.Sprintf("%sif (%s) { %s }", indent, cond, strings.TrimLeft(line, " \t"))
+}
+
+// ── Expression compilation ─────────────────────────────────────────────────
+
+func (c *cg) compileExpr(e ast.Expr, sc *scope) string {
+	switch e := e.(type) {
+	case *ast.NumberLit:
+		return strconv.Itoa(e.Value)
+	case *ast.StringLit:
+		return c.compileString(e.Value, sc)
+	case *ast.UnsetExpr:
+		return "null"
+	case *ast.NameExpr:
+		return c.compileName(e.Name, sc)
+	case *ast.BinaryExpr:
+		return c.compileBinary(e, sc)
+	case *ast.UnaryExpr:
+		inner := c.compileExpr(e.Expr, sc)
+		if e.Op == "not" {
+			return "!(" + inner + ")"
+		}
+		return "-(" + inner + ")"
+	case *ast.PropertyAccess:
+		return c.compilePropAccess(e, sc)
+	case *ast.FuncCallExpr:
+		return c.compileFuncCallExpr(e, sc)
+	case *ast.FilterExpr:
+		return fmt.Sprintf("_filter(%s, %s)", c.compileExpr(e.Collection, sc), jsStr(e.ClassName))
+	case *ast.IsSetExpr:
+		inner := c.compileExpr(e.Expr, sc)
+		if e.Set {
+			return fmt.Sprintf("_isset(%s)", inner)
+		}
+		return fmt.Sprintf("(!_isset(%s))", inner)
+	case *ast.HandlerCallExpr:
+		return c.compileHandlerCallExpr(e, sc)
+	case *ast.ArrayLit:
+		items := make([]string, len(e.Items))
+		for i, item := range e.Items {
+			items[i] = c.compileExpr(item, sc)
+		}
+		return "[" + strings.Join(items, ", ") + "]"
+	}
+	return "undefined"
+}
+
+// compileName resolves a bare name to its JS representation.
+//
+//   - Handler params and loop vars → bare JS identifier
+//   - Class properties (when self is in scope) → _prop(self, key)
+//   - Known kind values → quoted string (kind values stored by name at runtime)
+//   - Known instance names → quoted string (node key in the world tree)
+//   - Anything else → _get(key) (world-level property lookup)
+func (c *cg) compileName(name string, sc *scope) string {
+	if sc.vars[name] {
+		return name
+	}
+	if sc.clsProps[name] && sc.selfName != "" {
+		return fmt.Sprintf("_prop(%s, %s)", sc.selfName, jsStr(name))
+	}
+	if _, isKind := c.kof[name]; isKind {
+		return jsStr(name)
+	}
+	if c.nod[name] {
+		return jsStr(name)
+	}
+	return "_get(" + jsStr(name) + ")"
+}
+
+func (c *cg) compileBinary(e *ast.BinaryExpr, sc *scope) string {
+	switch e.Op {
+	case "is":
+		return c.compileIs(e, sc)
+	case "isnt":
+		return "!(" + c.compileIs(&ast.BinaryExpr{Pos: e.Pos, Left: e.Left, Op: "is", Right: e.Right}, sc) + ")"
+	case "and":
+		return "(" + c.compileExpr(e.Left, sc) + " && " + c.compileExpr(e.Right, sc) + ")"
+	case "or":
+		return "(" + c.compileExpr(e.Left, sc) + " || " + c.compileExpr(e.Right, sc) + ")"
+	case "modulo":
+		return "((" + c.compileExpr(e.Left, sc) + ") % (" + c.compileExpr(e.Right, sc) + "))"
+	case "<", ">", "<=", ">=":
+		left := c.compileExpr(e.Left, sc)
+		right := c.compileExpr(e.Right, sc)
+		if c.isKindExpr(e.Left) || c.isKindExpr(e.Right) {
+			return fmt.Sprintf("(_kindOrd(%s) %s _kindOrd(%s))", left, e.Op, right)
+		}
+		return fmt.Sprintf("((%s) %s (%s))", left, e.Op, right)
+	default: // ==, +, -, *, /
+		return fmt.Sprintf("((%s) %s (%s))", c.compileExpr(e.Left, sc), e.Op, c.compileExpr(e.Right, sc))
+	}
+}
+
+// compileIs handles the `is` operator.
+//
+//   - "peter is sad"        → _prop(peter, "mood") === "sad"
+//   - "lamp is lit"         → _prop(lamp, "light") === "lit"
+//   - "peter.mood is sad"   → _prop(peter,"mood") === "sad"  (left already a prop access)
+//   - "x is Robot"          → _instanceof(x, "Robot")
+//   - "x is location"       → x === "location" (instance ref comparison)
+func (c *cg) compileIs(e *ast.BinaryExpr, sc *scope) string {
+	right, isName := e.Right.(*ast.NameExpr)
+	if !isName {
+		return fmt.Sprintf("(%s === %s)", c.compileExpr(e.Left, sc), c.compileExpr(e.Right, sc))
+	}
+
+	// Class instanceof check
+	if len(right.Name) > 0 && right.Name[0] >= 'A' && right.Name[0] <= 'Z' {
+		return fmt.Sprintf("_instanceof(%s, %s)", c.compileExpr(e.Left, sc), jsStr(right.Name))
+	}
+
+	// Kind value: "peter is sad" — left must be a node ref so we look up the kind prop
+	if kindName, ok := c.kof[right.Name]; ok {
+		left := c.compileExpr(e.Left, sc)
+		if _, leftIsName := e.Left.(*ast.NameExpr); leftIsName {
+			// bare node ref → look up kind property on it
+			return fmt.Sprintf("(_prop(%s, %s) === %s)", left, jsStr(kindName), jsStr(right.Name))
+		}
+		// left is already a prop access or computed value
+		return fmt.Sprintf("(%s === %s)", left, jsStr(right.Name))
+	}
+
+	// Boolean literals
+	if right.Name == "true" || right.Name == "false" {
+		return fmt.Sprintf("(%s === %s)", c.compileExpr(e.Left, sc), right.Name)
+	}
+
+	// General equality (instance ref or world property comparison)
+	return fmt.Sprintf("(%s === %s)", c.compileExpr(e.Left, sc), c.compileExpr(e.Right, sc))
+}
+
+// isKindExpr reports whether an expression statically resolves to a kind value.
+func (c *cg) isKindExpr(e ast.Expr) bool {
+	name, ok := e.(*ast.NameExpr)
+	if !ok {
+		return false
+	}
+	_, isKind := c.kof[name.Name]
+	return isKind
+}
+
+func (c *cg) compilePropAccess(e *ast.PropertyAccess, sc *scope) string {
+	obj := c.compileExpr(e.Object, sc)
+	if e.KeyExpr != nil {
+		key := c.compileExpr(e.KeyExpr, sc)
+		return fmt.Sprintf("_prop(%s, %s)", obj, key)
+	}
+	switch e.Key {
+	case "length":
+		return fmt.Sprintf("_length(%s)", obj)
+	case "class":
+		return fmt.Sprintf("_class(%s)", obj)
+	case "name":
+		return fmt.Sprintf("_name(%s)", obj)
+	}
+	return fmt.Sprintf("_prop(%s, %s)", obj, jsStr(e.Key))
+}
+
+func (c *cg) compileFuncCallExpr(e *ast.FuncCallExpr, sc *scope) string {
+	args := make([]string, len(e.Args))
+	for i, a := range e.Args {
+		args[i] = c.compileExpr(a, sc)
+	}
+	joined := strings.Join(args, ", ")
+	switch e.Name {
+	case "floor":
+		return "Math.floor(" + joined + ")"
+	case "ceiling":
+		return "Math.ceil(" + joined + ")"
+	case "round":
+		return "Math.round(" + joined + ")"
+	case "absolute":
+		return "Math.abs(" + joined + ")"
+	case "biggest":
+		return "Math.max(" + joined + ")"
+	case "smallest":
+		return "Math.min(" + joined + ")"
+	case "random":
+		return "_random(" + joined + ")"
+	case "seed":
+		return "_seed(" + joined + ")"
+	}
+	return "_fn_" + e.Name + "(" + joined + ")"
+}
+
+// compileHandlerCallExpr emits a _call("sigKey", ...args) for an inline {call}.
+// The sigKey is assembled from the word parts; argument expressions are emitted
+// in order. The runtime resolves the sigKey against the handler table.
+func (c *cg) compileHandlerCallExpr(e *ast.HandlerCallExpr, sc *scope) string {
+	var words []string
+	var argExprs []string
+	for _, part := range e.Parts {
+		switch p := part.(type) {
+		case ast.HandlerCallWord:
+			words = append(words, p.Word)
+		case ast.HandlerCallArg:
+			argExprs = append(argExprs, c.compileExpr(p.Expr, sc))
+			words = append(words, "_")
+		}
+	}
+	sigKey := strings.Join(words, " ")
+	fn := "_call"
+	if e.Silently {
+		fn = "_callS"
+	}
+	if len(argExprs) > 0 {
+		return fmt.Sprintf("%s(%s, %s)", fn, jsStr(sigKey), strings.Join(argExprs, ", "))
+	}
+	return fmt.Sprintf("%s(%s)", fn, jsStr(sigKey))
+}
+
+// ── String interpolation ───────────────────────────────────────────────────
+
+// tmplSeg is one segment of an interpolated string — either literal text or
+// a {expression} slot.
+type tmplSeg struct {
+	text string // non-empty for a literal text segment
+	expr string // non-empty for an expression segment (raw Grue source)
+}
+
+// splitInterp splits a raw Grue string value into alternating text and
+// expression segments. Brace depth is tracked so nested {obj.{key}} works.
+func splitInterp(s string) []tmplSeg {
+	var segs []tmplSeg
+	var buf strings.Builder
+	i := 0
+	for i < len(s) {
+		if s[i] == '{' {
+			if buf.Len() > 0 {
+				segs = append(segs, tmplSeg{text: buf.String()})
+				buf.Reset()
+			}
+			depth, j := 1, i+1
+			for j < len(s) && depth > 0 {
+				if s[j] == '{' {
+					depth++
+				} else if s[j] == '}' {
+					depth--
+				}
+				j++
+			}
+			segs = append(segs, tmplSeg{expr: s[i+1 : j-1]})
+			i = j
+		} else {
+			buf.WriteByte(s[i])
+			i++
+		}
+	}
+	if buf.Len() > 0 {
+		segs = append(segs, tmplSeg{text: buf.String()})
+	}
+	return segs
+}
+
+// escapeTmpl escapes characters that are special inside a JS template literal.
+func escapeTmpl(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, "`", "\\`")
+	s = strings.ReplaceAll(s, "${", "\\${")
+	return s
+}
+
+// compileString converts a raw Grue string value (which may contain
+// {expression} interpolation slots) into a JS expression — either a plain
+// quoted string when there are no slots, or a template literal.
+func (c *cg) compileString(raw string, sc *scope) string {
+	segs := splitInterp(raw)
+
+	// Fast path: no interpolation → plain JS string literal.
+	hasExpr := false
+	for _, seg := range segs {
+		if seg.expr != "" {
+			hasExpr = true
+			break
+		}
+	}
+	if !hasExpr {
+		return jsStr(raw)
+	}
+
+	var b strings.Builder
+	b.WriteRune('`')
+	for _, seg := range segs {
+		if seg.text != "" {
+			b.WriteString(escapeTmpl(seg.text))
+		} else {
+			expr, err := parser.ParseExpr(seg.expr)
+			if err != nil {
+				// Emit a visible placeholder so the author sees the failure.
+				fmt.Fprintf(&b, "${/* parse error: %s */\"\"}", seg.expr)
+				continue
+			}
+			b.WriteString("${_str(")
+			b.WriteString(c.compileExpr(expr, sc))
+			b.WriteString(")}")
+		}
+	}
+	b.WriteRune('`')
 	return b.String()
 }
 
