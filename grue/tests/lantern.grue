@@ -1,6 +1,8 @@
-# lantern — minimal smoke test for M2 (input loop, look, examine)
+# lantern — smoke test for M3 (library loading, standard actions)
 
 "Passing the Brass Lantern" by Bernd Eickhoff
+
+library "standard"
 
 Room kitchen "The kitchen smells of burnt coffee. A brass lantern sits on the table."
     north: hallway
@@ -10,10 +12,10 @@ Room kitchen "The kitchen smells of burnt coffee. A brass lantern sits on the ta
 Room hallway "A narrow hallway leading south to the kitchen."
     south: kitchen
 
-on examine Object:thing:
-    say "You see nothing special."
-
 test
     look. "You look around"
     examine brass lantern. "nothing special"
     examine lamp. "nothing special"
+    take brass lantern. "Taken"
+    drop brass lantern. "Dropped"
+    inventory. "carrying nothing"

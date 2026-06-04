@@ -58,9 +58,11 @@ func HTML(w *world.World, g *grammar.Grammar) string {
 </head>
 <body>
 <div id="output"></div>
+<div id="tree" style="display:none"></div>
 <div id="input-area">
   <input id="cmd" type="text" autofocus>
   <button id="go">Go</button>
+  <button id="tree-btn">Tree</button>
 </div>
 <script>
 %s</script>

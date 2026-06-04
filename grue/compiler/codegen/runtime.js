@@ -9,6 +9,7 @@
 const GrueRuntime = (function () {
 
   let _out;
+  let _tree;
   let _game;
   let _location; // canonical name of the room the player is currently in
 
@@ -55,14 +56,17 @@ const GrueRuntime = (function () {
         ? { value: tokens[pos], consumed: 1 } : null;
     }
     // Object or class name — greedy multi-word vocab lookup.
+    // Type comparison is case-insensitive: the library uses lowercase "object"
+    // but class names in the descriptor are capitalised ("Object", "Room", …).
     const vocab = _game.vocab || {};
     const nodes = _game.nodes || {};
+    const typeLower = type.toLowerCase();
     for (let len = tokens.length - pos; len >= 1; len--) {
       const phrase = tokens.slice(pos, pos + len).join(" ");
       const canonical = vocab[phrase];
       if (canonical) {
         const node = nodes[canonical];
-        if (node && (type === "Object" || node.class === type)) {
+        if (node && (typeLower === "object" || node.class.toLowerCase() === typeLower)) {
           return { value: canonical, consumed: len };
         }
       }
@@ -76,13 +80,11 @@ const GrueRuntime = (function () {
     if (pos === tokens.length) {
       return node.sigKey ? { sigKey: node.sigKey, args } : null;
     }
-    // Keyword edge
     const word = tokens[pos];
     if (node.keywords && node.keywords[word]) {
       const r = walkTrie(node.keywords[word], tokens, pos + 1, args);
       if (r) return r;
     }
-    // Param edges
     for (const edge of (node.params || [])) {
       const m = matchParam(edge.type, tokens, pos);
       if (m) {
@@ -101,16 +103,11 @@ const GrueRuntime = (function () {
 
   // ── Dispatch ─────────────────────────────────────────────────────────────────
 
-  // describeLocation prints the current room's description.
-  // Used by the built-in look fallback and on room entry (M3).
   function describeLocation() {
     const room = _game.nodes && _game.nodes[_location];
     if (room && room.desc) say(room.desc);
   }
 
-  // dispatch fires the handler chain for sigKey with the resolved args.
-  // In M2, all handlers in the chain fire unconditionally.
-  // Scope filtering (room-local, class-specific) is added in M3+.
   function dispatch(sigKey, args) {
     const chain = (_game.handlers || {})[sigKey];
     if (!chain || chain.length === 0) {
@@ -122,9 +119,6 @@ const GrueRuntime = (function () {
     }
   }
 
-  // _builtins are commands recognised by the runtime when the grammar trie
-  // has no entry for them — i.e. the game doesn't define an on-handler.
-  // A game-defined handler always takes precedence (grammar is checked first).
   const _builtins = {
     "look": () => describeLocation()
   };
@@ -135,19 +129,93 @@ const GrueRuntime = (function () {
     const input = raw.trim();
     if (!input) return;
     echo(input);
-
-    // Grammar-defined commands take priority.
     const parsed = parseInput(input);
-    if (parsed) {
-      dispatch(parsed.sigKey, parsed.args);
-      return;
-    }
-
-    // Fall back to built-in commands.
+    if (parsed) { dispatch(parsed.sigKey, parsed.args); return; }
     const key = tokenize(input).join(" ");
     if (_builtins[key]) { _builtins[key](); return; }
-
     say("You don't know how to do that.");
+  }
+
+  // ── Tree view ────────────────────────────────────────────────────────────────
+
+  function esc(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  // renderTree rebuilds the tree panel from current runtime state.
+  // In later milestones this will reflect live property values and locations.
+  function renderTree() {
+    const nodes  = _game.nodes   || {};
+    const handlers = _game.handlers || {};
+    const meta   = _game.meta    || {};
+
+    // Group handler sigKeys by owner for display alongside each node.
+    const ownerHandlers = {};
+    for (const [sigKey, chain] of Object.entries(handlers)) {
+      for (const h of chain) {
+        const owner = h.owner || "__global__";
+        if (!ownerHandlers[owner]) ownerHandlers[owner] = [];
+        ownerHandlers[owner].push(sigKey);
+      }
+    }
+
+    let html = `<style>
+      #tree { font-family: monospace; font-size: 13px; padding: 0.5em 1em; }
+      #tree table { border-collapse: collapse; width: 100%; }
+      #tree td { padding: 2px 10px 2px 0; vertical-align: top; }
+      #tree .cls  { color: #06c; }
+      #tree .loc  { color: #080; font-size: 0.9em; }
+      #tree .desc { color: #888; font-style: italic; }
+      #tree .sig  { color: #080; font-size: 0.85em; display: inline-block; margin-right: 4px; }
+      #tree .isig { color: #a60; font-size: 0.85em; display: inline-block; margin-right: 4px; }
+      #tree .here { font-weight: bold; background: #ffe; }
+      #tree h3    { font-size: 1em; border-bottom: 1px solid #ccc; margin: 0.8em 0 0.3em; }
+    </style>`;
+
+    if (meta.title) {
+      html += `<p><b>"${esc(meta.title)}"</b> by ${esc(meta.author)}</p>`;
+    }
+
+    // Nodes
+    html += `<h3>World</h3><table>`;
+    for (const [name, node] of Object.entries(nodes)) {
+      const isHere = name === _location;
+      const rowClass = isHere ? " class='here'" : "";
+      const loc = node.location ? `<span class='loc'> &#8594; ${esc(node.location)}</span>` : "";
+      const desc = node.desc
+        ? `<span class='desc'>"${esc(node.desc.length > 50 ? node.desc.slice(0, 50) + "…" : node.desc)}"</span>`
+        : "";
+      const sigs = (ownerHandlers[name] || [])
+        .map(s => `<span class='sig'>${esc(s)}</span>`)
+        .join("");
+      html += `<tr${rowClass}>
+        <td class='cls'>${esc(node.class)}</td>
+        <td><b>${esc(name)}</b>${loc}</td>
+        <td>${desc}</td>
+        <td>${sigs}</td>
+      </tr>`;
+    }
+    html += `</table>`;
+
+    // Global handlers
+    const global = ownerHandlers["__global__"] || [];
+    if (global.length) {
+      html += `<h3>Global handlers</h3>`;
+      html += global.map(s => `<span class='sig'>${esc(s)}</span>`).join(" ");
+    }
+
+    // Vocab
+    const vocab = _game.vocab || {};
+    html += `<h3>Vocab</h3><p style="color:#888;font-size:0.9em">`;
+    html += Object.keys(vocab).sort().map(k =>
+      k === vocab[k] ? esc(k) : `${esc(k)} &#8594; ${esc(vocab[k])}`
+    ).join(" &nbsp;&bull;&nbsp; ");
+    html += `</p>`;
+
+    _tree.innerHTML = html;
   }
 
   // ── Public API ───────────────────────────────────────────────────────────────
@@ -156,9 +224,14 @@ const GrueRuntime = (function () {
     say,
 
     init(game) {
-      _game = game;
-      _out  = document.getElementById("output");
+      _game     = game;
+      _out      = document.getElementById("output");
+      _tree     = document.getElementById("tree");
       _location = game.start;
+
+      // Expose the game-facing API as globals so compiled handler functions
+      // can call say(...), and later fail(...), succeed(...), etc.
+      window.say = say;
 
       // Title block
       if (game.meta && game.meta.title) {
@@ -170,11 +243,13 @@ const GrueRuntime = (function () {
       // Starting room description
       describeLocation();
 
-      // Wire up the input box
-      const input = document.getElementById("cmd");
-      const go    = document.getElementById("go");
-      if (input && go) {
-        go.addEventListener("click", () => {
+      // Wire up the command input
+      const input   = document.getElementById("cmd");
+      const goBtn   = document.getElementById("go");
+      const treeBtn = document.getElementById("tree-btn");
+
+      if (input && goBtn) {
+        goBtn.addEventListener("click", () => {
           handleInput(input.value);
           input.value = "";
           input.focus();
@@ -184,6 +259,24 @@ const GrueRuntime = (function () {
             handleInput(input.value);
             input.value = "";
           }
+        });
+      }
+
+      // Tree toggle
+      if (treeBtn && _tree) {
+        treeBtn.addEventListener("click", () => {
+          const treeVisible = _tree.style.display !== "none";
+          if (treeVisible) {
+            _tree.style.display = "none";
+            _out.style.display  = "";
+            treeBtn.textContent = "Tree";
+          } else {
+            renderTree();
+            _tree.style.display = "";
+            _out.style.display  = "none";
+            treeBtn.textContent = "Game";
+          }
+          input && input.focus();
         });
       }
     }
