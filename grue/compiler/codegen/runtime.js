@@ -334,6 +334,46 @@ const GrueRuntime = (function () {
     "look": () => describeLocation(),
   };
 
+  // ── Turn synchronization ─────────────────────────────────────────────────────
+  //
+  // A turn is a transaction. It opens, all handlers run (synchronously or via
+  // async interface calls), and closes only when every handler has signalled
+  // completion. No timeouts are used for sequencing — only for genuine calls
+  // to the outside world (network, AI, etc.).
+  //
+  // Async interface handlers call _holdTurn() to keep the turn open and receive
+  // a release() function. They MUST call release() — on success or failure —
+  // so the turn always eventually closes:
+  //
+  //   const release = _holdTurn();
+  //   Promise.resolve(aiFunction(response, request)).then(release, release);
+
+  let _turnPending  = 0;
+  let _turnResolve  = null;
+
+  function _holdTurn() {
+    _turnPending++;
+    return function release() {
+      if (--_turnPending === 0 && _turnResolve) {
+        const r = _turnResolve;
+        _turnResolve = null;
+        r();
+      }
+    };
+  }
+
+  // executeTurn dispatches one player command and returns a Promise that
+  // resolves when all synchronous and asynchronous work for that turn is done.
+  // Pure-sync turns resolve immediately via Promise.resolve().
+  function executeTurn(input) {
+    _turnPending = 0;
+    _turnResolve = null;
+    if (input) handleInput(input);
+    // M8: fireEveryTurnHandlers(); fireTurnRangeHandlers();
+    if (_turnPending === 0) return Promise.resolve();
+    return new Promise(r => { _turnResolve = r; });
+  }
+
   // ── Turn loop ────────────────────────────────────────────────────────────────
 
   function handleInput(raw) {
@@ -820,7 +860,7 @@ const GrueRuntime = (function () {
     }
   }
 
-  function runTests() {
+  async function runTests() {
     const tests = _game.tests || {};
     if (!tests[""]) { say("No tests defined."); return; }
 
@@ -828,49 +868,37 @@ const GrueRuntime = (function () {
     const steps = [];
     _flattenTest("", tests, steps, new Set());
 
-    let idx = 0, passed = 0, failed = 0;
+    let passed = 0, failed = 0;
 
-    function nextStep() {
-      if (idx >= steps.length) {
-        const ok = failed === 0;
-        const el = document.createElement("p");
-        el.style.cssText = `font-weight:bold; color:${ok ? "#080" : "#c00"}`;
-        el.textContent = `${passed} passed, ${failed} failed`;
-        _out.appendChild(el);
-        return;
-      }
-      const step = steps[idx++];
-
+    for (const step of steps) {
       if (step._header) {
         const el = document.createElement("p");
         el.style.cssText = "color:#888; margin-top:1em";
         el.textContent = `-- test "${step._header}"`;
         _out.appendChild(el);
-        setTimeout(nextStep, 0);
-        return;
+        await new Promise(r => requestAnimationFrame(r));
+        continue;
       }
 
       if (step._teleport) {
         _location = step._teleport;
-        setTimeout(nextStep, 0);
-        return;
+        continue;
       }
 
-      // Run through the normal player turn path so echo, say, and (in M8)
-      // turn handlers all fire exactly as they would for a real player.
+      // Each step runs through the same turn machinery as a real player.
+      // executeTurn waits for all handlers — including async interface calls —
+      // to complete before the assertion is checked.
       const before = _out.children.length;
       if (step.exprFn) {
-        // {expr} assertion — evaluate the compiled expression and display it.
-        const result = step.exprFn();
         const el = document.createElement("p");
-        el.textContent = result;
+        el.textContent = step.exprFn();
         _out.appendChild(el);
       } else if (step.cmd) {
-        handleInput(step.cmd);
+        await executeTurn(step.cmd);
       }
-      // bare . (step.tick) fires turn handlers directly — wired in M8
+      // bare . (step.tick): await executeTurn() with no input — fires turn
+      // handlers only — wired in M8
 
-      // Collect text from elements added by this step to check the assertion.
       let outputText = "";
       for (let j = before; j < _out.children.length; j++) {
         outputText += " " + _out.children[j].textContent;
@@ -882,8 +910,7 @@ const GrueRuntime = (function () {
         const pass = step.negate ? !hit : hit;
         if (pass) passed++; else failed++;
         const el = document.createElement("div");
-        el.style.cssText =
-          `font-family:monospace; color:${pass ? "#080" : "#c00"}`;
+        el.style.cssText = `font-family:monospace; color:${pass ? "#080" : "#c00"}`;
         const sym = pass ? "OK" : "FAIL";
         const notStr = step.negate ? " not" : "";
         el.textContent = `${sym}${notStr} "${step.assert}"` +
@@ -891,10 +918,16 @@ const GrueRuntime = (function () {
         _out.appendChild(el);
       }
 
-      setTimeout(nextStep, 0);
+      // Yield to the browser renderer between steps — a legitimate outside-world
+      // call: we are asking the browser to paint before continuing.
+      await new Promise(r => requestAnimationFrame(r));
     }
 
-    nextStep();
+    const ok = failed === 0;
+    const el = document.createElement("p");
+    el.style.cssText = `font-weight:bold; color:${ok ? "#080" : "#c00"}`;
+    el.textContent = `${passed} passed, ${failed} failed`;
+    _out.appendChild(el);
   }
 
   // ── Public API ───────────────────────────────────────────────────────────────
@@ -923,17 +956,15 @@ const GrueRuntime = (function () {
       const treeBtn = document.getElementById("tree-btn");
 
       if (input && goBtn) {
-        goBtn.addEventListener("click", () => {
-          handleInput(input.value);
+        async function submit() {
+          const raw = input.value.trim();
+          if (!raw) return;
           input.value = "";
+          await executeTurn(raw);
           input.focus();
-        });
-        input.addEventListener("keydown", e => {
-          if (e.key === "Enter") {
-            handleInput(input.value);
-            input.value = "";
-          }
-        });
+        }
+        goBtn.addEventListener("click", submit);
+        input.addEventListener("keydown", e => { if (e.key === "Enter") submit(); });
       }
 
       const testsBtn = document.getElementById("tests-btn");
