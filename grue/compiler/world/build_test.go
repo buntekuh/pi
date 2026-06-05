@@ -107,15 +107,13 @@ class Rolodex extends Ledger
 	f := parseSource(t, src)
 	w := world.Build([]*ast.File{f}, nil)
 
-	if len(w.Classes) != 2 {
-		t.Fatalf("len(Classes) = %d, want 2", len(w.Classes))
-	}
+	// Classes includes built-in stubs; check that our two classes are present.
 	ledger, ok := w.ClassMap["Ledger"]
 	if !ok {
 		t.Fatal("ClassMap missing Ledger")
 	}
-	if ledger.Parent != "" {
-		t.Errorf("Ledger.Parent = %q, want empty", ledger.Parent)
+	if ledger.Parent != "Object" {
+		t.Errorf("Ledger.Parent = %q, want Object (implicit default)", ledger.Parent)
 	}
 	rolodex := w.ClassMap["Rolodex"]
 	if rolodex.Parent != "Ledger" {

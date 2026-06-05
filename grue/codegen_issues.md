@@ -164,3 +164,183 @@ if (node && (typeLower === "object" || _instanceof(canonical, type))) {
 - Any handler with a non-`Object` class parameter silently fails to match subclass instances
 - M8 (handler chain with class hierarchy) cannot be demonstrated without this fix
 - Needs to land before M9 (take/drop) since those handlers use `Item` typed parameters
+
+---
+
+## `for item in filter(Class):` wraps filter result in `_children()` — [codegen.go](compiler/codegen/codegen.go)
+
+`compileForIn` unconditionally wraps its collection in `R._children(...)`. For node names this is correct — `_children("kitchen")` returns the children of the kitchen node. But when the collection is a `FilterExpr` (e.g. `player.filter(Object)`), `_filter` already returns an array of node names and wrapping it in `_children` passes an array where a string is expected, silently returning nothing.
+
+```grue
+for item in player.filter(Object):   # broken — compiles to _children(_filter(...))
+    say "{item}"
+```
+
+compiles to:
+```js
+for (const item of R._children(R._filter("player", "Object"))) {  // wrong
+```
+
+should be:
+```js
+for (const item of R._filter("player", "Object")) {  // correct
+```
+
+The same problem affects `for key, value in X.filter(Class):` — `_entries` is called with an array instead of a node name.
+
+### Fix
+
+In `compileForIn`, detect `FilterExpr` collections and emit them directly without the `_children()` wrapper:
+
+```go
+if _, isFilter := s.Collection.(*ast.FilterExpr); isFilter {
+    return fmt.Sprintf("%sfor (const %s of %s) {\n%s%s}\n",
+        indent, s.Key, coll, body, indent)
+}
+```
+
+### Impact
+
+Every iterator test that uses `.filter()` in a `for` loop is silently broken. This includes `iterators.grue`, `library/standard.grue` (containment check), and any game that iterates inventory or room contents.
+
+The same applies to `for key, value in X.filter(Class):` — that path wraps the filter result in `_entries()` instead of `_children()`, with the same effect: an array is passed where a node name is expected, silently returning `[]`.
+
+---
+
+## `_filter()` passes array to `_instanceof` via O(n²) lookup — [runtime.js](compiler/codegen/runtime.js)
+
+`_filter` uses `Object.entries` but ignores the key in the destructuring (`[, n]`), then searches for the key by object identity:
+
+```js
+.filter(([, n]) => n.location === nameOrRef &&
+    _instanceof(nameOrRef === nameOrRef
+        ? Object.keys(nodes).find(k => nodes[k] === n)
+        : null, className))
+```
+
+`nameOrRef === nameOrRef` is a tautology (always true), so the conditional is dead code. The `Object.keys().find()` lookup correctly recovers the node name, but does so with an O(n) scan per node — O(n²) overall. The node name is already available as the first element of the `Object.entries` pair.
+
+### Fix
+
+Use `([name, n])` destructuring and pass `name` directly:
+
+```js
+function _filter(nameOrRef, className) {
+    const nodes = _game.nodes || {};
+    return Object.entries(nodes)
+        .filter(([name, n]) => n.location === nameOrRef && _instanceof(name, className))
+        .map(([name]) => name);
+}
+```
+
+---
+
+## `_call` does not return fail tokens — `when` arms on fail signals never fire — [runtime.js](compiler/codegen/runtime.js)
+
+`_call` captures the token from a `_SucceedSignal` but swallows `_FailSignal` silently, always returning `null` on failure:
+
+```js
+} catch (e) {
+    if (e instanceof _SucceedSignal) result = e.token;
+    else if (!(e instanceof _FailSignal)) throw e;
+}
+```
+
+`when` clauses that branch on named failure outcomes never match:
+
+```grue
+when {open ledger at page}:
+    out_of_bounds:              # never reached — _call returns null, not "out_of_bounds"
+        say "That page is out of bounds."
+    opened:
+        ...
+```
+
+`fail out_of_bounds` inside the handler throws `_FailSignal{token:"out_of_bounds"}`, which is caught and discarded. The `when` switch receives `null` and falls through every arm.
+
+### Tension with truthy/falsy use
+
+`_call` is also used in boolean context — `unless {has item silently}`. If fail tokens were returned, `unless "not_here"` would be `false` (truthy string), meaning the guard would not fire on failure. The two uses require different semantics:
+
+- `when {handler}:` needs the token regardless of fail/succeed
+- `unless {handler silently}` needs null for any failure
+
+### Fix options
+
+**Option A** — two call variants: `_call` (returns null on fail, token on succeed) for boolean context; `_callT` (returns token for both) used by compiled `when` expressions. The compiler emits `_callT` when the call is the switch expression of a `when`.
+
+**Option B** — return a result object `{ok, token}` from `_call` and update all call sites.
+
+Option A is the smaller change and keeps existing boolean uses working without modification.
+
+---
+
+## `on examine self:` at global scope produces malformed sigKey — [world/build.go](compiler/world/build.go) + [sema.go](compiler/sema/sema.go)
+
+`self` as a parameter type is valid inside class and instance bodies, where it resolves to the owning class name. At global scope there is no owning class, so `ownerClass` is `""` and `sigKey()` produces a key with an empty component — `"examine "` rather than `"examine Object"`.
+
+The handler is then registered under `"examine "` and the grammar trie also emits `sigKey: "examine "`. Neither the handler map nor the grammar can ever match a player command — the handler is permanently unreachable.
+
+Sema does not check that `self` is only used inside a class or instance body.
+
+### Fix
+
+Add a sema error: `self` as a parameter type is only valid inside a `class` or instance body. Emit `reserved_name` or a dedicated `self_outside_class` error at global scope.
+
+---
+
+## `compileIs` calls `_prop()` when left side is a kind value, not a node — [codegen.go](compiler/codegen/codegen.go)
+
+When the right side of `is` is a kind value, `compileIs` checks whether the left side is syntactically a bare `NameExpr`. If so, it wraps it in `R._prop(left, kindName)` on the assumption that the left side is a node reference. But the left side might itself be a kind value name, in which case `_prop()` is wrong.
+
+```grue
+kind mood: *happy, sad
+
+if happy is happy:   # compiles to R._prop("happy", "mood") === "happy"
+                     # _prop("happy", ...) returns null — the string "happy" is not a node
+```
+
+In practice this arises when a kind value is passed as an argument and then compared — less likely than comparing a node, but valid Grue.
+
+### Fix
+
+In `compileIs`, before wrapping in `_prop()`, check whether the left `NameExpr` is itself a kind value (present in `c.kof`). If so, compile it as a plain string literal comparison rather than a property lookup:
+
+```go
+if kindName, ok := c.kof[right.Name]; ok {
+    left := c.compileExpr(e.Left, sc)
+    if nameExpr, leftIsName := e.Left.(*ast.NameExpr); leftIsName {
+        if _, leftIsKind := c.kof[nameExpr.Name]; !leftIsKind && !sc.vars[nameExpr.Name] {
+            return fmt.Sprintf("(%s_prop(%s, %s) === %s)", rt, left, jsStr(kindName), jsStr(right.Name))
+        }
+    }
+    return fmt.Sprintf("(%s === %s)", left, jsStr(right.Name))
+}
+```
+
+---
+
+## Bare `.` tick steps in test runner are silently skipped — [runtime.js](compiler/codegen/runtime.js)
+
+A bare `.` in a test block compiles to `{ tick: true, assert: "...", negate: false }`. The test runner handles `step.exprFn` and `step.cmd` but has no branch for `step.tick` — it falls through with no `executeTurn` call, producing no output. Any assertion on a tick step always fails with `got: ""`.
+
+```grue
+test "execution"
+    press red button of Benson. "whirrs into action"
+    insert beep cube in Benson.
+    . "beeps happily"   ← tick: true — executeTurn never called, assertion always fails
+```
+
+The comment in the source already notes this as deferred to M17, but the missing `executeTurn("")` call means tick steps are completely inert even for the turn counter and any synchronous side effects.
+
+### Fix
+
+Add the missing branch in `runTests`:
+
+```js
+} else if (step.tick) {
+    await executeTurn("");
+}
+```
+
+This lands with M17 (every-turn handlers), but the call itself is one line.

@@ -1,6 +1,8 @@
 package grammar
 
 import (
+	"sort"
+
 	"gruc/ast"
 	"gruc/world"
 )
@@ -9,27 +11,52 @@ import (
 //
 // All public (non-internal) on-handlers across global scope, classes, and
 // instances are collected.  Handlers with the same SigKey are deduplicated —
-// the first occurrence in world-tree order (global → classes → instances,
-// depth-first) wins.  This matches the runtime dispatch priority order so
-// that the grammar trie reflects exactly what patterns players can type.
+// the first occurrence wins.  More-specific handlers are registered first so
+// that their param edges appear before less-specific ones in the trie:
+//
+//	instance handlers  (most specific)
+//	class handlers     (sorted deepest-first — subclasses before ancestors)
+//	global handlers    (least specific)
+//
+// This ensures matchParam tries the tightest-fitting type edge first.
 func Build(w *world.World) *Grammar {
 	g := &Grammar{Root: newTrieNode()}
 	seen := make(map[string]bool)
-
-	// Global handlers
-	addHandlers(g, w.Root.Handlers, seen)
-
-	// Class handlers (in declaration order)
-	for _, cls := range w.Classes {
-		addHandlers(g, cls.Handlers, seen)
-	}
 
 	// Instance handlers (world-tree order, depth-first)
 	for _, child := range w.Root.Children {
 		addNodeHandlers(g, child, seen)
 	}
 
+	// Class handlers sorted deepest-first so subclass param edges are tried
+	// before ancestor param edges (e.g. "Rolodex" before "Ledger" before "Object").
+	sorted := make([]*world.Class, len(w.Classes))
+	copy(sorted, w.Classes)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return classDepth(sorted[i].Name, w.ClassMap) > classDepth(sorted[j].Name, w.ClassMap)
+	})
+	for _, cls := range sorted {
+		addHandlers(g, cls.Handlers, seen)
+	}
+
+	// Global handlers last — most specific wins when param edges compete.
+	addHandlers(g, w.Root.Handlers, seen)
+
 	return g
+}
+
+// classDepth returns the number of hops from cls to the root of the hierarchy.
+func classDepth(name string, classMap map[string]*world.Class) int {
+	depth := 0
+	for name != "" {
+		cls, ok := classMap[name]
+		if !ok {
+			break
+		}
+		name = cls.Parent
+		depth++
+	}
+	return depth
 }
 
 // addNodeHandlers walks a Node subtree depth-first, inserting each node's

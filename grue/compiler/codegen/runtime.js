@@ -143,7 +143,7 @@ const GrueRuntime = (function () {
   function _filter(nameOrRef, className) {
     const nodes = _game.nodes || {};
     return Object.entries(nodes)
-      .filter(([, n]) => n.location === nameOrRef && _instanceof(nameOrRef === nameOrRef ? Object.keys(nodes).find(k => nodes[k] === n) : null, className))
+      .filter(([name, n]) => n.location === nameOrRef && _instanceof(name, className))
       .map(([name]) => name);
   }
 
@@ -184,16 +184,20 @@ const GrueRuntime = (function () {
   function _succeed(token) { throw new _SucceedSignal(token); }
   function _stop()         { /* TODO: disable input */ }
 
-  // _callDepth / _chainPos track which entry in the current chain is running,
-  // so _parent() can invoke the next one.
+  // _currentChain / _currentChainPos / _currentArgs / _currentRan track the
+  // in-progress dispatch so _parent() can invoke the next handler.
+  // _currentRan is a Set of chain indices already executed via _parent(), so
+  // the outer dispatch loop skips them and avoids double-firing.
   let _currentChain = null;
   let _currentChainPos = 0;
   let _currentArgs = null;
+  let _currentRan = null;
 
   function _parent() {
     if (!_currentChain) return;
     const next = _currentChainPos + 1;
     if (next >= _currentChain.length) return;
+    if (_currentRan) _currentRan.add(next);
     const saved = _currentChainPos;
     _currentChainPos = next;
     try {
@@ -213,9 +217,11 @@ const GrueRuntime = (function () {
     const savedChain = _currentChain;
     const savedPos   = _currentChainPos;
     const savedArgs  = _currentArgs;
+    const savedRan   = _currentRan;
     _currentChain    = chain;
     _currentChainPos = 0;
     _currentArgs     = args;
+    _currentRan      = new Set();
     let result = null;
     try {
       chain[0].fn(...args);
@@ -226,10 +232,40 @@ const GrueRuntime = (function () {
       _currentChain    = savedChain;
       _currentChainPos = savedPos;
       _currentArgs     = savedArgs;
+      _currentRan      = savedRan;
     }
     return result;
   }
   function _callS(sigKey, ...args) { return _call(sigKey, ...args); }
+
+  // _callT is like _call but returns the token for both _SucceedSignal and
+  // _FailSignal. Used when the call is the switch expression of a when statement,
+  // where arms need to match named failure outcomes as well as success tokens.
+  function _callT(sigKey, ...args) {
+    const chain = (_game.handlers || {})[sigKey];
+    if (!chain || chain.length === 0) return null;
+    const savedChain = _currentChain;
+    const savedPos   = _currentChainPos;
+    const savedArgs  = _currentArgs;
+    const savedRan   = _currentRan;
+    _currentChain    = chain;
+    _currentChainPos = 0;
+    _currentArgs     = args;
+    _currentRan      = new Set();
+    let result = null;
+    try {
+      chain[0].fn(...args);
+    } catch (e) {
+      if (e instanceof _SucceedSignal || e instanceof _FailSignal) result = e.token;
+      else throw e;
+    } finally {
+      _currentChain    = savedChain;
+      _currentChainPos = savedPos;
+      _currentArgs     = savedArgs;
+      _currentRan      = savedRan;
+    }
+    return result;
+  }
 
   // ── RNG ──────────────────────────────────────────────────────────────────────
 
@@ -257,17 +293,13 @@ const GrueRuntime = (function () {
       return tokens[pos] !== undefined
         ? { value: tokens[pos], consumed: 1 } : null;
     }
-    const vocab    = _game.vocab || {};
-    const nodes    = _game.nodes || {};
-    const typeLower = type.toLowerCase();
+    const vocab = _game.vocab || {};
+    const nodes = _game.nodes || {};
     for (let len = tokens.length - pos; len >= 1; len--) {
       const phrase    = tokens.slice(pos, pos + len).join(" ");
       const canonical = vocab[phrase];
-      if (canonical) {
-        const node = nodes[canonical];
-        if (node && (typeLower === "object" || node.class.toLowerCase() === typeLower)) {
-          return { value: canonical, consumed: len };
-        }
+      if (canonical && nodes[canonical] && _instanceof(canonical, type)) {
+        return { value: canonical, consumed: len };
       }
     }
     return null;
@@ -314,9 +346,12 @@ const GrueRuntime = (function () {
     const savedChain = _currentChain;
     const savedPos   = _currentChainPos;
     const savedArgs  = _currentArgs;
+    const savedRan   = _currentRan;
     _currentChain    = chain;
     _currentArgs     = args;
+    _currentRan      = new Set();
     for (let i = 0; i < chain.length; i++) {
+      if (_currentRan.has(i)) continue;
       _currentChainPos = i;
       try {
         chain[i].fn(...args);
@@ -328,6 +363,7 @@ const GrueRuntime = (function () {
     _currentChain    = savedChain;
     _currentChainPos = savedPos;
     _currentArgs     = savedArgs;
+    _currentRan      = savedRan;
   }
 
   const _builtins = {
@@ -942,7 +978,7 @@ const GrueRuntime = (function () {
     _kindOrd, _isset, _length, _class, _name, _instanceof,
     _filter, _children, _entries,
     _fail, _succeed, _parent, _stop,
-    _call, _callS, _holdTurn,
+    _call, _callS, _callT, _holdTurn,
     _random, _seed,
 
     init(game) {

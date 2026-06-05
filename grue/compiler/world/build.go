@@ -12,6 +12,28 @@ var builtinKindValues = map[string]string{
 	"running": "game_state", "won": "game_state", "lost": "game_state", "ended": "game_state",
 }
 
+// builtinClassHierarchy defines the built-in class tree. These stubs are
+// injected before author-declared classes so that _instanceof can walk the
+// full hierarchy at runtime, and the codegen can build correct inheritance
+// chains for subclasses of built-in types.
+// Emitted with isLibrary:true so the tree inspector hides them from the own-classes list.
+var builtinClassHierarchy = []struct{ Name, Parent string }{
+	{"Object", ""},
+	{"Room", "Object"},
+	{"Door", "Room"},
+	{"Item", "Object"},
+	{"Container", "Item"},
+	{"Supporter", "Item"},
+	{"Scenery", "Object"},
+	{"Person", "Object"},
+	{"Man", "Person"},
+	{"Woman", "Person"},
+	{"Animal", "Object"},
+	{"Player", "Object"},
+	{"Array", "Object"},
+	{"Font", "Object"},
+}
+
 // Build constructs the world tree IR from validated AST files.
 //
 // ownFiles are the game's own source files (main file plus any includes).
@@ -35,6 +57,7 @@ func Build(ownFiles, libFiles []*ast.File) *World {
 
 	b.w.Root = &Node{Name: "world", ClassName: "World"}
 
+	b.pass0Builtins()
 	b.pass1Kinds(ownFiles)
 	b.pass1Kinds(libFiles)
 	b.pass2Classes(ownFiles, false)
@@ -52,6 +75,22 @@ func Build(ownFiles, libFiles []*ast.File) *World {
 type builder struct {
 	w      *World
 	kindOf map[string]string // kind value name → kind name; "true"/"false" excluded
+}
+
+// =============================================================================
+// Pass 0 — inject built-in class stubs
+// =============================================================================
+
+// pass0Builtins pre-populates ClassMap and Classes with stub entries for the
+// built-in class hierarchy. The stubs carry no handlers or props — they exist
+// solely so that _instanceof can walk the full parent chain at runtime, and
+// so the codegen can resolve parent sigKeys across built-in class boundaries.
+func (b *builder) pass0Builtins() {
+	for _, bc := range builtinClassHierarchy {
+		cls := &Class{Name: bc.Name, Parent: bc.Parent, IsLibrary: true}
+		b.w.Classes = append(b.w.Classes, cls)
+		b.w.ClassMap[bc.Name] = cls
+	}
 }
 
 // =============================================================================
@@ -118,9 +157,13 @@ func (b *builder) pass2Classes(files []*ast.File, isLibrary bool) {
 }
 
 func (b *builder) buildClass(cd *ast.ClassDecl, isLibrary bool) *Class {
+	parent := cd.Parent
+	if parent == "" {
+		parent = "Object" // implicit default parent for all user-declared classes
+	}
 	cls := &Class{
 		Name:      cd.Name,
-		Parent:    cd.Parent,
+		Parent:    parent,
 		IsLibrary: isLibrary,
 	}
 	for _, bodyDecl := range cd.Body {

@@ -757,3 +757,229 @@ on look:
 		t.Errorf("for-loop index should have type 'number' in handler call sigKey:\n%s", out)
 	}
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bug fix: for/in filter — filter result must not be wrapped in _children
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestForInFilterIteratesDirectly(t *testing.T) {
+	// for item in X.filter(Class) must iterate the filter result directly.
+	// Previously compiled to _children(R._filter(...)), passing an array where
+	// a node name is expected — _children silently returned nothing.
+	out := emit(t, `
+Room kitchen "The kitchen."
+    Object bowl "A bowl."
+    Object cup "A cup."
+
+on list:
+    for item in kitchen.filter(Object):
+        say "{item}"
+`)
+	if strings.Contains(out, `_children(R._filter(`) {
+		t.Errorf("filter result must not be wrapped in _children:\n%s", out)
+	}
+	if !strings.Contains(out, `R._filter("kitchen", "Object")`) {
+		t.Errorf("expected direct R._filter call in output:\n%s", out)
+	}
+}
+
+func TestForInPlainCollectionUsesChildren(t *testing.T) {
+	// A plain node reference (no filter) must still use _children — regression guard.
+	out := emit(t, `
+Room kitchen "The kitchen."
+    Object bowl "A bowl."
+
+on list:
+    for item in kitchen:
+        say "{item}"
+`)
+	if !strings.Contains(out, `R._children("kitchen")`) {
+		t.Errorf("plain for/in over a node should use R._children:\n%s", out)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bug fix: _filter runtime — tautological condition and O(n²) reverse lookup
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestRuntimeFilterNoBogusLookup(t *testing.T) {
+	// _filter previously had a tautological `nameOrRef === nameOrRef` guard
+	// (always true) and recovered the node name via an O(n) Object.keys().find()
+	// scan even though the name was already in the Object.entries destructuring.
+	if strings.Contains(codegen.RuntimeJS, "nameOrRef === nameOrRef") {
+		t.Error("_filter still contains tautological nameOrRef === nameOrRef condition")
+	}
+	if strings.Contains(codegen.RuntimeJS, "Object.keys(nodes).find(") {
+		t.Error("_filter still uses O(n²) Object.keys().find() reverse lookup")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bug fix: when handler call uses _callT so fail tokens are returned
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestWhenHandlerCallUsesCallT(t *testing.T) {
+	// when {handler}: must use R._callT, which returns the token for both
+	// _SucceedSignal and _FailSignal. Plain R._call drops _FailSignal and
+	// returns null, so named failure arms in a when block never fire.
+	out := emit(t, `
+internal check Object:thing:
+    fail not_here
+
+on examine Object:thing:
+    when {check thing}:
+        not_here:
+            say "Not here."
+`)
+	if !strings.Contains(out, `R._callT(`) {
+		t.Errorf("when-switch expression should use R._callT:\n%s", out)
+	}
+	if strings.Contains(out, `switch (R._call(`) {
+		t.Errorf("when-switch expression must not use plain R._call:\n%s", out)
+	}
+}
+
+func TestHandlerCallOutsideWhenUsesCall(t *testing.T) {
+	// Handler calls outside a when expression must use plain R._call (or R._callS),
+	// preserving the null-on-fail behaviour relied on in boolean guard contexts.
+	out := emit(t, `
+internal has Object:thing:
+    succeed yes
+
+on take Object:item:
+    say "No." unless {has item silently}
+    say "Taken."
+`)
+	if strings.Contains(out, `R._callT(`) {
+		t.Errorf("handler call outside when must not use R._callT:\n%s", out)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// M5 — Classes, built-in hierarchy, inheritance chains
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestBuiltinClassStubsEmitted(t *testing.T) {
+	// Built-in class stubs (Object, Room, Person, …) must appear in the
+	// descriptor's classes map with isLibrary: true so the runtime
+	// _instanceof walk spans the full hierarchy.
+	out := emit(t, `Room kitchen "The kitchen."`)
+	for _, name := range []string{"Object", "Room", "Item", "Person", "Player"} {
+		if !strings.Contains(out, `"`+name+`"`) {
+			t.Errorf("built-in class %q missing from classes descriptor:\n%s", name, out)
+		}
+	}
+	if !strings.Contains(out, "isLibrary: true") {
+		t.Errorf("built-in classes should have isLibrary: true:\n%s", out)
+	}
+}
+
+func TestUserClassDefaultParentIsObject(t *testing.T) {
+	// A user-declared class with no explicit parent should get parent: "Object"
+	// so it participates in the _instanceof hierarchy.
+	out := emit(t, `
+class Chest
+    on open self:
+        say "Creak!"
+`)
+	if !strings.Contains(out, `parent: "Object"`) {
+		t.Errorf("user class with no explicit parent should emit parent: \"Object\":\n%s", out)
+	}
+}
+
+func TestInheritanceChainParentHandlerInSubclassChain(t *testing.T) {
+	// When Rolodex extends Ledger and both have "on open self:" handlers, the
+	// compiled "open Rolodex" chain must contain BOTH handlers so _parent()
+	// from the Rolodex handler reaches the Ledger handler.
+	out := emit(t, `
+class Ledger
+    on open self:
+        say "You open the ledger."
+
+class Rolodex extends Ledger
+    on open self:
+        say "You flip through the rolodex."
+`)
+	// Scope to the "open Rolodex" chain array only.
+	chainKey := `"open Rolodex": [`
+	chainStart := strings.Index(out, chainKey)
+	if chainStart == -1 {
+		t.Fatal(`"open Rolodex" handler chain missing from output`)
+	}
+	chainStart += len(chainKey)
+	chainEnd := strings.Index(out[chainStart:], "],\n")
+	if chainEnd == -1 {
+		t.Fatal(`could not find end of "open Rolodex" chain`)
+	}
+	chain := out[chainStart : chainStart+chainEnd]
+
+	rolodexIdx := strings.Index(chain, `"Rolodex"`)
+	ledgerIdx  := strings.Index(chain, `"Ledger"`)
+	if rolodexIdx == -1 {
+		t.Error(`owner "Rolodex" missing from "open Rolodex" chain`)
+	}
+	if ledgerIdx == -1 {
+		t.Error(`owner "Ledger" missing from "open Rolodex" chain — parent handler not inherited`)
+	}
+	if rolodexIdx != -1 && ledgerIdx != -1 && rolodexIdx > ledgerIdx {
+		t.Error(`Rolodex handler should appear before Ledger handler in the "open Rolodex" chain`)
+	}
+}
+
+func TestInheritanceChainGlobalHandlerReachableViaParent(t *testing.T) {
+	// A global "examine Object" handler must appear in the "examine Chest" chain
+	// so that _parent() from a Chest-specific handler reaches the library fallback.
+	out := emit(t, `
+class Chest
+    on examine self:
+        say "A sturdy chest."
+
+on examine Object:thing:
+    say "Nothing special about {thing}."
+`)
+	chainKey := `"examine Chest": [`
+	chainStart := strings.Index(out, chainKey)
+	if chainStart == -1 {
+		t.Fatal(`"examine Chest" chain missing from output`)
+	}
+	chainStart += len(chainKey)
+	chainEnd := strings.Index(out[chainStart:], "],\n")
+	if chainEnd == -1 {
+		t.Fatal(`could not find end of "examine Chest" chain`)
+	}
+	chain := out[chainStart : chainStart+chainEnd]
+
+	// Global handlers are emitted with owner: null (empty owner string → null in JS).
+	if !strings.Contains(chain, `owner: null`) {
+		t.Error(`global handler (owner: null) missing from "examine Chest" chain — library fallback not inherited`)
+	}
+}
+
+func TestGrammarSubclassParamBeforeAncestorParam(t *testing.T) {
+	// Grammar trie must list a subclass param edge before its ancestor class
+	// param edge so matchParam tries the most-specific type first.
+	out := emit(t, `
+class Chest extends Container
+    on open self:
+        say "Creak!"
+
+on open Container:thing:
+    say "You open it."
+`)
+	// Within the params array under "open", "Chest" edge must appear before "Container".
+	openIdx := strings.Index(out, `"open"`)
+	if openIdx == -1 {
+		t.Fatal(`"open" keyword missing from grammar output`)
+	}
+	chestIdx     := strings.Index(out[openIdx:], `"Chest"`)
+	containerIdx := strings.Index(out[openIdx:], `"Container"`)
+	if chestIdx == -1 {
+		t.Error(`"Chest" param edge missing from grammar trie`)
+	}
+	if containerIdx == -1 {
+		t.Error(`"Container" param edge missing from grammar trie`)
+	}
+	if chestIdx != -1 && containerIdx != -1 && chestIdx > containerIdx {
+		t.Error(`"Chest" param edge should appear before "Container" param edge in grammar trie`)
+	}
+}

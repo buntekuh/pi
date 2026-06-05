@@ -5,11 +5,12 @@
 class Ledger
     Object log
     position: 0
+    max_pages: 20
     kind opened: *closed, open
 
     on open self at number:page:
-        say "That page doesn't exist." if page >= 10
-        fail out_of_bounds if page >= 10
+        say "That page doesn't exist." if page >= max_pages
+        fail out_of_bounds if page >= max_pages
         position = page
         opened = open
         say "Opened {self} at position {page}."
@@ -22,9 +23,19 @@ class Ledger
         say "Recorded."
         succeed stored
 
+    on examine self:
+        say "{self}: a ledger."
+        parent
+
 class Rolodex extends Ledger
+    max_pages: 10
+
     on open self at number:page:
         say "Clack. Clack. Clack."
+        parent
+
+    on examine self:
+        say "{self}: a rolodex specifically."
         parent
 
 class Notebook extends Ledger
@@ -35,14 +46,33 @@ class Notebook extends Ledger
         fail out_of_bounds if page >= max_pages
         parent
 
-Rolodex rolodex "A clackity index card rolodex."
-Notebook notebook "A brown leatherbound notebook."
+on examine Object:thing:
+    say "{thing}: just an object."
+
+on identify Object:thing:
+    say "is Rolodex" if thing is Rolodex
+    say "is Ledger" if thing is Ledger
+    say "is Object" if thing is Object
+
+on count ledgers:
+    var n
+    for item in stacks.filter(Ledger):
+        n + 1
+    say "{n} ledger(s)."
+
+Room stacks "A room full of filing cabinets."
+    Rolodex rolodex "A clackity index card rolodex."
+    Notebook notebook "A brown leatherbound notebook."
 
 test
+    test "record".
     test "basic class".
     test "inheritance".
     test "subclass limit".
-    test "record".
+    test "global fallback".
+    test "grammar routing".
+    test "instanceof subclass".
+    test "filter subclass".
 
 test "basic class"
     open rolodex at 3. "Opened rolodex at position 3."
@@ -59,3 +89,23 @@ test "record"
     record "Jason" in rolodex. "You haven't opened it yet."
     open rolodex at 0. "Opened"
     record "Jason" in rolodex. "Recorded."
+
+test "global fallback"
+    examine rolodex. "a rolodex specifically"
+    examine rolodex. "a ledger"
+    examine rolodex. "just an object"
+
+test "grammar routing"
+    examine rolodex. "a rolodex specifically"
+    examine notebook. "a ledger"
+    examine notebook. not "a rolodex specifically"
+
+test "instanceof subclass"
+    identify rolodex. "is Rolodex"
+    identify rolodex. "is Ledger"
+    identify rolodex. "is Object"
+    identify notebook. not "is Rolodex"
+    identify notebook. "is Ledger"
+
+test "filter subclass"
+    count ledgers. "2 ledger(s)."

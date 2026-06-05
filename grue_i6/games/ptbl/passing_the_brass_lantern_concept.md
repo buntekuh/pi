@@ -677,3 +677,24 @@ happened anyway.
   player out once window is open
 - `else if` chains for eliza, Floyd and Thorin random responses
 - Score: one point per room escaped, max score 10
+
+
+You've found the real problem. Without Medea's need, the Eliza scene is just mechanics — a chatbot in a room. The dramatic purpose has to come first, or the AI has nothing to push against.
+
+And the AI specification follows directly from the story. You can't write Eliza's role, language, what she reacts to, until you know what Medea brings into the room.
+
+The myth gives material but doesn't answer it. In the myth Medea comes to Crete because the Argonauts need water — practical, forgettable. But chapter 01 already made it something else. Eris drops a lantern. Medea tries to give it to Talos. He can't receive it.
+
+So she came with something to give. The question is what she's really looking for in return.
+
+Some possibilities — not answers, just doorways:
+
+She seeks confirmation. She made an irreversible choice leaving Colchis. She needs to know it meant something. Talos couldn't tell her. Can anything?
+
+She seeks absolution. She has already done things — for Jason, for the voyage — that she cannot undo. She wants someone to witness them without flinching.
+
+She seeks her own reflection. Not flattery. An honest mirror. She is surrounded by men who need things from her. She wants to be seen without being needed.
+
+She seeks to know if mind can exist in matter. She is a sorceress. She understands creation. Talos was created and is empty. Is that all creation ever produces?
+
+The lantern Eris left — in IF, that is always the thing you carry into the dark to understand where you are. What darkness is Medea trying to read?

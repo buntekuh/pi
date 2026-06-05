@@ -406,7 +406,82 @@ func (c *cg) buildHandlerChains() map[string][]handlerEntry {
 			add(h.SigKey, "", "", h)
 		}
 	}
+
+	// Inheritance: for each class handler, walk the parent hierarchy and append
+	// ancestor handlers to the subclass sigKey chain. This lets _parent() work
+	// across class boundaries without needing a separate runtime lookup.
+	//
+	// Parent sigKey is computed by replacing the child class name with the
+	// ancestor class name (word-by-word, so only whole-word occurrences match).
+	for _, cls := range c.w.Classes {
+		if len(cls.Handlers) == 0 {
+			continue
+		}
+		for _, h := range cls.Handlers {
+			c.appendAncestorHandlers(chains, h.SigKey, cls.Name, cls.Parent, add)
+		}
+	}
+
 	return chains
+}
+
+// appendAncestorHandlers walks up the class hierarchy from parentName and
+// appends ancestor handlers for the given subclass sigKey to chains.
+// childClass is the class whose sigKey is being extended; as we walk up,
+// we replace childClass with each successive ancestor name to derive the
+// ancestor's version of the sigKey.
+func (c *cg) appendAncestorHandlers(chains map[string][]handlerEntry, sigKey, childClass, parentName string, add func(string, string, string, *world.Handler)) {
+	// curSigKey is the rolling ancestor translation of sigKey.
+	// Each level substitutes the current class name with the parent class name
+	// in the running sigKey, so a 3-level chain like:
+	//   examine Rolodex → examine Ledger → examine Object
+	// is derived one step at a time rather than always substituting into the
+	// original sigKey (which would fail to find "Ledger" in "examine Rolodex").
+	curSigKey := sigKey
+	for parentName != "" {
+		pSigKey := replaceClassInSigKey(curSigKey, childClass, parentName)
+		if pSigKey == curSigKey {
+			break // class name not present in sigKey, nothing to substitute
+		}
+		// Add parent class handlers that match this ancestor sigKey.
+		if parentCls, ok := c.w.ClassMap[parentName]; ok {
+			for _, ph := range parentCls.Handlers {
+				if ph.SigKey == pSigKey {
+					add(sigKey, parentName, parentName, ph)
+				}
+			}
+		}
+		// Add global (root) handlers that match the ancestor sigKey — these are
+		// the library fallbacks (e.g., "examine Object" fires for any class's
+		// examine chain).
+		for _, gh := range c.w.Root.Handlers {
+			if gh.SigKey == pSigKey {
+				add(sigKey, "", "", gh)
+			}
+		}
+		// Advance: the next level will substitute parentName with grandParentName
+		// in the current ancestor sigKey.
+		grandParentName := ""
+		if parentCls, ok := c.w.ClassMap[parentName]; ok {
+			grandParentName = parentCls.Parent
+		}
+		curSigKey = pSigKey
+		childClass = parentName
+		parentName = grandParentName
+	}
+}
+
+// replaceClassInSigKey returns sigKey with every whole-word occurrence of
+// oldClass replaced by newClass. SigKeys are space-separated, so a word
+// boundary check is not needed beyond splitting on spaces.
+func replaceClassInSigKey(sigKey, oldClass, newClass string) string {
+	words := strings.Split(sigKey, " ")
+	for i, w := range words {
+		if w == oldClass {
+			words[i] = newClass
+		}
+	}
+	return strings.Join(words, " ")
 }
 
 // ── handler compilation ────────────────────────────────────────────────────
@@ -571,10 +646,15 @@ func (c *cg) compileIf(s *ast.IfStmt, sc *scope, indent string) string {
 }
 
 func (c *cg) compileForIn(s *ast.ForInStmt, sc *scope, indent string) string {
+	_, isFilter := s.Collection.(*ast.FilterExpr)
 	coll := c.compileExpr(s.Collection, sc)
 	if s.Value == "" {
 		inner := sc.extend(s.Key)
 		body := c.compileStmts(s.Body, inner, indent+"    ")
+		if isFilter {
+			return fmt.Sprintf("%sfor (const %s of %s) {\n%s%s}\n",
+				indent, s.Key, coll, body, indent)
+		}
 		return fmt.Sprintf("%sfor (const %s of %s_children(%s)) {\n%s%s}\n",
 			indent, s.Key, rt, coll, body, indent)
 	}
@@ -585,7 +665,12 @@ func (c *cg) compileForIn(s *ast.ForInStmt, sc *scope, indent string) string {
 }
 
 func (c *cg) compileWhen(s *ast.WhenStmt, sc *scope, indent string) string {
-	expr := c.compileExpr(s.Expr, sc)
+	var expr string
+	if hce, ok := s.Expr.(*ast.HandlerCallExpr); ok {
+		expr = c.compileHandlerCall(hce, sc, true)
+	} else {
+		expr = c.compileExpr(s.Expr, sc)
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%sswitch (%s) {\n", indent, expr)
 	for _, arm := range s.Arms {
@@ -779,7 +864,12 @@ func (c *cg) compileIs(e *ast.BinaryExpr, sc *scope) string {
 	// Kind value: "peter is sad" — left must be a node ref so we look up the kind prop
 	if kindName, ok := c.kof[right.Name]; ok {
 		left := c.compileExpr(e.Left, sc)
-		if _, leftIsName := e.Left.(*ast.NameExpr); leftIsName {
+		if leftName, leftIsName := e.Left.(*ast.NameExpr); leftIsName {
+			if sc.clsProps[leftName.Name] && sc.selfName != "" {
+				// left is a class property already compiled as R._prop(self,"propName")
+				// — it already holds the kind value, so compare directly
+				return fmt.Sprintf("(%s === %s)", left, jsStr(right.Name))
+			}
 			// bare node ref → look up kind property on it
 			return fmt.Sprintf("(%s_prop(%s, %s) === %s)", rt, left, jsStr(kindName), jsStr(right.Name))
 		}
@@ -854,6 +944,13 @@ func (c *cg) compileFuncCallExpr(e *ast.FuncCallExpr, sc *scope) string {
 // The sigKey is assembled from the word parts; argument expressions are emitted
 // in order. The runtime resolves the sigKey against the handler table.
 func (c *cg) compileHandlerCallExpr(e *ast.HandlerCallExpr, sc *scope) string {
+	return c.compileHandlerCall(e, sc, false)
+}
+
+// compileHandlerCall is the shared implementation. tokenCtx=true emits _callT,
+// which returns the token for both _SucceedSignal and _FailSignal — needed when
+// the call is the switch expression of a when statement.
+func (c *cg) compileHandlerCall(e *ast.HandlerCallExpr, sc *scope, tokenCtx bool) string {
 	var words []string
 	var argExprs []string
 	for _, part := range e.Parts {
@@ -888,9 +985,14 @@ func (c *cg) compileHandlerCallExpr(e *ast.HandlerCallExpr, sc *scope) string {
 		}
 	}
 	sigKey := strings.Join(words, " ")
-	fn := rt + "_call"
-	if e.Silently {
+	var fn string
+	switch {
+	case tokenCtx:
+		fn = rt + "_callT"
+	case e.Silently:
 		fn = rt + "_callS"
+	default:
+		fn = rt + "_call"
 	}
 	if len(argExprs) > 0 {
 		return fmt.Sprintf("%s(%s, %s)", fn, jsStr(sigKey), strings.Join(argExprs, ", "))
