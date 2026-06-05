@@ -858,7 +858,7 @@ say → text buffer → [resolve directives] → stdout
 ```
 
 `say` appends text to the text buffer. At the end of each turn, inline
-directives (`[nobreak]`, `[comma]`, `[the]`, `[a]`, etc.) are resolved in a
+directives (`[nobreak]`, `[nobr]`, `[comma]`, `[the]`, `[a]`, etc.) are resolved in a
 single pass over the buffer — at that point the full turn output is known,
 making deferred decisions like "last item in list" and article selection
 possible. The resolved buffer then goes to stdout.
@@ -910,7 +910,7 @@ Room drawing room "Richly decorated sofas, armchairs and the occasional table
     down on you, proud through the ages."
 ```
 
-Use `[newline]` or `[paragraph]` when a real line break is needed inside a string.
+Use `[break]`, `[br]` or `[paragraph break]`, `[p]` when a real line break is needed inside a string.
 
 #### Special characters
 
@@ -918,7 +918,7 @@ Source files are UTF-8. Any Unicode character may appear directly in strings.
 
 | Write | Meaning |
 |-------|---------|
-| `[newline]` or `[n]` | newline |
+| `[break]` or `[br]` | newline |
 | `[tab]` or `[t]` | tab |
 | `[paragraph]` or `[p]` | paragraph break |
 | `["]` | literal `"` |

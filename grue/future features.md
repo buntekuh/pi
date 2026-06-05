@@ -367,3 +367,93 @@ Allow bare `key: value` at top level as an alternative to `var key: value`. Migr
 - Parser: recognise `word COLON expr? NEWLINE` at file scope as a world-property declaration (same path as `VarDecl`, no new AST node needed).
 - Existing code: mechanical search-and-replace of top-level `var ` with nothing — all `.grue` files affected.
 - Handler-body `var` is unchanged.
+
+---
+
+## String concatenation
+
+Grue has no string concatenation. The `+` operator is numeric only; nested quotes inside a `{...}` interpolation slot break the outer string literal. Building a string from parts requires pre-computing a variable, which itself cannot be assigned incrementally.
+
+### What to do
+
+Allow `+` to concatenate strings when either operand is a string value. In the compiled JS this is already correct — `("hello") + (" world")` works — the only blocker is the lexer ending the outer string on the inner `"`.
+
+The fix is in `splitInterp`: when scanning for `{...}` slots, track quote depth so that `"` inside a slot does not terminate the outer string. This is a lexer/scanner change in the interpolation splitter, not in the main lexer.
+
+```grue
+say "Hello, {name + "!"}."          # concatenate name with punctuation
+say "{first + " " + last} arrived." # join two properties
+```
+
+String literals in expression position (`"..."` used as a value) are already parsed correctly everywhere except inside `{...}` slots in a containing string.
+
+---
+
+## Conditional interpolation
+
+There is no way to include text conditionally inside a `say` string. Conditional output today requires separate `say` statements, which produce separate paragraphs rather than inline text.
+
+### Syntax
+
+A conditional expression inside a `{...}` slot: the expression evaluates to a string or to `""` if the condition is false.
+
+```grue
+say "Fruit: apples, pears{", bananas" if player has banana}."
+say "The lantern is {if lit}glowing{else}dark{/if}."
+```
+
+Two forms:
+
+**Postfix** — `{expr if condition}` evaluates to `expr` when `condition` is true, `""` otherwise. This is the common case (optionally adding words).
+
+**if/else** — `{if condition}text{else}other text{/if}` for when both branches have content. This is a template-level construct, not an expression.
+
+### Implementation
+
+The postfix form is simplest and covers most cases. It maps to a JS ternary inside the template literal:
+
+```js
+`Fruit: apples, pears${condition ? ", bananas" : ""}.`
+```
+
+The `if/else` form requires the interpolation splitter to recognise `{if ...}...{else}...{/if}` as a single multi-part slot rather than a `{...}` expression. This is a larger parser change and can follow the postfix form.
+
+### Relation to string concatenation
+
+Both features together unlock natural-language sentence assembly without resorting to pre-computed variables or multi-paragraph output. They are the Grue equivalent of Ink's inline conditional text.
+
+---
+
+## Output post-processor and `print`
+
+### The pipeline
+
+`say` adds a unit of text to the output buffer. Before any of it reaches the DOM, a post-processor runs over the accumulated buffer and assembles the final paragraphs. This separation lets layout directives embedded in strings control how adjacent `say` outputs are joined:
+
+- `[nobreak]` / `[nbr]` — combine this output with the next one into a single paragraph instead of two
+- `[br]` / `[break]` — insert a line break within a paragraph
+- `[p]` / `[paragraph break]` — force a new paragraph at this point
+
+The compiler and `say()` are untouched; the post-processor is the only place directives are interpreted.
+
+### `print`
+
+`print` was the keyword for declaring and invoking post-processor rules — it sat between the `say` buffer and the final DOM render. It was removed and needs to be redesigned.
+
+The intent: authors can declare named output rules that control how the buffer is assembled for specific contexts. For example, an inventory listing rule that joins items with commas and `and` before the last one, rather than one paragraph per item.
+
+```grue
+on inventory:
+    for item in player.filter(Item):
+        say "{item}[nobreak]"
+    say "."          # closes the nobreak chain into one line
+```
+
+versus a `print` rule that handles the comma-joining explicitly:
+
+```grue
+print inventory list:
+    # post-processor rule: join buffer entries with ", " and " and " before last
+```
+
+The exact syntax and scope of `print` rules needs to be designed before implementation.

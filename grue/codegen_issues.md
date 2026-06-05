@@ -136,3 +136,31 @@ The destination-class check (`Room` or `Door`) can be added if needed to exclude
 - Movement test `movement.grue` uses `top of ladder`, `bottom of ladder`, `manhole` — none of these work in the compiled output today
 - BFS pathfinding (see `future features.md`) requires all exits to be present
 - Map panel in the tree inspector shows an incomplete picture of the world
+
+---
+
+## `matchParam` uses exact class match, not instanceof — [runtime.js](compiler/codegen/runtime.js)
+
+`matchParam` in the runtime resolves a grammar parameter slot by checking `node.class.toLowerCase() === typeLower`. This is an exact match against the node's declared class — it does not walk the class hierarchy.
+
+The consequence: `on examine Vehicle:thing:` will only match nodes whose class is literally `Vehicle`. A `Robot` instance (even if `Robot extends Vehicle`) will not match and the handler will never fire for it. Every handler with a class-typed parameter only works for instances of that exact class, not subclasses.
+
+This breaks M8 — the handler chain fires correctly once a sigKey is resolved, but the grammar trie cannot resolve the right sigKey for subclass instances.
+
+### What needs to happen
+
+Replace the exact-class check with an `_instanceof` call:
+
+```js
+if (node && (typeLower === "object" || _instanceof(canonical, type))) {
+    return { value: canonical, consumed: len };
+}
+```
+
+`_instanceof` already walks the class hierarchy correctly. The `typeLower === "object"` fast-path stays for the common "any object" case.
+
+### Impact
+
+- Any handler with a non-`Object` class parameter silently fails to match subclass instances
+- M8 (handler chain with class hierarchy) cannot be demonstrated without this fix
+- Needs to land before M9 (take/drop) since those handlers use `Item` typed parameters
