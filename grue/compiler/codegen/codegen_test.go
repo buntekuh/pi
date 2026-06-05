@@ -238,7 +238,7 @@ func TestEmitHandlerSayCompiled(t *testing.T) {
 on look:
     say "You look around the room."
 `)
-	if !strings.Contains(out, `say("You look around the room.")`) {
+	if !strings.Contains(out, `R.say("You look around the room.")`) {
 		t.Errorf("compiled say call missing:\n%s", out)
 	}
 }

@@ -109,12 +109,21 @@ func (sc *scope) extend(name string) *scope {
 	return next
 }
 
+// rt is the runtime prefix prepended to every IIFE-private helper call in
+// compiled handler bodies and exprFn closures.  Handler functions are defined
+// in the game script's outer scope and cannot see the IIFE's local bindings,
+// so every call to say/prop/get/random/… is routed through the R parameter
+// of the wrapping function(R){...} that receives GrueRuntime as its argument.
+const rt = "R."
+
 // Emit generates the game-script JS for the given world and grammar.
-// The output is a single GrueRuntime.init({...}) call.
+// The output wraps the GrueRuntime.init({...}) descriptor in a function that
+// receives the runtime as R, giving handler and exprFn closures access to all
+// runtime helpers without requiring them to be global.
 func Emit(w *world.World, g *grammar.Grammar) string {
 	c := newCG(w)
 	var b strings.Builder
-	b.WriteString("GrueRuntime.init({\n")
+	b.WriteString("GrueRuntime.init((function(R) { return {\n")
 	writeMeta(&b, w.Game)
 	writeKinds(&b, w)
 	writeClasses(&b, w)
@@ -124,7 +133,7 @@ func Emit(w *world.World, g *grammar.Grammar) string {
 	writeGrammar(&b, g)
 	writeVocab(&b, w)
 	c.writeTests(&b)
-	b.WriteString("});\n")
+	b.WriteString("}; })(GrueRuntime));\n")
 	return b.String()
 }
 
@@ -415,7 +424,7 @@ func (c *cg) compileStmt(stmt ast.Stmt, sc *scope, indent string) string {
 			return ""
 		}
 		text := c.compileString(lit.Value, sc)
-		line := fmt.Sprintf("%ssay(%s);", indent, text)
+		line := fmt.Sprintf("%s%ssay(%s);", indent, rt, text)
 		return c.withGuard(line, s.Guard, sc, indent) + "\n"
 
 	case *ast.FailStmt:
@@ -425,7 +434,7 @@ func (c *cg) compileStmt(stmt ast.Stmt, sc *scope, indent string) string {
 		} else {
 			tok = c.compileExpr(s.Token, sc)
 		}
-		line := fmt.Sprintf("%s_fail(%s);", indent, tok)
+		line := fmt.Sprintf("%s%s_fail(%s);", indent, rt, tok)
 		return c.withGuard(line, s.Guard, sc, indent) + "\n"
 
 	case *ast.SucceedStmt:
@@ -435,14 +444,14 @@ func (c *cg) compileStmt(stmt ast.Stmt, sc *scope, indent string) string {
 		} else {
 			tok = c.compileExpr(s.Token, sc)
 		}
-		line := fmt.Sprintf("%s_succeed(%s);", indent, tok)
+		line := fmt.Sprintf("%s%s_succeed(%s);", indent, rt, tok)
 		return c.withGuard(line, s.Guard, sc, indent) + "\n"
 
 	case *ast.ParentStmt:
-		return fmt.Sprintf("%s_parent();\n", indent)
+		return fmt.Sprintf("%s%s_parent();\n", indent, rt)
 
 	case *ast.StopStmt:
-		return fmt.Sprintf("%s_stop();\n", indent)
+		return fmt.Sprintf("%s%s_stop();\n", indent, rt)
 
 	case *ast.AssignStmt:
 		rhs := c.compileExpr(s.Value, sc)
@@ -490,7 +499,7 @@ func (c *cg) compileStmt(stmt ast.Stmt, sc *scope, indent string) string {
 		return c.compileWhen(s, sc, indent)
 
 	case *ast.ChooseStmt:
-		return fmt.Sprintf("%s_choose(%s);\n", indent, jsStr(s.Prompt))
+		return fmt.Sprintf("%s%s_choose(%s);\n", indent, rt, jsStr(s.Prompt))
 
 	case *ast.CallStmt:
 		expr := c.compileExpr(s.Call, sc)
@@ -537,13 +546,13 @@ func (c *cg) compileForIn(s *ast.ForInStmt, sc *scope, indent string) string {
 	if s.Value == "" {
 		inner := sc.extend(s.Key)
 		body := c.compileStmts(s.Body, inner, indent+"    ")
-		return fmt.Sprintf("%sfor (const %s of _children(%s)) {\n%s%s}\n",
-			indent, s.Key, coll, body, indent)
+		return fmt.Sprintf("%sfor (const %s of %s_children(%s)) {\n%s%s}\n",
+			indent, s.Key, rt, coll, body, indent)
 	}
 	inner := sc.extend(s.Key).extend(s.Value)
 	body := c.compileStmts(s.Body, inner, indent+"    ")
-	return fmt.Sprintf("%sfor (const [%s, %s] of _entries(%s)) {\n%s%s}\n",
-		indent, s.Key, s.Value, coll, body, indent)
+	return fmt.Sprintf("%sfor (const [%s, %s] of %s_entries(%s)) {\n%s%s}\n",
+		indent, s.Key, s.Value, rt, coll, body, indent)
 }
 
 func (c *cg) compileWhen(s *ast.WhenStmt, sc *scope, indent string) string {
@@ -581,20 +590,20 @@ func (c *cg) compileAssign(target ast.Expr, op, rhs string, sc *scope, indent st
 		if sc.clsProps[name] && sc.selfName != "" {
 			switch op {
 			case "=", "is":
-				return fmt.Sprintf("%s_setProp(%s, %s, %s);", indent, sc.selfName, jsStr(name), rhs)
+				return fmt.Sprintf("%s%s_setProp(%s, %s, %s);", indent, rt, sc.selfName, jsStr(name), rhs)
 			case "+=":
-				return fmt.Sprintf("%s_setProp(%s, %s, _prop(%s, %s) + %s);", indent, sc.selfName, jsStr(name), sc.selfName, jsStr(name), rhs)
+				return fmt.Sprintf("%s%s_setProp(%s, %s, %s_prop(%s, %s) + %s);", indent, rt, sc.selfName, jsStr(name), rt, sc.selfName, jsStr(name), rhs)
 			case "-=":
-				return fmt.Sprintf("%s_setProp(%s, %s, _prop(%s, %s) - %s);", indent, sc.selfName, jsStr(name), sc.selfName, jsStr(name), rhs)
+				return fmt.Sprintf("%s%s_setProp(%s, %s, %s_prop(%s, %s) - %s);", indent, rt, sc.selfName, jsStr(name), rt, sc.selfName, jsStr(name), rhs)
 			}
 		}
 		switch op {
 		case "=", "is":
-			return fmt.Sprintf("%s_set(%s, %s);", indent, jsStr(name), rhs)
+			return fmt.Sprintf("%s%s_set(%s, %s);", indent, rt, jsStr(name), rhs)
 		case "+=":
-			return fmt.Sprintf("%s_set(%s, _get(%s) + %s);", indent, jsStr(name), jsStr(name), rhs)
+			return fmt.Sprintf("%s%s_set(%s, %s_get(%s) + %s);", indent, rt, jsStr(name), rt, jsStr(name), rhs)
 		case "-=":
-			return fmt.Sprintf("%s_set(%s, _get(%s) - %s);", indent, jsStr(name), jsStr(name), rhs)
+			return fmt.Sprintf("%s%s_set(%s, %s_get(%s) - %s);", indent, rt, jsStr(name), rt, jsStr(name), rhs)
 		}
 	case *ast.PropertyAccess:
 		obj := c.compileExpr(t.Object, sc)
@@ -606,11 +615,11 @@ func (c *cg) compileAssign(target ast.Expr, op, rhs string, sc *scope, indent st
 		}
 		switch op {
 		case "=", "is":
-			return fmt.Sprintf("%s_setProp(%s, %s, %s);", indent, obj, key, rhs)
+			return fmt.Sprintf("%s%s_setProp(%s, %s, %s);", indent, rt, obj, key, rhs)
 		case "+=":
-			return fmt.Sprintf("%s_setProp(%s, %s, _prop(%s, %s) + %s);", indent, obj, key, obj, key, rhs)
+			return fmt.Sprintf("%s%s_setProp(%s, %s, %s_prop(%s, %s) + %s);", indent, rt, obj, key, rt, obj, key, rhs)
 		case "-=":
-			return fmt.Sprintf("%s_setProp(%s, %s, _prop(%s, %s) - %s);", indent, obj, key, obj, key, rhs)
+			return fmt.Sprintf("%s%s_setProp(%s, %s, %s_prop(%s, %s) - %s);", indent, rt, obj, key, rt, obj, key, rhs)
 		}
 	}
 	return fmt.Sprintf("%s/* unhandled assign */;", indent)
@@ -654,13 +663,13 @@ func (c *cg) compileExpr(e ast.Expr, sc *scope) string {
 	case *ast.FuncCallExpr:
 		return c.compileFuncCallExpr(e, sc)
 	case *ast.FilterExpr:
-		return fmt.Sprintf("_filter(%s, %s)", c.compileExpr(e.Collection, sc), jsStr(e.ClassName))
+		return fmt.Sprintf("%s_filter(%s, %s)", rt, c.compileExpr(e.Collection, sc), jsStr(e.ClassName))
 	case *ast.IsSetExpr:
 		inner := c.compileExpr(e.Expr, sc)
 		if e.Set {
-			return fmt.Sprintf("_isset(%s)", inner)
+			return fmt.Sprintf("%s_isset(%s)", rt, inner)
 		}
-		return fmt.Sprintf("(!_isset(%s))", inner)
+		return fmt.Sprintf("(!%s_isset(%s))", rt, inner)
 	case *ast.HandlerCallExpr:
 		return c.compileHandlerCallExpr(e, sc)
 	case *ast.ArrayLit:
@@ -685,7 +694,7 @@ func (c *cg) compileName(name string, sc *scope) string {
 		return name
 	}
 	if sc.clsProps[name] && sc.selfName != "" {
-		return fmt.Sprintf("_prop(%s, %s)", sc.selfName, jsStr(name))
+		return fmt.Sprintf("%s_prop(%s, %s)", rt, sc.selfName, jsStr(name))
 	}
 	if _, isKind := c.kof[name]; isKind {
 		return jsStr(name)
@@ -693,7 +702,7 @@ func (c *cg) compileName(name string, sc *scope) string {
 	if c.nod[name] {
 		return jsStr(name)
 	}
-	return "_get(" + jsStr(name) + ")"
+	return rt + "_get(" + jsStr(name) + ")"
 }
 
 func (c *cg) compileBinary(e *ast.BinaryExpr, sc *scope) string {
@@ -712,7 +721,7 @@ func (c *cg) compileBinary(e *ast.BinaryExpr, sc *scope) string {
 		left := c.compileExpr(e.Left, sc)
 		right := c.compileExpr(e.Right, sc)
 		if c.isKindExpr(e.Left) || c.isKindExpr(e.Right) {
-			return fmt.Sprintf("(_kindOrd(%s) %s _kindOrd(%s))", left, e.Op, right)
+			return fmt.Sprintf("(%s_kindOrd(%s) %s %s_kindOrd(%s))", rt, left, e.Op, rt, right)
 		}
 		return fmt.Sprintf("((%s) %s (%s))", left, e.Op, right)
 	default: // ==, +, -, *, /
@@ -735,7 +744,7 @@ func (c *cg) compileIs(e *ast.BinaryExpr, sc *scope) string {
 
 	// Class instanceof check
 	if len(right.Name) > 0 && right.Name[0] >= 'A' && right.Name[0] <= 'Z' {
-		return fmt.Sprintf("_instanceof(%s, %s)", c.compileExpr(e.Left, sc), jsStr(right.Name))
+		return fmt.Sprintf("%s_instanceof(%s, %s)", rt, c.compileExpr(e.Left, sc), jsStr(right.Name))
 	}
 
 	// Kind value: "peter is sad" — left must be a node ref so we look up the kind prop
@@ -743,7 +752,7 @@ func (c *cg) compileIs(e *ast.BinaryExpr, sc *scope) string {
 		left := c.compileExpr(e.Left, sc)
 		if _, leftIsName := e.Left.(*ast.NameExpr); leftIsName {
 			// bare node ref → look up kind property on it
-			return fmt.Sprintf("(_prop(%s, %s) === %s)", left, jsStr(kindName), jsStr(right.Name))
+			return fmt.Sprintf("(%s_prop(%s, %s) === %s)", rt, left, jsStr(kindName), jsStr(right.Name))
 		}
 		// left is already a prop access or computed value
 		return fmt.Sprintf("(%s === %s)", left, jsStr(right.Name))
@@ -772,17 +781,17 @@ func (c *cg) compilePropAccess(e *ast.PropertyAccess, sc *scope) string {
 	obj := c.compileExpr(e.Object, sc)
 	if e.KeyExpr != nil {
 		key := c.compileExpr(e.KeyExpr, sc)
-		return fmt.Sprintf("_prop(%s, %s)", obj, key)
+		return fmt.Sprintf("%s_prop(%s, %s)", rt, obj, key)
 	}
 	switch e.Key {
 	case "length":
-		return fmt.Sprintf("_length(%s)", obj)
+		return fmt.Sprintf("%s_length(%s)", rt, obj)
 	case "class":
-		return fmt.Sprintf("_class(%s)", obj)
+		return fmt.Sprintf("%s_class(%s)", rt, obj)
 	case "name":
-		return fmt.Sprintf("_name(%s)", obj)
+		return fmt.Sprintf("%s_name(%s)", rt, obj)
 	}
-	return fmt.Sprintf("_prop(%s, %s)", obj, jsStr(e.Key))
+	return fmt.Sprintf("%s_prop(%s, %s)", rt, obj, jsStr(e.Key))
 }
 
 func (c *cg) compileFuncCallExpr(e *ast.FuncCallExpr, sc *scope) string {
@@ -805,11 +814,11 @@ func (c *cg) compileFuncCallExpr(e *ast.FuncCallExpr, sc *scope) string {
 	case "smallest":
 		return "Math.min(" + joined + ")"
 	case "random":
-		return "_random(" + joined + ")"
+		return rt + "_random(" + joined + ")"
 	case "seed":
-		return "_seed(" + joined + ")"
+		return rt + "_seed(" + joined + ")"
 	}
-	return "_fn_" + e.Name + "(" + joined + ")"
+	return rt + "_fn_" + e.Name + "(" + joined + ")"
 }
 
 // compileHandlerCallExpr emits a _call("sigKey", ...args) for an inline {call}.
@@ -828,9 +837,9 @@ func (c *cg) compileHandlerCallExpr(e *ast.HandlerCallExpr, sc *scope) string {
 		}
 	}
 	sigKey := strings.Join(words, " ")
-	fn := "_call"
+	fn := rt + "_call"
 	if e.Silently {
-		fn = "_callS"
+		fn = rt + "_callS"
 	}
 	if len(argExprs) > 0 {
 		return fmt.Sprintf("%s(%s, %s)", fn, jsStr(sigKey), strings.Join(argExprs, ", "))
@@ -919,7 +928,7 @@ func (c *cg) compileString(raw string, sc *scope) string {
 				fmt.Fprintf(&b, "${/* parse error: %s */\"\"}", seg.expr)
 				continue
 			}
-			b.WriteString("${_str(")
+			b.WriteString("${" + rt + "_str(")
 			b.WriteString(c.compileExpr(expr, sc))
 			b.WriteString(")}")
 		}
@@ -949,10 +958,10 @@ func (c *cg) writeTests(b *strings.Builder) {
 			case step.Expr != nil:
 				compiled := c.compileExpr(step.Expr, emptyScope)
 				if step.Assert != "" {
-					fmt.Fprintf(b, "      { exprFn: function() { return GrueRuntime._str(%s); }, assert: %s, negate: %v },\n",
+					fmt.Fprintf(b, "      { exprFn: function() { return R._str(%s); }, assert: %s, negate: %v },\n",
 						compiled, jsStr(step.Assert), step.Negate)
 				} else {
-					fmt.Fprintf(b, "      { exprFn: function() { return GrueRuntime._str(%s); } },\n", compiled)
+					fmt.Fprintf(b, "      { exprFn: function() { return R._str(%s); } },\n", compiled)
 				}
 			case step.Cmd == "":
 				if step.Assert != "" {

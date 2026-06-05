@@ -933,8 +933,16 @@ const GrueRuntime = (function () {
   // ── Public API ───────────────────────────────────────────────────────────────
 
   return {
+    // All helpers are exposed so that handler functions and exprFn closures
+    // compiled into the game script (outside the IIFE) can reach them via
+    // the R parameter of the (function(R){...})(GrueRuntime) wrapper.
     say,
-    _str, // exposed for exprFn closures compiled into the game script
+    _str, _prop, _setProp, _get, _set,
+    _kindOrd, _isset, _length, _class, _name, _instanceof,
+    _filter, _children, _entries,
+    _fail, _succeed, _parent, _stop,
+    _call, _callS, _holdTurn,
+    _random, _seed,
 
     init(game) {
       _game     = game;
