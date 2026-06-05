@@ -2,7 +2,9 @@
 
 "Arithmetic" by Test
 
-var score
+"Arithmetic" by Test
+
+var score: 0
 var energy: 100
 
 on earn number:points:
@@ -18,6 +20,7 @@ on halve floor:
     say "Score: {score}."
 
 on halve ceiling:
+    say "current score: {score}"
     score = ceiling(score / 2)
     say "Score: {score}."
 
@@ -33,6 +36,10 @@ on distance from number:target:
 on tick:
     say "Tick!" if turn modulo 3 == 0
 
+on reset:
+    score = 0
+    energy = 100
+
 test
     test "addition".
     test "rounding".
@@ -46,14 +53,17 @@ test "addition"
     earn 5. "Score: 15."
 
 test "rounding"
+    reset.
     earn 7.
     halve. "Score: 4."
 
 test "floor"
+    reset.
     earn 7.
     halve floor. "Score: 3."
 
 test "ceiling"
+    reset.
     earn 7.
     halve ceiling. "Score: 4."
 

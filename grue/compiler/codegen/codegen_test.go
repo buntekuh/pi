@@ -299,6 +299,8 @@ on look:
 }
 
 func TestEmitInternalHandlerExcluded(t *testing.T) {
+	// Internal handlers must be in the handlers map (so _call() can invoke them
+	// from code) but must NOT be in the grammar trie (players can't type them).
 	out := emit(t, `
 internal check Object:thing:
     succeed
@@ -306,11 +308,16 @@ internal check Object:thing:
 on take Object:thing:
     say "Taken."
 `)
-	if strings.Contains(out, `"check Object"`) {
-		t.Error("internal handler should not appear in handlers map")
+	if !strings.Contains(out, `"check Object"`) {
+		t.Error("internal handler should appear in handlers map (callable from code)")
 	}
 	if !strings.Contains(out, `"take Object"`) {
 		t.Error("public handler should appear in handlers map")
+	}
+	// The grammar trie has sigKey leaves like `sigKey: "take Object"`.
+	// The internal handler must not appear there.
+	if strings.Contains(out, `sigKey: "check Object"`) {
+		t.Error("internal handler should not appear in grammar trie")
 	}
 }
 
@@ -414,5 +421,339 @@ Room hallway "The hallway."
 	out2 := codegen.Emit(w, g)
 	if out1 != out2 {
 		t.Error("Emit is not deterministic")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// R-parameter wrapper
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestEmitRWrapper(t *testing.T) {
+	// Handler and exprFn closures close over R = GrueRuntime so they can call
+	// R.say(), R._prop(), etc. without globals.
+	out := emit(t, `"Test" by T`)
+	if !strings.Contains(out, "(function(R) { return {") {
+		t.Errorf("R-wrapper header missing:\n%s", out)
+	}
+	if !strings.Contains(out, "})(GrueRuntime)") {
+		t.Errorf("R-wrapper tail missing:\n%s", out)
+	}
+}
+
+func TestEmitSayUsesRPrefix(t *testing.T) {
+	out := emit(t, `
+on look:
+    say "Hello."
+`)
+	if !strings.Contains(out, "R.say(") {
+		t.Errorf("say should be prefixed with R.:\n%s", out)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// string interpolation
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestEmitInterpolationUsesRStr(t *testing.T) {
+	out := emit(t, `
+on examine Object:thing:
+    say "You see {thing}."
+`)
+	if !strings.Contains(out, "${R._str(thing)}") {
+		t.Errorf("interpolated {thing} should compile to ${R._str(thing)}:\n%s", out)
+	}
+}
+
+func TestEmitInterpolationWorldPropUsesRGet(t *testing.T) {
+	out := emit(t, `
+on look:
+    say "Score: {score}."
+`)
+	if !strings.Contains(out, `R._get("score")`) {
+		t.Errorf("unknown bare name in interpolation should use R._get:\n%s", out)
+	}
+}
+
+func TestEmitInterpolationPropAccessUsesRProp(t *testing.T) {
+	out := emit(t, `
+on examine Object:thing:
+    say "Weight: {thing.weight}."
+`)
+	if !strings.Contains(out, `R._prop(thing, "weight")`) {
+		t.Errorf("prop access in interpolation should use R._prop:\n%s", out)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// exprFn (test assertions)
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestEmitExprFnUsesRStr(t *testing.T) {
+	out := emit(t, `
+"Test" by T
+test
+    test "math".
+test "math"
+    {3 + 4}. "7"
+`)
+	if !strings.Contains(out, "exprFn: function()") {
+		t.Errorf("exprFn step missing:\n%s", out)
+	}
+	if !strings.Contains(out, "R._str(") {
+		t.Errorf("exprFn should use R._str:\n%s", out)
+	}
+	if !strings.Contains(out, `assert: "7"`) {
+		t.Errorf("assert value missing from exprFn step:\n%s", out)
+	}
+}
+
+func TestEmitExprFnNoAssert(t *testing.T) {
+	// Bare {expr} step (no assertion) should emit exprFn without assert field.
+	out := emit(t, `
+"Test" by T
+test
+    test "bare".
+test "bare"
+    {seed(42)}
+`)
+	if !strings.Contains(out, "exprFn: function()") {
+		t.Errorf("bare exprFn step missing:\n%s", out)
+	}
+	if strings.Contains(out, "assert:") {
+		t.Errorf("bare exprFn step should not emit assert:\n%s", out)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// fail / succeed / parent / stop
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestEmitFailNoToken(t *testing.T) {
+	out := emit(t, `
+on take Object:thing:
+    fail
+`)
+	if !strings.Contains(out, `R._fail("")`) {
+		t.Errorf(`fail should compile to R._fail(""):\n%s`, out)
+	}
+}
+
+func TestEmitSucceedWithToken(t *testing.T) {
+	out := emit(t, `
+internal check Object:thing:
+    succeed yes
+`)
+	if !strings.Contains(out, `R._succeed("yes")`) {
+		t.Errorf(`succeed yes should compile to R._succeed("yes"):\n%s`, out)
+	}
+}
+
+func TestEmitParentCompilesWithR(t *testing.T) {
+	out := emit(t, `
+Room kitchen "The kitchen."
+    on look:
+        parent
+`)
+	if !strings.Contains(out, "R._parent()") {
+		t.Errorf("parent should compile to R._parent():\n%s", out)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// property access
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestEmitPropAccessUsesRProp(t *testing.T) {
+	out := emit(t, `
+on examine Object:thing:
+    say "Weight: {thing.weight}."
+`)
+	if !strings.Contains(out, `R._prop(thing, "weight")`) {
+		t.Errorf("prop access should compile to R._prop:\n%s", out)
+	}
+}
+
+func TestEmitWorldPropUsesRGet(t *testing.T) {
+	out := emit(t, `
+on look:
+    say "Score: {score}."
+`)
+	if !strings.Contains(out, `R._get("score")`) {
+		t.Errorf("world prop access should compile to R._get:\n%s", out)
+	}
+}
+
+func TestEmitSelfClassPropUsesRProp(t *testing.T) {
+	// Inside a class handler, a bare class-property name resolves to R._prop(self, key).
+	out := emit(t, `
+class Container
+    capacity: 10
+    on open self:
+        say "Capacity: {capacity}."
+`)
+	if !strings.Contains(out, `R._prop(self, "capacity")`) {
+		t.Errorf("bare class prop in class handler should compile to R._prop(self, key):\n%s", out)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// instanceof / is-set
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestEmitInstanceofUsesRInstanceof(t *testing.T) {
+	out := emit(t, `
+class Container
+
+on examine Object:thing:
+    say "It's a container." if thing is Container
+`)
+	if !strings.Contains(out, `R._instanceof(thing, "Container")`) {
+		t.Errorf("instanceof check should compile to R._instanceof:\n%s", out)
+	}
+}
+
+func TestEmitIsSetUsesRIsset(t *testing.T) {
+	out := emit(t, `
+on examine Object:thing:
+    say "Has label." if thing.label is set
+`)
+	if !strings.Contains(out, `R._isset(`) {
+		t.Errorf("is set should compile to R._isset:\n%s", out)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// kinds
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestEmitKindIsUsesRProp(t *testing.T) {
+	// "peter is wet" — kind-value comparison compiles to R._prop(peter, "wetness") === "wet"
+	out := emit(t, `
+kind wetness: *dry, damp, wet
+
+Object peter "A person."
+
+on look:
+    say "Wet." if peter is wet
+`)
+	if !strings.Contains(out, `R._prop(`) {
+		t.Errorf("kind 'is' check should use R._prop for the kind property:\n%s", out)
+	}
+}
+
+func TestEmitKindOrdUsesRKindOrd(t *testing.T) {
+	// Kind ordering comparison (>=, <, etc.) compiles to R._kindOrd(...).
+	out := emit(t, `
+kind wetness: *dry, damp, wet
+
+Object peter "A person."
+
+on look:
+    say "Damp or worse." if peter.wetness >= damp
+`)
+	if !strings.Contains(out, `R._kindOrd(`) {
+		t.Errorf("kind ordinal comparison should use R._kindOrd:\n%s", out)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// if / guard / unless
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestEmitIfElseCompiles(t *testing.T) {
+	out := emit(t, `
+on look:
+    if score > 10:
+        say "Doing well."
+    else:
+        say "Keep trying."
+`)
+	if !strings.Contains(out, "if (") {
+		t.Errorf("if statement missing:\n%s", out)
+	}
+	if !strings.Contains(out, "} else {") {
+		t.Errorf("else clause missing:\n%s", out)
+	}
+}
+
+func TestEmitPostfixIfGuard(t *testing.T) {
+	out := emit(t, `
+on take Object:thing:
+    say "Done." if score > 0
+`)
+	if !strings.Contains(out, "if (") {
+		t.Errorf("postfix if guard should compile to if:\n%s", out)
+	}
+}
+
+func TestEmitPostfixUnlessGuard(t *testing.T) {
+	out := emit(t, `
+on take Object:thing:
+    fail unless score > 0
+`)
+	if !strings.Contains(out, "if (!(") {
+		t.Errorf("postfix unless guard should compile to if (!(...)):\n%s", out)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// handler calls (_call / _callS) — sigKey uses type names, not var names
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestEmitHandlerCallUsesVarType(t *testing.T) {
+	// {has item} where item is declared Object:item → sigKey "has Object", arg item.
+	out := emit(t, `
+internal has Object:thing:
+    succeed yes
+
+on take Object:item:
+    say "No." unless {has item silently}
+    say "Taken."
+`)
+	if !strings.Contains(out, `R._callS("has Object", item)`) {
+		t.Errorf("handler call should use type name 'Object' in sigKey, not var name 'item':\n%s", out)
+	}
+}
+
+func TestEmitHandlerCallNumberArg(t *testing.T) {
+	// {score 10} with a number literal → sigKey "score number", arg 10.
+	out := emit(t, `
+internal score points:number:
+    score + points
+
+on look:
+    {score 10}
+`)
+	if !strings.Contains(out, `R._call("score number", 10)`) {
+		t.Errorf("numeric literal arg should produce 'number' in sigKey:\n%s", out)
+	}
+}
+
+func TestEmitHandlerCallMultiVarArg(t *testing.T) {
+	// {move item to room} where item:Object and room:Room → "move Object to Room".
+	out := emit(t, `
+internal move Object:thing to Room:dest:
+    thing.location = dest
+
+on deposit Object:item in Room:room:
+    {move item to room}
+`)
+	if !strings.Contains(out, `R._call("move Object to Room", item, room)`) {
+		t.Errorf("multi-var handler call should use type names in sigKey:\n%s", out)
+	}
+}
+
+func TestEmitHandlerCallForLoopVarIsNumber(t *testing.T) {
+	// Loop index from a for-from loop has type "number".
+	out := emit(t, `
+internal ping number:n:
+    say "ping"
+
+on look:
+    for i from 0 to 5:
+        {ping i}
+`)
+	if !strings.Contains(out, `R._call("ping number", i)`) {
+		t.Errorf("for-loop index should have type 'number' in handler call sigKey:\n%s", out)
 	}
 }

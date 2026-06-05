@@ -2,6 +2,131 @@
 
 ---
 
+## Grue as an embedded human-interaction engine
+
+Grue's handler syntax reads like human language — `on examine Object:thing:` is not an implementation detail, it is the thing. This makes Grue's core dispatch model applicable to any domain where interaction needs to be described declaratively: not just text adventure commands but dialog, social rules, NPC behaviour, and decision trees. Ink won the narrative scripting space because it makes writing *feel* like writing. Grue is something different: a **reactive rules engine dressed in natural language**, and the parser input is just one way to trigger it.
+
+Four design problems stand between current Grue and that broader role.
+
+---
+
+### 1. Inward-facing interface — receiving events from the host
+
+The current `interface` mechanism is purely outbound: Grue calls out to a named JS function and receives a result asynchronously. The host cannot push events in.
+
+For embedding, the host needs to fire into Grue: an NPC reached a waypoint, a timer fired, a physics collision occurred. These should dispatch through the handler chain just like player commands do.
+
+**Runtime change**: expose `GrueRuntime.dispatch(sigKey, ...args)` in the public API. The internal `dispatch` function is already correct — it just needs to be exported.
+
+**Language addition** (optional): a `receive` declaration documents which sigKeys the host is expected to fire, analogous to `interface` documenting outbound calls. It changes nothing about dispatch semantics — it is a declaration that this handler is part of the external API surface.
+
+```grue
+receive npc arrives at Room:room with Actor:npc:
+    say "You notice {npc} enter." if npc.location is location
+```
+
+---
+
+### 2. Actions as first-class values
+
+Actions currently enter Grue in two forms — as text strings from the player (parsed by the grammar trie) or as pre-parsed command objects in test steps (also string-based). Neither is a value the game can manipulate at runtime. An NPC cannot construct an action, store it, pass it to a handler, or choose between alternatives without re-parsing strings.
+
+An `Action` type resolves this. An action is a resolved (sigKey, args) pair — the form that `dispatch` already accepts — stored as a first-class value.
+
+```grue
+var greet_action: action greet player     # resolved once against the grammar
+push greet_action to npc_queue            # stored in a list
+{execute greet_action as barkeep}         # dispatched in actor context
+```
+
+**`action` expression**: `action <command-literal>` runs the literal through the grammar trie at construction time, not at execution time. The result is a typed object — resolution cost is paid once.
+
+**`execute Action:act as Actor:actor`**: dispatches `act` through the handler chain with `actor` as the originating agent rather than the player. The same handler chain fires — locks, energy limits, NPC restrictions all apply.
+
+NPC scripting, external event injection, and the test runner all currently work around the absence of this type. With first-class actions, patrol routes, scripted scenes, and remote commands become uniform.
+
+---
+
+### 3. List handling — concatenation, membership, and iteration syntax
+
+The existing `List` design covers push/pop for stack and queue patterns. Three gaps remain before it is complete enough for production use (e.g. biro factory processing queues).
+
+**Concatenation** — append one list to another. Useful for combining command queues, merging topic sets, building compound routes:
+
+```grue
+on concat List:source to List:dest:
+    for i from source.head to source.tail:
+        push source.items.{i} to dest
+```
+
+This is fully implementable in Grue using existing List handlers — no new language primitives needed.
+
+**Membership test** — `List:l contains Object:item`, linear scan. Also expressible as a handler, though a compiler-backed primitive would be faster for large lists.
+
+**`for item in list:` iteration** — currently you access items as `list.items.{i}` directly. A for-in form that desugars to the same index loop would be cleaner:
+
+```grue
+for item in npc_queue:
+    say "Queued: {item}."
+```
+
+The primary outstanding work is writing and testing the `List` library class itself, not language changes.
+
+---
+
+### 4. Topic classes — dynamic dialog sets with availability rules
+
+Ink's power is first-class dialog flow. Grue can match it through class instances where each topic carries its own availability rules. The handler chain already does the right thing — what is missing is a compact declaration syntax for the inclusion predicate.
+
+```grue
+class Topic
+    on available:     # succeed = in the current topic set, fail = excluded
+        succeed       # default: always available
+
+    on discuss:       # fires when the player chooses this topic
+        pass
+```
+
+Topics are ordinary instances:
+
+```grue
+Topic golden_fleece "The Golden Fleece"
+    on available:
+        succeed if player has jason_rumour
+        fail
+
+    on discuss:
+        say "You recount the story of the Fleece..."
+        golden_fleece_discussed = true
+```
+
+**`when:` block** — syntactic sugar for common availability predicates, instead of writing a full `on available:` handler. Conditions are the same boolean expressions used everywhere else in Grue:
+
+```grue
+Topic revenge_plan "The Revenge Plan"
+    when:
+        medea_trust >= trusted
+        not revenge_discussed
+```
+
+`when:` compiles to an `on available:` handler that succeeds only if all listed conditions hold. The two are semantically equivalent; `when:` makes the conditions readable as a list without requiring the author to think in terms of fail/succeed signals. It also enables tooling: a debugger can show which topics are currently blocked and why, without running the handler.
+
+**Dialog system** — an NPC's talk handler collects available topics and hands off to `choose`:
+
+```grue
+on talk to NPC:npc:
+    for topic in filter(Topic):
+        if {topic is available silently}:
+            push topic to choices
+    {choose "What would you like to talk about?"}
+```
+
+`choose` (stubbed in the language) is where Grue hands off to the host UI — a numbered menu in a text adventure, a dialog wheel in a 3D game, a voice prompt in audio. The host handles rendering; Grue handles what is available and what each choice does.
+
+Topics are the clearest example of Grue used as a social rules engine. The host fires `GrueRuntime.dispatch("talk to NPC", [player, barkeep])`, Grue evaluates which topics are available, the host presents the menu, and the chosen topic's `on discuss:` fires. Narrative logic lives entirely in Grue; the host provides rendering and context.
+
+---
+
 ## List processing
 
 Lists are already expressible as Objects with integer keys and a position counter, but the language has no primitives to manipulate them. This is the missing half of the data model.
@@ -224,3 +349,21 @@ go to Mare Tranquillitatis.
 2. Fix `writeExits` bug (see `codegen_issues.md`)
 3. `go to` + BFS handler in `standard.grue` (or `navigation.grue`)
 4. `on every turn:` auto-advance in `standard.grue` — driven by the test stepper in tests, normal turn processing in interactive play
+
+---
+
+## Drop `var` at top level
+
+Top-level `var score: 0` is redundant — it declares a world-level property, which is exactly what a bare `score: 0` declaration would do (same as `capacity: 10` in a class body). The `var` keyword at file scope adds nothing the parser could not infer from `word: value`.
+
+`var` inside a handler body remains meaningful (it declares a local JS `let`, scoped to the call), so the keyword stays there.
+
+### What to do
+
+Allow bare `key: value` at top level as an alternative to `var key: value`. Migrate all existing `.grue` files. Eventually deprecate `var` at top level.
+
+### Impact
+
+- Parser: recognise `word COLON expr? NEWLINE` at file scope as a world-property declaration (same path as `VarDecl`, no new AST node needed).
+- Existing code: mechanical search-and-replace of top-level `var ` with nothing — all `.grue` files affected.
+- Handler-body `var` is unchanged.

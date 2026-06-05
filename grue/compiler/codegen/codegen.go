@@ -61,19 +61,26 @@ func newCG(w *world.World) *cg {
 // (handler parameters, loop variables, local var declarations) and which names
 // are class-level properties accessible on self without qualification.
 type scope struct {
-	vars     map[string]bool // local JS variables — compiled as bare identifiers
-	clsProps map[string]bool // class property names — compiled as _prop(self, key)
-	selfName string          // name of the self parameter, or "" if none
+	vars     map[string]bool   // local JS variables — compiled as bare identifiers
+	varTypes map[string]string // parameter type name for each variable (e.g. "Object", "Room", "number")
+	clsProps map[string]bool   // class property names — compiled as _prop(self, key)
+	selfName string            // name of the self parameter, or "" if none
 }
 
 func newScope(h *world.Handler, ownerClass string, w *world.World) *scope {
 	sc := &scope{
 		vars:     make(map[string]bool),
+		varTypes: make(map[string]string),
 		clsProps: make(map[string]bool),
 	}
 	for _, part := range h.ResolvedSig {
 		if p, ok := part.(ast.SigParam); ok {
 			sc.vars[p.Name] = true
+			typ := p.Type
+			if typ == "self" {
+				typ = ownerClass
+			}
+			sc.varTypes[p.Name] = typ
 			if p.Type == ownerClass || p.Name == "self" {
 				sc.selfName = p.Name
 			}
@@ -97,15 +104,24 @@ func newScope(h *world.Handler, ownerClass string, w *world.World) *scope {
 }
 
 func (sc *scope) extend(name string) *scope {
+	return sc.extendTyped(name, "")
+}
+
+func (sc *scope) extendTyped(name, typ string) *scope {
 	next := &scope{
 		vars:     make(map[string]bool, len(sc.vars)+1),
+		varTypes: make(map[string]string, len(sc.varTypes)+1),
 		clsProps: sc.clsProps,
 		selfName: sc.selfName,
 	}
 	for k := range sc.vars {
 		next.vars[k] = true
 	}
+	for k, v := range sc.varTypes {
+		next.varTypes[k] = v
+	}
 	next.vars[name] = true
+	next.varTypes[name] = typ
 	return next
 }
 
@@ -230,11 +246,19 @@ func writeClasses(b *strings.Builder, w *world.World) {
 
 func writeNodes(b *strings.Builder, w *world.World) {
 	nodes := worldNodes(w)
-	if len(nodes) == 0 {
+	// Emit a synthetic "world" node when the root has declared properties
+	// (var declarations at global scope). _get() already falls back to this node.
+	hasRootProps := len(w.Root.Props) > 0
+	if len(nodes) == 0 && !hasRootProps {
 		b.WriteString("  nodes: {},\n")
 		return
 	}
 	b.WriteString("  nodes: {\n")
+	if hasRootProps {
+		b.WriteString(`    "world": { class: "World", props: `)
+		writePropsObject(b, w.Root.Props)
+		b.WriteString(" },\n")
+	}
 	for _, node := range nodes {
 		fmt.Fprintf(b, "    %s: { class: %s", jsStr(node.Name), jsStr(node.ClassName))
 		if node.Desc != "" {
@@ -359,27 +383,26 @@ func (c *cg) buildHandlerChains() map[string][]handlerEntry {
 	add := func(sigKey, owner, ownerClass string, h *world.Handler) {
 		chains[sigKey] = append(chains[sigKey], handlerEntry{owner, h, ownerClass})
 	}
+	// Internal handlers ARE included in the handlers map so _call() can find
+	// them from within other handler bodies. The grammar builder separately
+	// excludes them from the player-input trie.
 	for _, node := range worldNodes(c.w) {
 		for _, h := range node.Handlers {
-			if !h.Internal {
-				add(h.SigKey, node.Name, node.ClassName, h)
-			}
+			add(h.SigKey, node.Name, node.ClassName, h)
 		}
 	}
 	for _, cls := range c.w.Classes {
 		for _, h := range cls.Handlers {
-			if !h.Internal {
-				add(h.SigKey, cls.Name, cls.Name, h)
-			}
+			add(h.SigKey, cls.Name, cls.Name, h)
 		}
 	}
 	for _, h := range c.w.Root.Handlers {
-		if !h.Internal && !h.IsLibrary {
+		if !h.IsLibrary {
 			add(h.SigKey, "", "", h)
 		}
 	}
 	for _, h := range c.w.Root.Handlers {
-		if !h.Internal && h.IsLibrary {
+		if h.IsLibrary {
 			add(h.SigKey, "", "", h)
 		}
 	}
@@ -407,6 +430,12 @@ func (c *cg) compileHandler(h *world.Handler, ownerClass string) string {
 func (c *cg) compileStmts(stmts []ast.Stmt, sc *scope, indent string) string {
 	var b strings.Builder
 	for _, stmt := range stmts {
+		// VarStmt extends the scope for all subsequent statements in the same
+		// block, so that {d} in a following say compiles to the local var, not
+		// to R._get("d").
+		if vs, ok := stmt.(*ast.VarStmt); ok {
+			sc = sc.extendTyped(vs.Name, "")
+		}
 		b.WriteString(c.compileStmt(stmt, sc, indent))
 	}
 	return b.String()
@@ -432,7 +461,7 @@ func (c *cg) compileStmt(stmt ast.Stmt, sc *scope, indent string) string {
 		if s.Token == nil {
 			tok = `""`
 		} else {
-			tok = c.compileExpr(s.Token, sc)
+			tok = c.compileSignalToken(s.Token, sc)
 		}
 		line := fmt.Sprintf("%s%s_fail(%s);", indent, rt, tok)
 		return c.withGuard(line, s.Guard, sc, indent) + "\n"
@@ -442,7 +471,7 @@ func (c *cg) compileStmt(stmt ast.Stmt, sc *scope, indent string) string {
 		if s.Token == nil {
 			tok = `""`
 		} else {
-			tok = c.compileExpr(s.Token, sc)
+			tok = c.compileSignalToken(s.Token, sc)
 		}
 		line := fmt.Sprintf("%s%s_succeed(%s);", indent, rt, tok)
 		return c.withGuard(line, s.Guard, sc, indent) + "\n"
@@ -478,7 +507,7 @@ func (c *cg) compileStmt(stmt ast.Stmt, sc *scope, indent string) string {
 		return c.compileIf(s, sc, indent)
 
 	case *ast.ForFromStmt:
-		inner := sc.extend(s.Var)
+		inner := sc.extendTyped(s.Var, "number")
 		from := c.compileExpr(s.From, sc)
 		to := c.compileExpr(s.To, sc)
 		body := c.compileStmts(s.Body, inner, indent+"    ")
@@ -830,10 +859,32 @@ func (c *cg) compileHandlerCallExpr(e *ast.HandlerCallExpr, sc *scope) string {
 	for _, part := range e.Parts {
 		switch p := part.(type) {
 		case ast.HandlerCallWord:
-			words = append(words, p.Word)
+			word := p.Word
+			if sc.vars[word] {
+				// Variable in scope: use its declared type in the sigKey so that
+				// the call matches the registered handler (which uses type names,
+				// e.g. "has Object" not "has item").
+				typ := sc.varTypes[word]
+				if typ == "" {
+					typ = "_"
+				}
+				words = append(words, typ)
+				argExprs = append(argExprs, c.compileName(word, sc))
+			} else {
+				words = append(words, word)
+			}
 		case ast.HandlerCallArg:
+			// Use the literal type name when statically known so the sigKey
+			// matches the handler registration ("score number", not "score _").
+			typ := "_"
+			switch p.Expr.(type) {
+			case *ast.NumberLit:
+				typ = "number"
+			case *ast.StringLit:
+				typ = "string"
+			}
+			words = append(words, typ)
 			argExprs = append(argExprs, c.compileExpr(p.Expr, sc))
-			words = append(words, "_")
 		}
 	}
 	sigKey := strings.Join(words, " ")
@@ -845,6 +896,25 @@ func (c *cg) compileHandlerCallExpr(e *ast.HandlerCallExpr, sc *scope) string {
 		return fmt.Sprintf("%s(%s, %s)", fn, jsStr(sigKey), strings.Join(argExprs, ", "))
 	}
 	return fmt.Sprintf("%s(%s)", fn, jsStr(sigKey))
+}
+
+// compileSignalToken compiles the token expression of a fail/succeed statement.
+// Bare identifier tokens that are not kind values, instance names, or local
+// variables are signal names — they must compile to their literal string, not
+// to a world-property lookup via _get(). Kind values and instance names compile
+// normally (they are already string literals via compileName).
+func (c *cg) compileSignalToken(e ast.Expr, sc *scope) string {
+	if name, ok := e.(*ast.NameExpr); ok {
+		n := name.Name
+		if !sc.vars[n] && !c.nod[n] {
+			if _, isKind := c.kof[n]; !isKind {
+				if n != "true" && n != "false" {
+					return jsStr(n) // bare signal name → literal string
+				}
+			}
+		}
+	}
+	return c.compileExpr(e, sc)
 }
 
 // ── String interpolation ───────────────────────────────────────────────────
@@ -941,7 +1011,7 @@ func (c *cg) compileString(raw string, sc *scope) string {
 
 // emptyScope is used when compiling {expr} test assertions, which have no
 // handler parameters, class properties, or self reference.
-var emptyScope = &scope{vars: make(map[string]bool), clsProps: make(map[string]bool)}
+var emptyScope = &scope{vars: make(map[string]bool), varTypes: make(map[string]string), clsProps: make(map[string]bool)}
 
 func (c *cg) writeTests(b *strings.Builder) {
 	if len(c.w.Tests) == 0 {

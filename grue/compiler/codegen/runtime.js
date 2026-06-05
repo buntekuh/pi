@@ -368,6 +368,7 @@ const GrueRuntime = (function () {
   function executeTurn(input) {
     _turnPending = 0;
     _turnResolve = null;
+    _set("turn", (_get("turn") ?? 0) + 1);
     if (input) handleInput(input);
     // M8: fireEveryTurnHandlers(); fireTurnRangeHandlers();
     if (_turnPending === 0) return Promise.resolve();

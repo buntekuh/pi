@@ -2,11 +2,11 @@
 
 "Internal" by Test
 
-internal has object:thing:
+internal has Object:thing:
     succeed if player has thing
     fail not_here
 
-internal move object:thing to Room:destination:
+internal move Object:thing to Room:destination:
     thing.location = destination
 
 internal score points:number:
