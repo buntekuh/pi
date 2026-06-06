@@ -1,0 +1,14 @@
+# "self" as a parameter type is valid inside class and instance bodies.
+
+"Self In Class Handler" by Test
+
+class Machine
+    on examine self:
+        say "You see a machine."
+
+    on operate self with string:tool:
+        say "You use {tool} on it."
+
+Machine widget "A small widget."
+    on examine self:
+        say "A tiny widget."

@@ -983,3 +983,75 @@ on open Container:thing:
 		t.Error(`"Chest" param edge should appear before "Container" param edge in grammar trie`)
 	}
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// writeExits — compass and custom direction exits
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestExitsCompassDirections(t *testing.T) {
+	// Standard compass directions must still appear in exits.
+	out := emit(t, `
+Room cave "A dark cave."
+    north: tunnel
+
+Room tunnel "A narrow tunnel."
+`)
+	idx := strings.Index(out, `"cave"`)
+	if idx == -1 {
+		t.Fatal("cave node missing from output")
+	}
+	end := strings.Index(out[idx:], "},")
+	node := out[idx : idx+end]
+	if !strings.Contains(node, `exits:`) {
+		t.Errorf("exits field missing from cave node:\n%s", node)
+	}
+	if !strings.Contains(node, `"north": "tunnel"`) {
+		t.Errorf(`"north" exit missing from cave node:\n%s`, node)
+	}
+}
+
+func TestExitsCustomDirection(t *testing.T) {
+	// Non-compass directions must be emitted — previously silently dropped.
+	out := emit(t, `
+Room shaft "The bottom of a shaft."
+    top of ladder: platform
+
+Room platform "A wooden platform."
+`)
+	idx := strings.Index(out, `"shaft"`)
+	if idx == -1 {
+		t.Fatal("shaft node missing from output")
+	}
+	end := strings.Index(out[idx:], "},")
+	node := out[idx : idx+end]
+	if !strings.Contains(node, `exits:`) {
+		t.Errorf("exits field missing from shaft node:\n%s", node)
+	}
+	if !strings.Contains(node, `"top of ladder": "platform"`) {
+		t.Errorf(`custom exit "top of ladder" missing from shaft node:\n%s`, node)
+	}
+}
+
+func TestExitsMultipleIncludingCustom(t *testing.T) {
+	// A room with both compass and custom exits emits all of them.
+	out := emit(t, `
+Room foyer "The foyer."
+    north: hall
+    airlock: chamber
+
+Room hall "The hall."
+Room chamber "The airlock chamber."
+`)
+	idx := strings.Index(out, `"foyer"`)
+	if idx == -1 {
+		t.Fatal("foyer node missing from output")
+	}
+	end := strings.Index(out[idx:], "},")
+	node := out[idx : idx+end]
+	if !strings.Contains(node, `"north": "hall"`) {
+		t.Errorf(`"north" exit missing:\n%s`, node)
+	}
+	if !strings.Contains(node, `"airlock": "chamber"`) {
+		t.Errorf(`custom exit "airlock" missing:\n%s`, node)
+	}
+}
