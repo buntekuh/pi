@@ -2,33 +2,40 @@
 
 "Actors" by Test
 
+# Global every-turn fires every turn regardless of location.
 on every turn:
-    say "You wake in a cold, dark room." if turn == 0
+    say "You wake in a cold, dark room." if turn == 1
 
+# Room lobby is the start room and the global-turn test location.
+# The time bomb is in engine room so it doesn't fire here.
+Room lobby "A quiet lobby."
+    test "global turn 1"
+        . "cold, dark room"
+
+# Engine room: room-scoped every-turn fires only while player is here.
 Room engine room "Banks of humming machinery."
     on every turn:
-        say "The machinery hums." if turn > 0
+        say "The machinery hums." if turn > 1
 
+    test "countdown"
+        . "5 turns remaining"
+        . "4 turns remaining"
+        . "3 turns remaining"
+        . "2 turns remaining"
+        . "1 turns remaining"
+        . "BOOM"
+
+# Time bomb fires only when the player is in engine room.
 Object time bomb "A ticking device."
+    location: engine room
     fuse: 5
     on every turn:
-        fuse - 1
-        say "The bomb ticks. {fuse} turns remaining."
         if fuse == 0:
             say "BOOM."
             stop
+        say "The bomb ticks. {fuse} turns remaining."
+        fuse - 1
 
 test
-    test "global turn 0".
+    test "global turn 1".
     test "countdown".
-
-test "global turn 0"
-    . "cold, dark room"
-
-test "countdown"
-    . "5 turns remaining"
-    . "4 turns remaining"
-    . "3 turns remaining"
-    . "2 turns remaining"
-    . "1 turns remaining"
-    . "BOOM"

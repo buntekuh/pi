@@ -213,7 +213,7 @@ const GrueRuntime = (function () {
 
   function _fail(token)    { throw new _FailSignal(token); }
   function _succeed(token) { throw new _SucceedSignal(token); }
-  function _stop()         { /* TODO: disable input */ }
+  function _stop()         { throw new _SucceedSignal(); }
 
   // _currentChain / _currentChainPos / _currentArgs / _currentRan track the
   // in-progress dispatch so _parent() can invoke the next handler.
@@ -413,7 +413,46 @@ const GrueRuntime = (function () {
 
   const _builtins = {
     "look": () => describeLocation(),
+    "wait": () => {},
   };
+
+  // ── Every-turn and turn-range handlers ───────────────────────────────────────
+
+  function _ownerInScope(owner) {
+    const nodes = _game.nodes || {};
+    const node  = nodes[owner];
+    if (!node) return false;
+    if (_instanceof(owner, "Room")) return owner === _location;
+    const loc = node.location;
+    return loc === _location || loc === "player";
+  }
+
+  function _fireEveryTurn() {
+    const chain = (_game.handlers || {})["every turn"];
+    if (!chain) return;
+    for (const h of chain) {
+      if (h.owner && !_ownerInScope(h.owner)) continue;
+      try { h.fn(h.owner); } catch(e) {
+        if (e instanceof _FailSignal || e instanceof _SucceedSignal) continue;
+        throw e;
+      }
+    }
+  }
+
+  function _fireTurnRangeHandlers() {
+    const turn   = _get("turn") ?? 0;
+    const ranges = _game.turnRanges || [];
+    for (const h of ranges) {
+      if (h.owner && !_ownerInScope(h.owner)) continue;
+      const lo = h.from === 0 || turn >= h.from;
+      const hi = h.to   === -1 || turn <= h.to;
+      if (!lo || !hi) continue;
+      try { h.fn(h.owner); } catch(e) {
+        if (e instanceof _FailSignal || e instanceof _SucceedSignal) continue;
+        throw e;
+      }
+    }
+  }
 
   // ── Turn synchronization ─────────────────────────────────────────────────────
   //
@@ -452,7 +491,8 @@ const GrueRuntime = (function () {
     _set("turn", (_get("turn") ?? 0) + 1);
     _set("location", _location); // keep _get("location") in sync with current room
     if (input) handleInput(input);
-    // M8: fireEveryTurnHandlers(); fireTurnRangeHandlers();
+    _fireEveryTurn();
+    _fireTurnRangeHandlers();
     if (_turnPending === 0) return Promise.resolve();
     return new Promise(r => { _turnResolve = r; });
   }
@@ -1027,9 +1067,9 @@ const GrueRuntime = (function () {
         _out.appendChild(el);
       } else if (step.cmd) {
         await executeTurn(step.cmd);
+      } else if (step.tick) {
+        await executeTurn("");
       }
-      // bare . (step.tick): await executeTurn() with no input — fires turn
-      // handlers only — wired in M8
 
       let outputText = "";
       for (let j = before; j < _out.children.length; j++) {

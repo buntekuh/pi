@@ -146,6 +146,7 @@ func Emit(w *world.World, g *grammar.Grammar) string {
 	writeNodes(&b, w)
 	writeStart(&b, w)
 	c.writeHandlers(&b)
+	c.writeTurnRanges(&b)
 	writeGrammar(&b, g)
 	writeVocab(&b, w)
 	c.writeTests(&b)
@@ -388,14 +389,19 @@ func writeStart(b *strings.Builder, w *world.World) {
 // ── handlers ───────────────────────────────────────────────────────────────
 
 // handlerEntry pairs an owner label with a compiled handler.
+// For normal handlers, handler is non-nil. For every-turn handlers compiled
+// into the "every turn" chain, everyTurnBody is non-nil and handler is nil.
 type handlerEntry struct {
-	owner      string
-	handler    *world.Handler
-	ownerClass string // class name when owner is a class, else ""
+	owner         string
+	handler       *world.Handler
+	ownerClass    string     // class name when owner is a class, else ""
+	everyTurnBody []ast.Stmt // non-nil for EveryTurn entries; handler is nil
 }
 
 // writeHandlers emits the handlers map: sigKey → ordered list of {owner, fn}.
 // Chain order: instance → class → global own → global library.
+// Every-turn handlers are compiled into the "every turn" chain with
+// compileEveryTurnFn rather than compileHandler.
 func (c *cg) writeHandlers(b *strings.Builder) {
 	chains := c.buildHandlerChains()
 	if len(chains) == 0 {
@@ -412,8 +418,13 @@ func (c *cg) writeHandlers(b *strings.Builder) {
 			if e.owner != "" {
 				owner = jsStr(e.owner)
 			}
-			fmt.Fprintf(b, "      { owner: %s, fn: %s },\n",
-				owner, c.compileHandler(e.handler, e.ownerClass))
+			var fn string
+			if e.everyTurnBody != nil {
+				fn = c.compileEveryTurnFn(e.everyTurnBody, e.owner, e.ownerClass)
+			} else {
+				fn = c.compileHandler(e.handler, e.ownerClass)
+			}
+			fmt.Fprintf(b, "      { owner: %s, fn: %s },\n", owner, fn)
 		}
 		b.WriteString("    ],\n")
 	}
@@ -423,7 +434,14 @@ func (c *cg) writeHandlers(b *strings.Builder) {
 func (c *cg) buildHandlerChains() map[string][]handlerEntry {
 	chains := make(map[string][]handlerEntry)
 	add := func(sigKey, owner, ownerClass string, h *world.Handler) {
-		chains[sigKey] = append(chains[sigKey], handlerEntry{owner, h, ownerClass})
+		chains[sigKey] = append(chains[sigKey], handlerEntry{
+			owner: owner, handler: h, ownerClass: ownerClass,
+		})
+	}
+	addET := func(owner, ownerClass string, eth *world.EveryTurnHandler) {
+		chains["every turn"] = append(chains["every turn"], handlerEntry{
+			owner: owner, ownerClass: ownerClass, everyTurnBody: eth.Body,
+		})
 	}
 	// Internal handlers ARE included in the handlers map so _call() can find
 	// them from within other handler bodies. The grammar builder separately
@@ -432,10 +450,16 @@ func (c *cg) buildHandlerChains() map[string][]handlerEntry {
 		for _, h := range node.Handlers {
 			add(h.SigKey, node.Name, node.ClassName, h)
 		}
+		for _, eth := range node.EveryTurn {
+			addET(node.Name, node.ClassName, eth)
+		}
 	}
 	for _, cls := range c.w.Classes {
 		for _, h := range cls.Handlers {
 			add(h.SigKey, cls.Name, cls.Name, h)
+		}
+		for _, eth := range cls.EveryTurn {
+			addET(cls.Name, cls.Name, eth)
 		}
 	}
 	for _, h := range c.w.Root.Handlers {
@@ -443,9 +467,19 @@ func (c *cg) buildHandlerChains() map[string][]handlerEntry {
 			add(h.SigKey, "", "", h)
 		}
 	}
+	for _, eth := range c.w.Root.EveryTurn {
+		if !eth.IsLibrary {
+			addET("", "", eth)
+		}
+	}
 	for _, h := range c.w.Root.Handlers {
 		if h.IsLibrary {
 			add(h.SigKey, "", "", h)
+		}
+	}
+	for _, eth := range c.w.Root.EveryTurn {
+		if eth.IsLibrary {
+			addET("", "", eth)
 		}
 	}
 
@@ -465,6 +499,85 @@ func (c *cg) buildHandlerChains() map[string][]handlerEntry {
 	}
 
 	return chains
+}
+
+// compileEveryTurnFn compiles an every-turn handler body into a JS function.
+// If ownerName is non-empty (node-scoped), the function takes a `self` param
+// so that bare property names (e.g. `fuse`) resolve via _prop(self, "fuse").
+// Instance props are added to clsProps so they compile as self-accesses.
+func (c *cg) compileEveryTurnFn(body []ast.Stmt, ownerName, ownerClass string) string {
+	sc := &scope{
+		vars:     make(map[string]bool),
+		varTypes: make(map[string]string),
+		clsProps: make(map[string]bool),
+	}
+	paramStr := ""
+	if ownerName != "" {
+		sc.selfName = "self"
+		// Collect class hierarchy props.
+		cls := ownerClass
+		for cls != "" {
+			if cd, ok := c.w.ClassMap[cls]; ok {
+				for _, prop := range cd.Props {
+					sc.clsProps[prop.Key] = true
+				}
+				cls = cd.Parent
+			} else {
+				break
+			}
+		}
+		// Also include instance props (e.g. fuse: 5 on a specific node).
+		if node, ok := c.w.NodeMap[ownerName]; ok {
+			for _, prop := range node.Props {
+				sc.clsProps[prop.Key] = true
+			}
+		}
+		paramStr = "self"
+	}
+	compiled := c.compileStmts(body, sc, "        ")
+	if compiled == "" {
+		return fmt.Sprintf("function(%s) {}", paramStr)
+	}
+	return fmt.Sprintf("function(%s) {\n%s      }", paramStr, compiled)
+}
+
+// writeTurnRanges emits the turnRanges array used by _fireTurnRangeHandlers.
+func (c *cg) writeTurnRanges(b *strings.Builder) {
+	type rangeEntry struct {
+		from, to   int
+		owner      string
+		ownerClass string
+		body       []ast.Stmt
+	}
+	var entries []rangeEntry
+	collect := func(owner, ownerClass string, trs []*world.TurnRangeHandler) {
+		for _, tr := range trs {
+			entries = append(entries, rangeEntry{tr.From, tr.To, owner, ownerClass, tr.Body})
+		}
+	}
+	for _, node := range worldNodes(c.w) {
+		collect(node.Name, node.ClassName, node.TurnRanges)
+	}
+	for _, cls := range c.w.Classes {
+		collect(cls.Name, cls.Name, cls.TurnRanges)
+	}
+	collect("", "", c.w.Root.TurnRanges)
+
+	if len(entries) == 0 {
+		b.WriteString("  turnRanges: [],\n")
+		return
+	}
+	b.WriteString("  turnRanges: [\n")
+	for _, e := range entries {
+		owner := "null"
+		if e.owner != "" {
+			owner = jsStr(e.owner)
+		}
+		fn := c.compileEveryTurnFn(e.body, e.owner, e.ownerClass)
+		fmt.Fprintf(b, "    { from: %d, to: %d, owner: %s, fn: %s },\n",
+			e.from, e.to, owner, fn)
+	}
+	b.WriteString("  ],\n")
 }
 
 // appendAncestorHandlers walks up the class hierarchy from parentName and
