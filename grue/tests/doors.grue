@@ -54,7 +54,7 @@ Room bedroom "A small bedroom."
         go east. "landing"
         go west. "bedroom"
 
-Object brass key "A small brass key."
+Item brass key "A small brass key."
 
 test
     test "locked door blocks".
