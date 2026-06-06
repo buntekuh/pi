@@ -491,7 +491,7 @@ succeed "stored"            # named success
 ```
 
 Tokens are plain strings — no declaration needed, no special identity.
-`fail` and `succeed` do not stop the chain — parent handlers still run.
+`fail` and `succeed` stop the handler chain — no further handlers run unless `parent` was already called.
 
 Guard clauses:
 ```

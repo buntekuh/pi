@@ -227,6 +227,18 @@ Lands with M17 (every-turn handlers).
 
 ---
 
+## No automated sema test for `CheckFiles` library-override path — [sema.go](compiler/sema/sema.go)
+
+`sema_test.go` uses `sema.Analyse(file)`, which calls `Check(files...)` (the single-namespace path). The new `CheckFiles(ownFiles, libFiles)` path — which allows a game handler to override a library handler with the same signature — is only exercised by building a game that actually uses a library (e.g. `movement.grue`). A regression in `CheckFiles` would not be caught by `go test ./...`.
+
+### What needs to happen
+
+Extend the sema test runner to support a two-file fixture: a game file and a library file passed separately to `syms.CheckFiles(ownFiles, libFiles)`. A clean fixture would declare `internal on go Room:destination:` in the library file and `on go Room:destination:` in the game file, and assert zero diagnostics.
+
+Lands whenever the sema test harness is next extended.
+
+---
+
 ## Fixed
 
 The following issues were resolved and are kept here for reference.

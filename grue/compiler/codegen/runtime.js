@@ -9,6 +9,7 @@
 //   M3: + library loading, exits, connects
 //   M4: + kinds, classes, node props
 //   M9: + location on nodes (containment model)
+//   M11: + movement — exit lookup, player relocation, room description
 const GrueRuntime = (function () {
 
   let _out;
@@ -117,7 +118,10 @@ const GrueRuntime = (function () {
     if (root && root.props && key in root.props) return root.props[key];
     return null;
   }
-  function _set(key, value) { _worldState[key] = value; }
+  function _set(key, value) {
+    _worldState[key] = value;
+    if (key === "location") _location = value; // keep player location in sync
+  }
 
   // _kindOrd(value) returns the ordinal (integer index) of a kind value name.
   // Used for ordering comparisons such as peter.wet < damp.
@@ -202,8 +206,8 @@ const GrueRuntime = (function () {
   // ── Chain control ────────────────────────────────────────────────────────────
 
   // Fail and succeed exit the current handler by throwing a signal object.
-  // The dispatch loop catches these and continues to the next handler in the
-  // chain (fail/succeed do NOT stop the chain — parent handlers still run).
+  // The dispatch loop catches these and stops the chain (break). A normal
+  // return also stops the chain. The only way to continue is via parent().
   class _FailSignal    { constructor(t) { this.token = t; } }
   class _SucceedSignal { constructor(t) { this.token = t; } }
 
@@ -360,8 +364,21 @@ const GrueRuntime = (function () {
   // ── Dispatch ─────────────────────────────────────────────────────────────────
 
   function describeLocation() {
-    const room = _game.nodes && _game.nodes[_location];
-    if (room && room.desc) say(room.desc);
+    const nodes = _game.nodes || {};
+    const room  = nodes[_location];
+    if (!room) return;
+    heading(_location);
+    if (room.desc) say(room.desc);
+    // Objects visible at this location (anything that isn't a Room or Door)
+    for (const [name, node] of Object.entries(nodes)) {
+      if (node.location === _location && !_instanceof(name, "Room") && !_instanceof(name, "Door")) {
+        say("You can see " + name + " here.");
+      }
+    }
+    // Available exits
+    const exits = room.exits || {};
+    const dirs  = Object.keys(exits);
+    if (dirs.length) say("Exits: " + dirs.join(", ") + ".");
   }
 
   function dispatch(sigKey, args) {
@@ -383,9 +400,10 @@ const GrueRuntime = (function () {
       try {
         chain[i].fn(...args);
       } catch (e) {
-        if (e instanceof _FailSignal || e instanceof _SucceedSignal) continue;
+        if (e instanceof _FailSignal || e instanceof _SucceedSignal) break;
         throw e;
       }
+      break;
     }
     _currentChain    = savedChain;
     _currentChainPos = savedPos;
@@ -445,9 +463,33 @@ const GrueRuntime = (function () {
     const input = raw.trim();
     if (!input) return;
     echo(input);
+    const words = tokenize(input);
+
+    // Exit-phrase lookup: "go <direction>" resolved against current room's exits.
+    // This runs before grammar so multi-word directions like "top of ladder" work
+    // without needing every exit name registered in the vocabulary.
+    if (words[0] === "go" && words.length > 1) {
+      const phrase = words.slice(1).join(" ");
+      const room   = (_game.nodes || {})[_location];
+      const exits  = (room && room.exits) ? room.exits : {};
+      if (phrase in exits) {
+        const prevLoc = _location;
+        dispatch("go Room", [exits[phrase]]);
+        if (_location !== prevLoc) describeLocation();
+        return;
+      }
+    }
+
+    // Normal grammar dispatch; also describes the new room if movement occurred.
     const parsed = parseInput(input);
-    if (parsed) { dispatch(parsed.sigKey, parsed.args); return; }
-    const key = tokenize(input).join(" ");
+    if (parsed) {
+      const prevLoc = _location;
+      dispatch(parsed.sigKey, parsed.args);
+      if (_location !== prevLoc) describeLocation();
+      return;
+    }
+
+    const key = words.join(" ");
     if (_builtins[key]) { _builtins[key](); return; }
     say("You don't know how to do that.");
   }
@@ -947,6 +989,11 @@ const GrueRuntime = (function () {
 
       if (step._teleport) {
         _location = step._teleport;
+        continue;
+      }
+
+      if (step.setup) {
+        step.setup();
         continue;
       }
 

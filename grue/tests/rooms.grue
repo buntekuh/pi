@@ -2,6 +2,8 @@
 
 "Rooms" by Test
 
+library "standard"
+
 Room kitchen "The smell of burnt coffee lingers."
     north: hallway
     east: garden

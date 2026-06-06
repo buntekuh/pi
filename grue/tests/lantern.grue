@@ -25,7 +25,7 @@ Door red gate, gate "A large red iron gate set into the garden wall."
     west: garden
 
 test
-    look. "You look around"
+    look. "burnt coffee"
     examine brass lantern. "tarnished"
     examine lamp. "tarnished"
     take brass lantern. "Taken"

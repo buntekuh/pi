@@ -84,7 +84,7 @@ func main() {
 	// Step 3b — Re-collect with all files, then validate.
 	allFiles := append(ownFiles, libFiles...)
 	syms = sema.Collect(allFiles...)
-	diags := syms.Check(allFiles...)
+	diags := syms.CheckFiles(ownFiles, libFiles)
 	hasError := false
 	for _, d := range diags {
 		if d.Severity == sema.Error {

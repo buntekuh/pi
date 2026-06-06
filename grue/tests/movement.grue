@@ -2,6 +2,8 @@
 
 "Movement" by Test
 
+library "standard"
+
 var energy: 3
 
 on go Room:destination:
@@ -15,6 +17,27 @@ Room Washington DC "Before you stands a ladder. Whether it goes all the way to t
     manhole: the sewers
     west: landing pad
 
+    test "standard exits"
+        energy = 3
+        go west. "landing pad"
+        go east. "Washington DC"
+
+    test "custom exits"
+        energy = 3
+        go top of ladder. "lunar plain"
+        go bottom of ladder. "Washington DC"
+        go manhole. "rats"
+
+    test "energy limit"
+        energy = 1
+        go west. "landing pad"
+        go east. "too tired"
+
+    test "room description"
+        energy = 3
+        go west. "crowbar"
+        go east. "Exits:"
+
 Room Mare Tranquillitatis "A vast lunar plain."
     bottom of ladder: Washington DC
 
@@ -23,22 +46,10 @@ Room the sewers "Say hi to the rats."
 
 Room landing pad "A concrete pad."
     east: Washington DC
+    Item crowbar "A heavy steel crowbar."
 
 test
     test "standard exits".
     test "custom exits".
     test "energy limit".
-
-test "standard exits"
-    go west. "landing pad"
-    go east. "Washington DC"
-
-test "custom exits"
-    go top of ladder. "lunar plain"
-    go bottom of ladder. "Washington DC"
-    go manhole. "rats"
-
-test "energy limit"
-    energy = 1
-    go west. "landing pad"
-    go east. "too tired"
+    test "room description".

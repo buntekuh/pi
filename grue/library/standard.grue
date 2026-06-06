@@ -30,11 +30,22 @@ internal enter Room:room:
 
 internal leave Room:room:
 
+# ── Movement ──────────────────────────────────────────────────────────────────
+# Base go handler: moves the player to the destination room.
+# The runtime calls describeLocation() after dispatch if location changed.
+# Authors override on go Room:destination: for per-action customisation;
+# call parent to execute the move, skip it to block movement.
+internal on go Room:destination:
+    location = destination
+
 # ── Look ──────────────────────────────────────────────────────────────────────
-# Displays the current room's description.
-# Authors override on look: in a room body for room-specific flavour.
+# Displays the current room description (desc + items at location).
+# Exits are listed by the runtime on room entry; this handler covers
+# the player-typed "look" command and explicit handler calls.
 on look:
-    say "You look around."
+    say "{location.desc}" if location.desc is set
+    for item in location.filter(Item):
+        say "You can see {item} here."
 
 # ── Examine ───────────────────────────────────────────────────────────────────
 # Shows the thing's description if it has one; fallback for featureless objects.

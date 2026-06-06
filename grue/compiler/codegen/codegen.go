@@ -1167,6 +1167,9 @@ func (c *cg) writeTests(b *strings.Builder) {
 		fmt.Fprintf(b, "    %s: { room: %s, steps: [\n", jsStr(test.Name), jsStr(test.Room))
 		for _, step := range test.Steps {
 			switch {
+			case step.SetupStmt != nil:
+				body := c.compileStmt(step.SetupStmt, emptyScope, "")
+				fmt.Fprintf(b, "      { setup: function() { %s } },\n", strings.TrimSpace(body))
 			case step.SubTest != "":
 				fmt.Fprintf(b, "      { sub: %s },\n", jsStr(step.SubTest))
 			case step.Expr != nil:

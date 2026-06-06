@@ -2,6 +2,8 @@
 
 "Doors" by Test
 
+library "standard"
+
 kind lockable: *false, true
 
 Room corridor "A narrow corridor."

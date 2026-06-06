@@ -234,6 +234,9 @@ func (b *builder) buildTest(d *ast.TestDecl, room string) *Test {
 	for _, stmt := range d.Body {
 		cmd, ok := stmt.(*ast.TestCmdStmt)
 		if !ok {
+			// Assignment or other statement — carry as a setup step so codegen
+			// can emit it as a JS closure the test runner executes directly.
+			t.Steps = append(t.Steps, TestStep{SetupStmt: stmt})
 			continue
 		}
 		step := TestStep{

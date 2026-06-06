@@ -224,14 +224,31 @@ func Collect(files ...*ast.File) *Symbols {
 // mergeDoorDecls runs first because it validates the "leads to" cross-references
 // that checkPropertyValueRefs would otherwise flag as unknown instance refs.
 func (s *Symbols) Check(files ...*ast.File) []Diagnostic {
+	return s.CheckFiles(files, nil)
+}
+
+// CheckFiles runs Pass 2 treating ownFiles and libFiles as separate namespaces
+// for handler-signature duplicate detection.  A game-file handler with the same
+// signature as a library handler is not an error — it is an intentional override.
+// Duplicates within own files or within library files are still errors.
+func (s *Symbols) CheckFiles(ownFiles, libFiles []*ast.File) []Diagnostic {
 	var allDecls []ast.Decl
-	for _, f := range files {
+	for _, f := range append(ownFiles, libFiles...) {
 		allDecls = append(allDecls, f.Decls...)
+	}
+	var ownDecls []ast.Decl
+	for _, f := range ownFiles {
+		ownDecls = append(ownDecls, f.Decls...)
+	}
+	var libDecls []ast.Decl
+	for _, f := range libFiles {
+		libDecls = append(libDecls, f.Decls...)
 	}
 	s.a.mergeDoorDecls(allDecls)
 	s.a.checkKinds(allDecls)
 	s.a.checkInheritance()
-	s.a.checkHandlerSigs(allDecls)
+	s.a.checkHandlerSigs(ownDecls)
+	s.a.checkHandlerSigs(libDecls)
 	s.a.checkClassRefs(allDecls, false)
 	s.a.checkKindUseRefs(allDecls)
 	s.a.checkPropertyValueRefs(allDecls)
