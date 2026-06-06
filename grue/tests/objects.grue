@@ -1,19 +1,30 @@
-# objects — declarations, nesting, aliases, descriptions
+# objects — declarations, nesting, aliases, descriptions, take/drop/inventory
 
 "Objects" by Test
 
+library "standard"
+
 Room kitchen "A kitchen."
     Object table "A scrubbed pine table."
-    Object brass lantern, lamp "A tarnished brass lantern."
-    Object mug, cup, vessel "Your grandmother's mug."
+    Item brass lantern, lamp "A tarnished brass lantern."
+    Item mug, cup, vessel "Your grandmother's mug."
         Object tea bag "A soggy tea bag."
-
-Object torch "A flickering torch."
-Object old key, key "A heavy iron key."
+    Item torch "A flickering torch."
+    Item old key, key "A heavy iron key."
 
 test
+    test "inventory".
     test "aliases".
     test "nesting".
+
+test "inventory"
+    inventory. "carrying nothing"
+    take torch. "Taken"
+    inventory. "torch"
+    examine torch. "flickering"
+    drop torch. "Dropped"
+    inventory. "carrying nothing"
+    examine torch. "flickering"
 
 test "aliases"
     examine lamp. "tarnished brass"

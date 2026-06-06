@@ -6,10 +6,10 @@ library "standard"
 
 Room kitchen "The kitchen smells of burnt coffee. A brass lantern sits on the table."
     north: hallway
-    Object brass lantern, lamp "A tarnished brass lantern. The wick is dry."
+    Item brass lantern, lamp "A tarnished brass lantern. The wick is dry."
     Object table "A sturdy wooden table."
-    Object red apple "A shiny red apple."
-    Object red balloon "A bright red balloon."
+    Item red apple "A shiny red apple."
+    Item red balloon "A bright red balloon."
 
 Room hallway "A narrow hallway leading south to the kitchen."
     south: kitchen
@@ -26,8 +26,8 @@ Door red gate, gate "A large red iron gate set into the garden wall."
 
 test
     look. "You look around"
-    examine brass lantern. "nothing special"
-    examine lamp. "nothing special"
+    examine brass lantern. "tarnished"
+    examine lamp. "tarnished"
     take brass lantern. "Taken"
     drop brass lantern. "Dropped"
     inventory. "carrying nothing"

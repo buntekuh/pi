@@ -12,3 +12,10 @@ class Machine
 Machine widget "A small widget."
     on examine self:
         say "A tiny widget."
+
+class Tool
+    on examine self:
+        say "A nifty tool."
+
+test
+    operate widget with spanner. "You use"

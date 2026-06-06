@@ -37,20 +37,30 @@ on look:
     say "You look around."
 
 # ── Examine ───────────────────────────────────────────────────────────────────
-# Default examine: a short non-committal response.
+# Shows the thing's description if it has one; fallback for featureless objects.
 # Authors override on examine self: in a class or instance body.
 on examine Object:thing:
-    say "You see nothing special."
+    if thing.desc is set:
+        say "{thing.desc}"
+    else:
+        say "You see nothing special."
 
 # ── Take and drop ─────────────────────────────────────────────────────────────
-# M3 stubs — say the right words, actual inventory management in M5.
-on take Object:thing:
+# Move the item to the player's inventory / current room.
+# No scope or reachability check — that lives in M10.
+on take Item:thing:
+    thing.location = player
     say "Taken."
 
-on drop Object:thing:
+on drop Item:thing:
+    thing.location = location
     say "Dropped."
 
 # ── Inventory ─────────────────────────────────────────────────────────────────
-# M3 stub — listing carried items requires containment (M5).
+# List everything in the player's inventory.
 on inventory:
-    say "You are carrying nothing."
+    var carried
+    for item in player.filter(Item):
+        say "You are carrying {item}."
+        carried = 1
+    say "You are carrying nothing." if carried == 0

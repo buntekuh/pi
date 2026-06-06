@@ -8,6 +8,7 @@
 //   M2: + handlers, grammar, vocab
 //   M3: + library loading, exits, connects
 //   M4: + kinds, classes, node props
+//   M9: + location on nodes (containment model)
 const GrueRuntime = (function () {
 
   let _out;
@@ -58,6 +59,8 @@ const GrueRuntime = (function () {
     const k = String(key);
     const node = _nodeOf(nameOrRef);
     if (node) {
+      if (k === "location") return node.location ?? null;
+      if (k === "desc")     return node.desc     ?? null;
       if (node.props && k in node.props) return node.props[k];
       // Walk class hierarchy for defaults.
       let clsName = node.class;
@@ -78,8 +81,32 @@ const GrueRuntime = (function () {
     const k = String(key);
     const node = _nodeOf(nameOrRef);
     if (!node) return;
+    if (k === "location") { node.location = value; return; }
     if (!node.props) node.props = {};
     node.props[k] = value;
+  }
+
+  // _move(item, dest) relocates a node to a new parent.
+  function _move(item, dest) {
+    const node = _nodeOf(item);
+    if (node) node.location = dest;
+  }
+
+  // _inScope(name) — true when the player can currently perceive / refer to name.
+  // An item is in scope if its location chain transitively reaches the current
+  // room or the player's inventory. Top-level nodes (rooms, etc.) with no
+  // location are always in scope.
+  function _inScope(name) {
+    const nodes = _game.nodes || {};
+    const node  = nodes[name];
+    if (!node) return false;
+    let loc = node.location;
+    if (!loc) return true; // top-level (rooms) — always visible
+    while (loc) {
+      if (loc === _location || loc === "player") return true;
+      loc = (nodes[loc] || {}).location;
+    }
+    return false;
   }
 
   // _get / _set access world-level (root) properties by name.
@@ -298,7 +325,7 @@ const GrueRuntime = (function () {
     for (let len = tokens.length - pos; len >= 1; len--) {
       const phrase    = tokens.slice(pos, pos + len).join(" ");
       const canonical = vocab[phrase];
-      if (canonical && nodes[canonical] && _instanceof(canonical, type)) {
+      if (canonical && nodes[canonical] && _instanceof(canonical, type) && _inScope(canonical)) {
         return { value: canonical, consumed: len };
       }
     }
@@ -405,6 +432,7 @@ const GrueRuntime = (function () {
     _turnPending = 0;
     _turnResolve = null;
     _set("turn", (_get("turn") ?? 0) + 1);
+    _set("location", _location); // keep _get("location") in sync with current room
     if (input) handleInput(input);
     // M8: fireEveryTurnHandlers(); fireTurnRangeHandlers();
     if (_turnPending === 0) return Promise.resolve();
@@ -977,6 +1005,7 @@ const GrueRuntime = (function () {
     _str, _prop, _setProp, _get, _set,
     _kindOrd, _isset, _length, _class, _name, _instanceof,
     _filter, _children, _entries,
+    _move, _inScope,
     _fail, _succeed, _parent, _stop,
     _call, _callS, _callT, _holdTurn,
     _random, _seed,
@@ -986,6 +1015,8 @@ const GrueRuntime = (function () {
       _out      = document.getElementById("output");
       _tree     = document.getElementById("tree");
       _location = game.start;
+      _worldState["player"]   = "player";   // _get("player") → "player" (inventory container)
+      _worldState["location"] = _location;  // _get("location") → current room
 
       window.say = say;
 

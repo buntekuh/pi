@@ -18,7 +18,7 @@ DIST_DIR="$SCRIPT_DIR/dist"
 
 # ── rebuild gruc when any .go source is newer than the binary ─────────────
 
-if [[ ! -x "$GRUC" ]] || find "$COMPILER_DIR" -name '*.go' -newer "$GRUC" | grep -q .; then
+if [[ ! -x "$GRUC" ]] || find "$COMPILER_DIR" \( -name '*.go' -o -name '*.js' \) -newer "$GRUC" | grep -q .; then
     printf 'building gruc...\n' >&2
     (cd "$COMPILER_DIR" && go build -o gruc ./cmd/gruc) \
         || { printf 'build.sh: compiler build failed\n' >&2; exit 1; }

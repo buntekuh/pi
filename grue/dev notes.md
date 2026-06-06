@@ -38,7 +38,7 @@ full chain: instance → class → parent → global → library
 Demonstrable: a class handler fires for any instance of that class
 Note: matchParam uses exact class match — see codegen_issues.md
 
-M9 — Items + examine + take/drop
+M9 — Items + examine + take/drop ✓
 Descriptor: + location/containment on nodes
 Runtime: containment model, inventory, scope (what's reachable)
 Demonstrable: pick up an object, examine it, drop it, very simple on examine, take and drop handlers without failure checking (e.g. object must be present)
@@ -72,6 +72,8 @@ Demonstrable: containers, supporters, etc. in action
 M17 — Every-turn + turn ranges
 Runtime: fire every-turn handlers after each turn, check turn range conditions
 Demonstrable: a candle that burns down over time
+Note: teatime.grue — grandmother's sitting room; fill her cup, hand it to her, she drinks it
+over a few turns, hand it back empty, refill, offer biscuits in between
 
 M18 - print evaluation (post processor): 
 Inline directives: (`[nobreak]`, `[nobr]`, `[comma]`, `[the]`, `[a]`)
