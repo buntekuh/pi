@@ -403,12 +403,13 @@ against. The signature IS the grammar — no separate verb table required.
 Keywords are bare words. Parameters are `type:name` pairs. The parser derives
 all valid player commands from the declared signatures:
 
-| Type | Matches |
-|------|---------|
-| `object:name` | any game object |
-| `number:name` | an integer |
-| `string:name` | quoted text |
-| `ClassName:name` | an instance of that class |
+| Type | Matches | Player types |
+|------|---------|--------------|
+| `object:name` | any game object | bare word — `take lantern` |
+| `number:name` | an integer | bare integer — `open ledger at 3` |
+| `string:name` | a quoted string | double-quoted text — `record "Jason" in rolodex` |
+| `ClassName:name` | an instance of that class | bare word matching an instance of that class |
+| `self` | the owning instance | bare word matching this instance (class/object bodies only) |
 
 ```
 on take object:item:
@@ -418,30 +419,48 @@ on talk to Michelle:npc:
 on traverse passage in the dark:
 ```
 
+**`string:name`** captures free-form player input. The bound variable holds the
+string value without its surrounding quotes and can be used anywhere an expression
+is valid:
+
+```
+class Ledger
+    on record string:entry in self:
+        log.{position} = entry          # store the string
+        say "Recorded: {entry}."        # interpolate it
+
+on name object:thing string:label:      # rename thing to label
+    thing.name = label
+    say "{thing} is now called {label}."
+```
+
+The player types the value in double quotes: `record "Jason Bourne" in rolodex`.
+Quotes are required — unquoted words are matched as object names or keywords, not
+strings. The grammar treats `string` as a distinct slot type, so a handler with a
+`string:x` parameter never conflicts with one using `object:x` at the same
+position.
+
 #### self
 
-Inside a class or object body, `self` can appear in a handler signature as the
-typed parameter for the instance itself. It is what ties the handler into the
-grammar — the parser uses it to route `open door with key` to the Door class handler:
+`self` is only valid inside a `class` or object body. It is sugar for
+`ClassName:self` and binds the handler to its owning type in the grammar:
 
 ```
 class Door
-    on open self with key:      # self matches "door", "gate", any Door instance
+    on open self with key:      # matches any Door instance — "open gate with key"
         fail unless key matches self.key
         opened = true
 
 Object yoke
-    on examine self:            # self matches "yoke" specifically
+    on examine self:            # matches "yoke" specifically
         say "A sturdy wooden yoke."
         parent
 ```
 
-At the global level `self` is not available — use an explicit typed parameter:
+At global scope use an explicit class parameter instead:
 ```
-on open Door:door with key:     # equivalent to the class handler above
+on open Door:door with key:     # equivalent to the Door class handler above
 ```
-
-`self` inside a class is sugar for `ClassName:self`.
 
 #### Public and internal handlers
 
