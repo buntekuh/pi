@@ -1157,24 +1157,17 @@ func (c *cg) writeTests(b *strings.Builder) {
 
 // ── exits and door connections ─────────────────────────────────────────────
 
-// compassDirs is the set of property keys treated as room exits.
-var compassDirs = map[string]bool{
-	"north": true, "south": true, "east": true, "west": true,
-	"up": true, "down": true, "in": true, "out": true,
-	"northeast": true, "northwest": true, "southeast": true, "southwest": true,
-}
-
 // writeExits emits an exits:{} object on Room nodes listing direction→dest.
+// Every RefValue property is emitted — custom directions (e.g. "top of ladder")
+// are included alongside compass directions.
 func writeExits(b *strings.Builder, node *world.Node) {
 	if node.ClassName != "Room" {
 		return
 	}
 	var parts []string
 	for _, prop := range node.Props {
-		if compassDirs[prop.Key] {
-			if ref, ok := prop.Value.(world.RefValue); ok {
-				parts = append(parts, fmt.Sprintf("%s: %s", jsStr(prop.Key), jsStr(ref.Name)))
-			}
+		if ref, ok := prop.Value.(world.RefValue); ok {
+			parts = append(parts, fmt.Sprintf("%s: %s", jsStr(prop.Key), jsStr(ref.Name)))
 		}
 	}
 	if len(parts) > 0 {

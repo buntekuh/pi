@@ -229,7 +229,7 @@ Lands with M17 (every-turn handlers).
 
 ## Fixed
 
-The following issues were resolved during M5 and are kept here for reference.
+The following issues were resolved and are kept here for reference.
 
 ### `matchParam` uses exact class match, not instanceof ✓
 
@@ -245,6 +245,17 @@ directly without the `_children()` wrapper.
 
 Fixed in M5: `_filter` uses `([name, n])` destructuring and passes `name`
 directly to `_instanceof`, eliminating the `Object.keys().find()` scan.
+
+### `writeExits` drops custom exits ✓
+
+Fixed: removed `compassDirs` guard; `writeExits` now emits every `RefValue`
+property on a Room node regardless of key name.
+
+### `on examine self:` at global scope produces malformed sigKey ✓
+
+Fixed: `checkClassRefs` now passes `inClass bool` through recursion and emits
+`self_outside_class` when a `self` param appears in a global handler. Error
+fixture at `tests/sema/errors/self_outside_class.grue`.
 
 ### `_call` does not return fail tokens — `when` arms on fail signals never fire ✓
 

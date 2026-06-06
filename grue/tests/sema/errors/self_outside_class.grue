@@ -1,0 +1,6 @@
+# expect: error self_outside_class line 5
+
+"Self Outside Class" by Test
+
+on examine self:
+    say "You see it."

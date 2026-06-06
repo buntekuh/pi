@@ -232,7 +232,7 @@ func (s *Symbols) Check(files ...*ast.File) []Diagnostic {
 	s.a.checkKinds(allDecls)
 	s.a.checkInheritance()
 	s.a.checkHandlerSigs(allDecls)
-	s.a.checkClassRefs(allDecls)
+	s.a.checkClassRefs(allDecls, false)
 	s.a.checkKindUseRefs(allDecls)
 	s.a.checkPropertyValueRefs(allDecls)
 	s.a.checkCallArgs(allDecls)
@@ -603,13 +603,19 @@ func (a *analyser) checkClassRef(name string, line int) {
 
 // checkClassRefs validates class-name references in handler signatures,
 // is/isnt expressions, and filter() calls.  It descends into handler bodies
-// because is/filter can appear anywhere in code.
-func (a *analyser) checkClassRefs(decls []ast.Decl) {
+// because is/filter can appear anywhere in code.  inClass is true when
+// descending into a class or instance body — needed to detect "self" at
+// global scope, where it has no owning class to resolve to.
+func (a *analyser) checkClassRefs(decls []ast.Decl, inClass bool) {
 	for _, d := range decls {
 		switch d := d.(type) {
 		case *ast.HandlerDecl:
 			for _, part := range d.Signature {
 				if p, ok := part.(ast.SigParam); ok {
+					if p.Type == "self" && !inClass {
+						a.errorf("self_outside_class", d.Pos.Line,
+							`"self" parameter type is only valid inside a class or instance body`)
+					}
 					a.checkClassRef(p.Type, d.Pos.Line)
 				}
 			}
@@ -621,9 +627,9 @@ func (a *analyser) checkClassRefs(decls []ast.Decl) {
 				}
 			}
 		case *ast.ClassDecl:
-			a.checkClassRefs(d.Body)
+			a.checkClassRefs(d.Body, true)
 		case *ast.InstanceDecl:
-			a.checkClassRefs(d.Body)
+			a.checkClassRefs(d.Body, true)
 		}
 	}
 }
