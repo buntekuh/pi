@@ -168,6 +168,11 @@ type KindValue struct{ Name string }
 // UnsetValue is Grue's null — an explicitly absent property value.
 type UnsetValue struct{}
 
+// SubObjectValue marks a property whose value is a per-instance sub-node.
+// Declared as "Object propName" (or any class name) inside a class body.
+// Each instance gets a uniquely named child node: instanceName.propName.
+type SubObjectValue struct{ ClassName string }
+
 // ListValue is a comma-separated list of values in a property declaration
 // (e.g. context: mood, location). Used for multi-value properties.
 type ListValue struct{ Items []Value }
@@ -176,13 +181,14 @@ type ListValue struct{ Items []Value }
 // The code generator emits an inline Array object with integer keys 0..N-1.
 type ArrayValue struct{ Items []Value }
 
-func (NumberValue) valueNode() {}
-func (StringValue) valueNode() {}
-func (RefValue) valueNode()    {}
-func (KindValue) valueNode()   {}
-func (UnsetValue) valueNode()  {}
-func (ListValue) valueNode()   {}
-func (ArrayValue) valueNode()  {}
+func (NumberValue) valueNode()   {}
+func (StringValue) valueNode()   {}
+func (RefValue) valueNode()      {}
+func (KindValue) valueNode()     {}
+func (UnsetValue) valueNode()    {}
+func (ListValue) valueNode()     {}
+func (ArrayValue) valueNode()    {}
+func (SubObjectValue) valueNode() {}
 
 // =============================================================================
 // Handler types

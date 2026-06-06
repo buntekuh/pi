@@ -201,9 +201,12 @@ func (b *builder) addToClass(cls *Class, d ast.Decl, ownerClass string, isLibrar
 	case *ast.InterfaceHandlerDecl:
 		cls.Interfaces = append(cls.Interfaces, b.buildInterface(d, ownerClass, isLibrary))
 	case *ast.InstanceDecl:
-		child := b.buildNode(d, isLibrary)
-		cls.Children = append(cls.Children, child)
-		b.registerNode(child)
+		// "Object log" inside a class body declares a per-instance sub-object.
+		// Store as SubObjectValue; codegen creates a named sub-node per instance.
+		cls.Props = append(cls.Props, &Prop{
+			Key:   d.Name,
+			Value: SubObjectValue{ClassName: d.ClassName},
+		})
 	}
 }
 

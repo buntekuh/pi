@@ -276,11 +276,53 @@ func writeNodes(b *strings.Builder, w *world.World) {
 		}
 		writeExits(b, node)
 		writeConnects(b, node)
+		// Collect SubObjectValue props from the class hierarchy and add refs
+		// to per-instance sub-nodes (e.g. "rolodex.log").
+		subObjs := collectSubObjectProps(node.ClassName, w)
+		effectiveProps := node.Props
+		if len(subObjs) > 0 {
+			effectiveProps = make([]*world.Prop, len(node.Props), len(node.Props)+len(subObjs))
+			copy(effectiveProps, node.Props)
+			for _, sop := range subObjs {
+				effectiveProps = append(effectiveProps, &world.Prop{
+					Key:   sop.key,
+					Value: world.RefValue{Name: node.Name + "." + sop.key},
+				})
+			}
+		}
 		b.WriteString(", props: ")
-		writePropsObject(b, node.Props)
+		writePropsObject(b, effectiveProps)
 		b.WriteString(" },\n")
+		// Emit the per-instance sub-nodes.
+		for _, sop := range subObjs {
+			fmt.Fprintf(b, "    %s: { class: %s, props: {} },\n",
+				jsStr(node.Name+"."+sop.key), jsStr(sop.className))
+		}
 	}
 	b.WriteString("  },\n")
+}
+
+type subObjProp struct{ key, className string }
+
+// collectSubObjectProps walks the class hierarchy of className and returns all
+// SubObjectValue properties reachable from it.
+func collectSubObjectProps(className string, w *world.World) []subObjProp {
+	var result []subObjProp
+	seen := make(map[string]bool)
+	for cls := className; cls != ""; {
+		cd, ok := w.ClassMap[cls]
+		if !ok {
+			break
+		}
+		for _, prop := range cd.Props {
+			if sov, ok := prop.Value.(world.SubObjectValue); ok && !seen[prop.Key] {
+				seen[prop.Key] = true
+				result = append(result, subObjProp{key: prop.Key, className: sov.ClassName})
+			}
+		}
+		cls = cd.Parent
+	}
+	return result
 }
 
 // writePropsObject emits a JS object literal for a slice of Props.
