@@ -11,6 +11,7 @@ Room vestibule "A grand entrance hall."
         leads to: kitchen
         is locked
         key: brass key
+    south: kitchen
 
     test "locked door blocks"
         go east. "locked"
@@ -55,6 +56,7 @@ Room bedroom "A small bedroom."
         go west. "bedroom"
 
 Item brass key "A small brass key."
+    location: vestibule
 
 test
     test "locked door blocks".

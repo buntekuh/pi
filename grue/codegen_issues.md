@@ -178,6 +178,43 @@ Lands whenever the sema test harness is next extended.
 
 ---
 
+## Top-level `Item` instances are silently reachable everywhere — [sema.go](compiler/sema/sema.go)
+
+An `Item` (or any non-Room, non-Door instance) declared at the top level with no
+`location:` property has `node.location = undefined` at runtime. The `_inScope`
+function returns `true` for any node with no location ("top-level nodes — always
+visible"), so the item is reachable from every room in the game world. This is
+almost certainly unintentional — the author probably forgot to set a starting
+location.
+
+```grue
+Item brass key "A small brass key."   # reachable everywhere — likely a bug
+```
+
+Rooms and Doors at top level are intentional (they have no location by design),
+but Item and custom class instances almost always need a placement.
+
+### What needs to happen
+
+In the sema pass, after the world is built, walk all top-level nodes and emit a
+`Warning` for any instance whose class is not a Room or Door subclass and that has
+no `location:` property set:
+
+```go
+// pseudo-code
+for _, node := range world.Nodes {
+    if node.Location == "" && !isRoomOrDoor(node.Class) {
+        a.warn("global_item", node.Line, "item %q has no location and will be reachable from everywhere", node.Name)
+    }
+}
+```
+
+### Warning to emit
+
+`global_item` — "item %q has no location and will be reachable from everywhere in the game world"
+
+---
+
 ## Fixed
 
 The following issues were resolved and are kept here for reference.
