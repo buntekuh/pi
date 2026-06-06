@@ -75,3 +75,41 @@ on inventory:
         say "You are carrying {item}."
         carried = 1
     say "You are carrying nothing." if carried == 0
+
+# ── Doors ─────────────────────────────────────────────────────────────────────
+# kind open:   false = closed (default), true = open
+# kind locked: false = unlocked (default), true = locked
+# A door with key: <item> set can be locked/unlocked with that item.
+# Door traversal is handled by the runtime (checks open/locked before moving).
+kind open: *false, true
+kind locked: *false, true
+
+on open Door:door:
+    say "The {door} is already open." if door.open is true
+    fail if door.open is true
+    say "The {door} is locked." if door.locked is true
+    fail if door.locked is true
+    door.open = true
+    say "You open the {door}."
+
+on close Door:door:
+    say "The {door} is already closed." unless door.open is true
+    fail unless door.open is true
+    door.open = false
+    say "You close the {door}."
+
+on unlock Door:door with Item:key:
+    say "The {door} is already unlocked." unless door.locked is true
+    fail unless door.locked is true
+    say "That doesn't fit the lock." if door.key isnt key
+    fail if door.key isnt key
+    door.locked = false
+    say "You unlock the {door}."
+
+on lock Door:door with Item:key:
+    say "The {door} is already locked." if door.locked is true
+    fail if door.locked is true
+    say "That doesn't fit the lock." if door.key isnt key
+    fail if door.key isnt key
+    door.locked = true
+    say "You lock the {door}."

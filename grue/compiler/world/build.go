@@ -64,6 +64,7 @@ func Build(ownFiles, libFiles []*ast.File) *World {
 	b.pass2Classes(libFiles, true)
 	b.pass3TopLevel(ownFiles, false)
 	b.pass3TopLevel(libFiles, true)
+	b.pass4TopLevelDoorExits()
 	b.buildVocab()
 	return b.w
 }
@@ -560,6 +561,82 @@ func (b *builder) addNodeVocab(node *Node) {
 	}
 	for _, child := range node.Children {
 		b.addNodeVocab(child)
+	}
+}
+
+// =============================================================================
+// Pass 4 — wire top-level door exits into connected rooms
+// =============================================================================
+
+// compassOpposite maps each compass direction to its reverse.
+var compassOpposite = map[string]string{
+	"north": "south", "south": "north",
+	"east": "west", "west": "east",
+	"up": "down", "down": "up",
+	"in": "out", "out": "in",
+	"northeast": "southwest", "southwest": "northeast",
+	"northwest": "southeast", "southeast": "northwest",
+}
+
+// pass4TopLevelDoorExits processes top-level Door nodes that declare their
+// connections via compass-direction props (e.g. east: landing, west: bedroom).
+//
+// For each fully-bidirectional door (exactly two compass direction props), it:
+//   - Adds a reverse exit to each connected room pointing at the door, so the
+//     room's exits table includes the door and players can traverse it.
+//   - Adds "leads to" props to the door node so the runtime's connects[] array
+//     is populated correctly for through-traversal.
+//
+// One-sided top-level doors (single compass prop) are skipped — they are
+// scenic or decorative and do not create automatic room connections.
+func (b *builder) pass4TopLevelDoorExits() {
+	for _, node := range b.w.Root.Children {
+		if node.ClassName != "Door" {
+			continue
+		}
+		// Collect only compass-direction props.
+		type dirEntry struct{ dir, dest string }
+		var dirs []dirEntry
+		for _, prop := range node.Props {
+			if _, ok := compassOpposite[prop.Key]; !ok {
+				continue
+			}
+			ref, ok := prop.Value.(RefValue)
+			if !ok {
+				continue
+			}
+			dirs = append(dirs, dirEntry{prop.Key, ref.Name})
+		}
+		// Only wire bidirectional doors.
+		if len(dirs) != 2 {
+			continue
+		}
+		for _, d := range dirs {
+			target := b.w.NodeMap[d.dest]
+			if target == nil {
+				continue
+			}
+			rev := compassOpposite[d.dir]
+			// Add reverse exit to the room unless it already has one.
+			already := false
+			for _, ep := range target.Props {
+				if ep.Key == rev {
+					already = true
+					break
+				}
+			}
+			if !already {
+				target.Props = append(target.Props, &Prop{
+					Key:   rev,
+					Value: RefValue{Name: node.Name},
+				})
+			}
+			// Add "leads to" prop to the door so connects[] is populated.
+			node.Props = append(node.Props, &Prop{
+				Key:   "leads to",
+				Value: RefValue{Name: d.dest},
+			})
+		}
 	}
 }
 

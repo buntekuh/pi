@@ -1,24 +1,32 @@
-# doors — top-level doors, one-way inline doors, shared inline doors
+# M12 — Doors and Keys
+# Inline shared doors, one-way doors, top-level bidirectional door.
+# State accumulates across sub-tests (no reset between them).
 
 "Doors" by Test
 
 library "standard"
 
-kind lockable: *false, true
-
-Room corridor "A narrow corridor."
-    north: great hall
-    south: vestibule
-
-Room great hall "A vast echoing hall."
-    south: corridor
-
 Room vestibule "A grand entrance hall."
-    north: corridor
-    east: Door brass door
+    east: Door brass door "A heavy brass door."
         leads to: kitchen
-        is lockable
+        is locked
         key: brass key
+
+    test "locked door blocks"
+        go east. "locked"
+
+    test "closed door blocks"
+        take brass key. "Taken."
+        unlock brass door with brass key. "unlock"
+        go east. "closed"
+
+    test "open and pass through"
+        open brass door. "open"
+        go east. "kitchen"
+
+    test "shared state other side"
+        go east. "kitchen"
+        go west. "vestibule"
 
 Room kitchen "A kitchen."
     west: Door brass door
@@ -28,34 +36,30 @@ Room cellar "A damp cellar."
     up: Door trapdoor "A heavy trapdoor."
         leads to: kitchen
 
-Door iron door, gate "A heavy iron door."
+    test "one-way door"
+        go up. "closed"
+        open trapdoor. "open"
+        go up. "kitchen"
+
+Door iron door "A heavy iron door."
     east: landing
     west: bedroom
 
 Room landing "A landing."
+
 Room bedroom "A small bedroom."
+    test "top-level door"
+        go east. "closed"
+        open iron door. "open"
+        go east. "landing"
+        go west. "bedroom"
 
 Object brass key "A small brass key."
 
 test
-    test "inline door locked".
-    test "inline door with key".
+    test "locked door blocks".
+    test "closed door blocks".
+    test "open and pass through".
+    test "shared state other side".
     test "top-level door".
     test "one-way door".
-
-test "inline door locked"
-    go north. "great hall"
-    go north. "great hall"
-    go east. "The brass door is locked."
-
-test "inline door with key"
-    take brass key. "Taken."
-    go east. "kitchen"
-
-test "top-level door"
-    go east. "landing"
-    go west. "bedroom"
-
-test "one-way door"
-    go down. "cellar"
-    go up. "kitchen"

@@ -852,6 +852,9 @@ func (c *cg) compileName(name string, sc *scope) string {
 	if sc.clsProps[name] && sc.selfName != "" {
 		return fmt.Sprintf("%s_prop(%s, %s)", rt, sc.selfName, jsStr(name))
 	}
+	if name == "true" || name == "false" {
+		return jsStr(name) // boolean kind values stored as strings at runtime
+	}
 	if _, isKind := c.kof[name]; isKind {
 		return jsStr(name)
 	}
@@ -919,9 +922,9 @@ func (c *cg) compileIs(e *ast.BinaryExpr, sc *scope) string {
 		return fmt.Sprintf("(%s === %s)", left, jsStr(right.Name))
 	}
 
-	// Boolean literals
+	// Boolean literals — kind values "true"/"false" are stored as strings at runtime.
 	if right.Name == "true" || right.Name == "false" {
-		return fmt.Sprintf("(%s === %s)", c.compileExpr(e.Left, sc), right.Name)
+		return fmt.Sprintf("(%s === %s)", c.compileExpr(e.Left, sc), jsStr(right.Name))
 	}
 
 	// General equality (instance ref or world property comparison)

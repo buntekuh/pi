@@ -473,9 +473,29 @@ const GrueRuntime = (function () {
       const room   = (_game.nodes || {})[_location];
       const exits  = (room && room.exits) ? room.exits : {};
       if (phrase in exits) {
-        const prevLoc = _location;
-        dispatch("go Room", [exits[phrase]]);
-        if (_location !== prevLoc) describeLocation();
+        const dest     = exits[phrase];
+        const destNode = (_game.nodes || {})[dest];
+        if (destNode && _instanceof(dest, "Door")) {
+          // Door traversal: check state then move to the through-room.
+          if (_prop(dest, "locked") === "true") {
+            say("The " + dest + " is locked.");
+            return;
+          }
+          if (_prop(dest, "open") !== "true") {
+            say("The " + dest + " is closed.");
+            return;
+          }
+          const connects = destNode.connects || [];
+          const through  = connects.find(r => r !== _location) ?? connects[0];
+          if (!through) { say("The " + dest + " doesn't lead anywhere."); return; }
+          const prevLoc = _location;
+          dispatch("go Room", [through]);
+          if (_location !== prevLoc) describeLocation();
+        } else {
+          const prevLoc = _location;
+          dispatch("go Room", [dest]);
+          if (_location !== prevLoc) describeLocation();
+        }
         return;
       }
     }
