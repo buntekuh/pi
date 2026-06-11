@@ -22,7 +22,6 @@ var builtinClassHierarchy = []struct{ Name, Parent string }{
 	{"Room", "Object"},
 	{"Door", "Room"},
 	{"Item", "Object"},
-	{"Scenery", "Object"},
 	{"Player", "Object"},
 	{"Number", ""},
 	{"Text", ""},

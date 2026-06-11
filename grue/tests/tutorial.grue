@@ -1,0 +1,63 @@
+# tutorial — a guided tour of Grue's core features.
+#
+# This file is a small playable game that shows the language in practice.
+# Read it alongside language.md for the full picture.
+
+"Tutorial" by Grue
+
+library "standard"
+
+# ── Backdrop ───────────────────────────────────────────────────────────────────
+# Backdrop extends Room to add an ambient view shown before the standard look
+# output. `parent` continues to the standard look handler.
+#
+# Because `on look:` has no explicit self parameter, the current room is reached
+# through player.location rather than self.
+
+class Backdrop extends Room
+
+    on look:
+        say "{player.location.backdrop}" if player.location.backdrop is set
+        parent
+
+# ── World ──────────────────────────────────────────────────────────────────────
+
+Room lodge "A cosy timber lodge. Pine boards, woodsmoke, a heavy silence."
+    east: ridge
+
+    # People: Man, Woman, Animal extend Person (library "standard") with gendered pronouns.
+    Man guide "He knows every trail on the mountain."
+
+    # Scenery items are fixed features: examinable, but not takeable.
+    Scenery fireplace "A stone hearth tall enough to stand in, stacked with glowing logs."
+
+    # Items are portable.
+    Item map "A topographical map of the surrounding peaks."
+
+Backdrop ridge "A rocky ridge above the treeline. The wind is sharp."
+    backdrop: "The peaks of the distant range saw at the sky, white and cold."
+    west: lodge
+
+# ── Tests ─────────────────────────────────────────────────────────────────────
+
+test
+    test "backdrop".
+    test "scenery".
+    test "items".
+    test "npc".
+
+test "backdrop"
+    east.  "The Ridge"
+    look.  "distant range"
+    west.  "lodge"
+
+test "scenery"
+    examine fireplace.  "stone hearth"
+
+test "items"
+    take map.  "Taken"
+    inventory.  "map"
+    drop map.  "Dropped"
+
+test "npc"
+    examine guide.  "He knows"

@@ -51,7 +51,7 @@ type Diagnostic struct {
 // builtinClasses exist without being declared.
 var builtinClasses = map[string]bool{
 	"Object": true, "Room": true, "Door": true,
-	"Player": true, "Item": true, "Scenery": true,
+	"Player": true, "Item": true,
 	"Number": true, "Text": true,
 }
 
@@ -60,8 +60,7 @@ var builtinClassParents = map[string]string{
 	"Player":  "Object",
 	"Room":    "Object",
 	"Door":    "Room",
-	"Item":    "Object",
-	"Scenery": "Object",
+	"Item": "Object",
 }
 
 // builtinKinds are world-level kinds pre-declared by the runtime.

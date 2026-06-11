@@ -78,6 +78,11 @@ The primary outstanding work is writing and testing the `List` library class its
 
 ### 4. Topic classes — dynamic dialog sets with availability rules
 
+> **`talk to NPC` is not yet implemented.** The `on talk to NPC:npc:` command
+> and its conversation UI depend on the choose overhaul described here.
+> Giving items to NPCs is handled by `on give Item:thing to Person:npc:` in
+> `standard.grue` — authors override per NPC or per item.
+
 Ink's power is first-class dialog flow. Grue can match it through class instances where each topic carries its own availability rules. The handler chain already does the right thing — what is missing is a compact declaration syntax for the inclusion predicate.
 
 ```grue

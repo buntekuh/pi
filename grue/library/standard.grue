@@ -9,11 +9,19 @@ class Person
     internal pronoun of self:
         succeed "they"
 
+    on give Item:thing to self:
+        say "They don't want that."
+        fail
+
 class Man extends Person
     is male
 
     internal pronoun of self:
         succeed "he"
+
+    on give Item:thing to self:
+        say "He doesn't want that."
+        fail
 
 class Woman extends Person
     is female
@@ -21,11 +29,19 @@ class Woman extends Person
     internal pronoun of self:
         succeed "she"
 
+    on give Item:thing to self:
+        say "She doesn't want that."
+        fail
+
 class Animal extends Person
     is neuter
 
     internal pronoun of self:
         succeed "it"
+
+    on give Item:thing to self:
+        say "It doesn't want that."
+        fail
 
 # Player pronoun: perspective-first, then gender for third person.
 internal pronoun of Player:player:
@@ -89,14 +105,23 @@ internal on go Room:destination:
 on look:
     say "{player.location.desc}" if player.location.desc is set
     for item in player.location.filter(Item):
-        say "I can see {item} here." if player.perspective is first
-        say "You can see {item} here." if player.perspective is second
-        say "{pronoun of player} can see {item} here."
+        if item.scenery isnt true:
+            say "I can see {item} here." if player.perspective is first
+            say "You can see {item} here." if player.perspective is second
+            say "{pronoun of player} can see {item} here."
     for direction, destination in player.location:
         if destination is Room:
             say "I can go {direction}." if player.perspective is first
             say "You can go {direction}." if player.perspective is second
             say "{pronoun of player} can go {direction}."
+
+# ── Scenery ───────────────────────────────────────────────────────────────────
+# Scenery items are fixed features of the world. They participate in filter(Item)
+# for examine and interaction but are hidden from the "you can see X" listing.
+kind scenery: *true, false
+
+class Scenery extends Item
+    is scenery
 
 # ── Switchable ────────────────────────────────────────────────────────────────
 kind switchable: *on, off
