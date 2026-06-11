@@ -248,7 +248,7 @@ func treeHTML(w *world.World) string {
 			ownH = append(ownH, h)
 		}
 	}
-	if len(ownH) > 0 || len(w.Root.EveryTurn) > 0 || len(w.Root.TurnRanges) > 0 {
+	if len(ownH) > 0 || len(w.Root.EveryTurn) > 0 {
 		b.WriteString("<h2>Global handlers</h2><table>\n")
 		for _, h := range ownH {
 			cls := "handler"
@@ -259,9 +259,6 @@ func treeHTML(w *world.World) string {
 		}
 		for range w.Root.EveryTurn {
 			b.WriteString("<tr><td class='turn'>(every turn)</td></tr>\n")
-		}
-		for _, tr := range w.Root.TurnRanges {
-			b.WriteString("<tr><td class='turn'>" + turnLabel(tr.From, tr.To) + "</td></tr>\n")
 		}
 		b.WriteString("</table>\n")
 	}
@@ -321,9 +318,6 @@ func writeNodeHTML(b *strings.Builder, node *world.Node, depth int) {
 	for range node.EveryTurn {
 		pills = append(pills, "<span class='turn'>(every turn)</span>")
 	}
-	for _, tr := range node.TurnRanges {
-		pills = append(pills, "<span class='turn'>"+turnLabel(tr.From, tr.To)+"</span>")
-	}
 	b.WriteString("<td>" + strings.Join(pills, " ") + "</td></tr>\n")
 
 	for _, child := range node.Children {
@@ -338,16 +332,6 @@ func he(s string) string {
 	s = strings.ReplaceAll(s, ">", "&gt;")
 	s = strings.ReplaceAll(s, `"`, "&quot;")
 	return s
-}
-
-func turnLabel(from, to int) string {
-	if to < 0 {
-		return fmt.Sprintf("turn %d-", from)
-	}
-	if from == to {
-		return fmt.Sprintf("turn %d", from)
-	}
-	return fmt.Sprintf("turn %d-%d", from, to)
 }
 
 func min(a, b int) int {

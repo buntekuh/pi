@@ -22,16 +22,10 @@ var builtinClassHierarchy = []struct{ Name, Parent string }{
 	{"Room", "Object"},
 	{"Door", "Room"},
 	{"Item", "Object"},
-	{"Container", "Item"},
-	{"Supporter", "Item"},
 	{"Scenery", "Object"},
-	{"Person", "Object"},
-	{"Man", "Person"},
-	{"Woman", "Person"},
-	{"Animal", "Object"},
 	{"Player", "Object"},
-	{"Array", "Object"},
-	{"Font", "Object"},
+	{"Number", ""},
+	{"Text", ""},
 }
 
 // Build constructs the world tree IR from validated AST files.
@@ -123,7 +117,7 @@ func (b *builder) collectKindsFromDecls(decls []ast.Decl) {
 			}
 			b.w.Kinds = append(b.w.Kinds, kind)
 			for _, v := range d.Values {
-				if v != "true" && v != "false" {
+				if v != "true" && v != "false" && v != "unset" {
 					b.kindOf[v] = d.Name
 				}
 			}
@@ -197,8 +191,6 @@ func (b *builder) addToClass(cls *Class, d ast.Decl, ownerClass string, isLibrar
 		} else {
 			cls.Handlers = append(cls.Handlers, b.buildHandler(d, ownerClass, isLibrary))
 		}
-	case *ast.TurnHandlerDecl:
-		cls.TurnRanges = append(cls.TurnRanges, b.buildTurnRange(d, isLibrary))
 	case *ast.InterfaceHandlerDecl:
 		cls.Interfaces = append(cls.Interfaces, b.buildInterface(d, ownerClass, isLibrary))
 	case *ast.InstanceDecl:
@@ -263,15 +255,19 @@ func (b *builder) addToRoot(d ast.Decl, isLibrary bool) {
 		}
 
 	case *ast.KindDecl:
-		// Top-level kind declaration also creates a world-level kind variable
-		// initialised to its default value.
-		if !isLibrary {
-			defaultVal := d.Values[d.DefaultIdx]
-			root.Props = append(root.Props, &Prop{
-				Key:   d.Name,
-				Value: KindValue{Name: defaultVal},
-			})
+		// Kind declaration only registers the kind values — it does not set any
+		// world property. Use `is <value>` at the world level to initialise the
+		// world's instance of this kind.
+
+	case *ast.KindUseDecl:
+		p := b.buildKindUse(d)
+		for i, existing := range root.Props {
+			if existing.Key == p.Key {
+				root.Props[i] = p
+				return
+			}
 		}
+		root.Props = append(root.Props, p)
 
 	case *ast.VarDecl:
 		root.Props = append(root.Props, b.buildVar(d))
@@ -288,9 +284,6 @@ func (b *builder) addToRoot(d ast.Decl, isLibrary bool) {
 			// ownerClass is empty at global scope — "self" is invalid there.
 			root.Handlers = append(root.Handlers, b.buildHandler(d, "", isLibrary))
 		}
-
-	case *ast.TurnHandlerDecl:
-		root.TurnRanges = append(root.TurnRanges, b.buildTurnRange(d, isLibrary))
 
 	case *ast.InterfaceHandlerDecl:
 		root.Interfaces = append(root.Interfaces, b.buildInterface(d, "", isLibrary))
@@ -343,8 +336,6 @@ func (b *builder) addToNode(node *Node, d ast.Decl, ownerClass string, isLibrary
 		} else {
 			node.Handlers = append(node.Handlers, b.buildHandler(d, ownerClass, isLibrary))
 		}
-	case *ast.TurnHandlerDecl:
-		node.TurnRanges = append(node.TurnRanges, b.buildTurnRange(d, isLibrary))
 	case *ast.InterfaceHandlerDecl:
 		node.Interfaces = append(node.Interfaces, b.buildInterface(d, ownerClass, isLibrary))
 	case *ast.InstanceDecl:
@@ -477,15 +468,6 @@ func resolveSignature(sig []ast.SigPart, ownerClass string) []ast.SigPart {
 	return resolved
 }
 
-func (b *builder) buildTurnRange(d *ast.TurnHandlerDecl, isLibrary bool) *TurnRangeHandler {
-	return &TurnRangeHandler{
-		From:      d.From,
-		To:        d.To,
-		Body:      d.Body,
-		IsLibrary: isLibrary,
-	}
-}
-
 func (b *builder) buildInterface(d *ast.InterfaceHandlerDecl, ownerClass string, isLibrary bool) *InterfaceHandler {
 	iface := &InterfaceHandler{
 		Signature: d.Signature,
@@ -517,6 +499,13 @@ func (b *builder) buildExpr(e ast.Expr) Value {
 	switch v := e.(type) {
 	case *ast.NumberLit:
 		return NumberValue{V: v.Value}
+	case *ast.UnaryExpr:
+		if v.Op == "-" {
+			if n, ok := v.Expr.(*ast.NumberLit); ok {
+				return NumberValue{V: -n.Value}
+			}
+		}
+		return UnsetValue{}
 	case *ast.StringLit:
 		return StringValue{V: v.Value}
 	case *ast.UnsetExpr:
@@ -531,12 +520,6 @@ func (b *builder) buildExpr(e ast.Expr) Value {
 			items[i] = b.buildExpr(item)
 		}
 		return ListValue{Items: items}
-	case *ast.ArrayLit:
-		items := make([]Value, len(v.Items))
-		for i, item := range v.Items {
-			items[i] = b.buildExpr(item)
-		}
-		return ArrayValue{Items: items}
 	}
 	return UnsetValue{}
 }

@@ -1,41 +1,34 @@
-# silently — suppresses say throughout call chain
+# silently — parent silently runs parent handler without say output
 
 "Silently" by Test
 
-kind opened: *closed, open
+library "standard"
 
-Object box "A wooden box."
+Room lab "A stark laboratory."
+    Item box "A plain box."
 
-internal has object:thing:
-    succeed if player has thing
-    fail not_here
+on greet Object:thing:
+    say "Hello, {thing}."
 
-on open Object:container:
-    say "You don't have that." unless {has container silently}
-    fail not_here unless {has container silently}
-    say "Already open." if container is opened
-    fail already_open if container is opened
-    container.opened = open
-    say "{container} swings open."
+on greet Item:thing:
+    parent silently
+    say "Greeted {thing} without noise."
 
-on check Object:thing:
-    if {has thing silently}:
-        say "{thing} is in your inventory."
-    else:
-        say "{thing} is not here."
+on announce Object:thing:
+    say "Base: {thing}."
+
+on announce Item:thing:
+    parent
+    say "Extra: {thing} announced."
 
 test
-    test "silently suppresses output".
-    test "check uses silently".
+    test "parent silently hides parent output".
+    test "plain parent shows parent output".
 
-test "silently suppresses output"
-    take box. "Taken."
-    open box. "swings open"
-    open box. "Already open."
-    open box. not "swings open"
+test "parent silently hides parent output"
+    greet box. "Greeted box without noise."
+    greet box. not "Hello"
 
-test "check uses silently"
-    check box. "not here"
-    take box.
-    check box. "in your inventory"
-    check box. not "not here"
+test "plain parent shows parent output"
+    announce box. "Base: box."
+    announce box. "Extra: box announced."

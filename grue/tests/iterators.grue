@@ -2,23 +2,25 @@
 
 "Iterators" by Test
 
+library "standard"
+
 Room storeroom "A cluttered storeroom."
-    Object crate "A wooden crate."
-    Object barrel "A heavy barrel."
-    Object lantern "A dusty lantern."
+    Item crate "A wooden crate."
+    Item barrel "A heavy barrel."
+    Item lantern "A dusty lantern."
 
 on inventory:
     say "You are carrying: [nobreak]"
-    for item in player.filter(Object):
+    for item in player.filter(Item):
         say "{item}[comma]"
 
 on list exits:
-    for key, value in location.filter(Room):
+    for key, value in player.location.filter(Room):
         say "{key}: {value}[comma]"
 
 on count things:
-    var n
-    for item in location.filter(Object):
+    var n: 0
+    for item in player.location.filter(Item):
         n + 1
     say "{n} things here."
 
@@ -31,10 +33,13 @@ on log entries:
         say "Entry {i}."
 
 test
-    test "inventory".
     test "filter by class".
+    test "inventory".
     test "range repeat".
     test "range with index".
+
+test "filter by class"
+    count things. "3 things here."
 
 test "inventory"
     take crate. "Taken."
@@ -42,9 +47,6 @@ test "inventory"
     inventory. "crate"
     inventory. "lantern"
     inventory. not "barrel"
-
-test "filter by class"
-    count things. "3 things here."
 
 test "range repeat"
     bang 3 times. "Bang!"

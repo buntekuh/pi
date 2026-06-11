@@ -215,6 +215,83 @@ for _, node := range world.Nodes {
 
 ---
 
+## Every-turn handler firing order is undefined — [runtime.js](compiler/codegen/runtime.js)
+
+Multiple `every turn` handlers can fire in the same turn — e.g. `internal every
+turn` from the standard library, a room-scoped `on every turn:`, and a
+world-level `on every turn:` from the game all fire together. The current
+runtime fires them in registration order (library handlers first, then game
+handlers in declaration order), but this is incidental and undocumented.
+
+Ordering matters in practice: standard's `internal every turn` detects room
+changes and fires `enter`/`leave`; a room handler may itself change
+`player.location`; a world-level counter handler may need to run before or
+after the room handler. Wrong order produces wrong output or missed enter/leave
+calls.
+
+### What needs to happen
+
+Define explicit precedence tiers and sort the handler chain on load:
+
+1. `internal` library handlers (e.g. standard's location-change detector)
+2. World-level game handlers (no owner)
+3. Room-scoped handlers (owner is current room)
+4. Object/item-scoped handlers (owner is in scope)
+
+Within each tier, declaration order is preserved. The sort should happen once
+in `init` after `_game` is set, not on every turn.
+
+---
+
+## `executeTurn` has no guard against concurrent calls — [runtime.js](compiler/codegen/runtime.js)
+
+`executeTurn` is not re-entrant. `_turnPending` and `_turnResolve` are single
+scalars, so a second call while the first is still open (e.g. the user submits
+input while an async `_holdTurn` release is outstanding) would reset them,
+silently lose the in-flight turn, and corrupt state.
+
+This is not a problem today because all handlers are synchronous. It becomes a
+problem the moment an async handler is added (AI NPC, network call, timed event).
+
+### What needs to happen
+
+When async handlers become real, disable the input box (and any other turn-
+triggering path) for the duration of an open turn:
+
+```js
+function executeTurn(input) {
+    if (_turnOpen) return;   // or queue the input
+    _turnOpen = true;
+    // ... existing body ...
+    const p = _turnPending === 0 ? Promise.resolve() : new Promise(r => { _turnResolve = r; });
+    return p.finally(() => { _turnOpen = false; });
+}
+```
+
+The input element should be `disabled` while `_turnOpen` is true so the UI
+enforces the same invariant.
+
+---
+
+## `from N to M:` in a test body silently no-ops when the loop body contains player commands — [world/build.go](compiler/world/build.go)
+
+`buildTest` walks the test body statements and type-asserts each one to `*ast.TestCmdStmt`. Any other statement type — including `*ast.ForFromStmt` — falls into the else branch and is emitted as a setup step (a JS closure). When codegen runs the `ForFromStmt` closure, the inner body is a `TestCmdStmt`, which has no meaningful JS representation outside the test runner; the loop body executes zero times from the game's perspective.
+
+```grue
+test "stack full"
+    from 0 to 4:
+        insert beep cube in Benson.   # never dispatched — silently no-ops
+    insert dance cube in Benson. "stack is full"
+```
+
+The workaround is explicit repetition. `from` loops in test bodies that contain player commands are currently invalid.
+
+### What needs to happen
+
+`buildTest` should detect a `ForFromStmt` whose body parses as a list of `TestCmdStmt` nodes and unroll it at compile time into N copies of those test steps. The loop bounds must be integer literals for this to work at compile time; variable bounds would require a different approach.
+
+---
+
 ## Fixed
 
 The following issues were resolved and are kept here for reference.

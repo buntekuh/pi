@@ -1,0 +1,13 @@
+"List smoke" by Test
+library "list"
+
+Room lab "A lab."
+
+on test list:
+    var List l
+    append lab to l
+    append lab to l
+    append lab to l
+    say "length: {l.length}"
+    for item in l:
+        say "item: {item}"

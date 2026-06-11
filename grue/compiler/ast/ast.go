@@ -212,6 +212,7 @@ type KindUseDecl struct {
 
 func (d *KindUseDecl) Position() Pos { return d.Pos }
 func (d *KindUseDecl) declNode()     {}
+func (d *KindUseDecl) stmtNode()     {}
 
 
 // InterfaceHandlerDecl declares a handler that calls an external capability:
@@ -251,24 +252,6 @@ type HandlerDecl struct {
 
 func (d *HandlerDecl) Position() Pos { return d.Pos }
 func (d *HandlerDecl) declNode()     {}
-
-// TurnHandlerDecl fires on a specific turn or turn range:
-//
-//	on turn 1:       From=1,  To=1   (exact)
-//	on turn 5-6:     From=5,  To=6   (inclusive range)
-//	on turn 7-:      From=7,  To=-1  (7 and beyond)
-//	on turn -8:      From=0,  To=8   (up to and including 8)
-//
-// To=-1 means no upper bound.
-type TurnHandlerDecl struct {
-	Pos  Pos
-	From int
-	To   int
-	Body []Stmt
-}
-
-func (d *TurnHandlerDecl) Position() Pos { return d.Pos }
-func (d *TurnHandlerDecl) declNode()     {}
 
 // TestDecl is a named or default test block:
 //
@@ -366,8 +349,10 @@ func (s *SucceedStmt) stmtNode()     {}
 // ParentStmt calls the next handler in the chain:
 //
 //	parent
+//	parent silently
 type ParentStmt struct {
-	Pos Pos
+	Pos      Pos
+	Silently bool
 }
 
 func (s *ParentStmt) Position() Pos { return s.Pos }
@@ -591,12 +576,15 @@ func (s *BareCallWithBodyStmt) stmtNode()     {}
 //
 //	var n
 //	var d: absolute(score - target)
+//	var List l          (IsNodeVar — creates a runtime node of class List)
 //
 // It mirrors VarDecl but implements Stmt instead of Decl.
 type VarStmt struct {
-	Pos     Pos
-	Name    string
-	Initial Expr // nil if no initializer
+	Pos       Pos
+	Name      string
+	TypeName  string // optional dispatch-type annotation, e.g. "Room"; class name when IsNodeVar
+	Initial   Expr   // nil if no initializer
+	IsNodeVar bool   // true → var ClassName Name; allocates a runtime node
 }
 
 func (s *VarStmt) Position() Pos { return s.Pos }
@@ -641,17 +629,6 @@ type ListLit struct {
 func (e *ListLit) Position() Pos { return e.Pos }
 func (e *ListLit) exprNode()     {}
 
-// ArrayLit is an Array literal: [expr, expr, ...].
-// Creates an Array instance with auto-assigned integer keys starting at 0.
-// Only unkeyed expressions are permitted — named properties inside [...]
-// are a compile error enforced by the semantic analyser.
-type ArrayLit struct {
-	Pos   Pos
-	Items []Expr
-}
-
-func (e *ArrayLit) Position() Pos { return e.Pos }
-func (e *ArrayLit) exprNode()     {}
 
 // NumberLit is an integer literal: 0, 10, 42.
 type NumberLit struct {
@@ -742,6 +719,21 @@ type IsSetExpr struct {
 
 func (e *IsSetExpr) Position() Pos { return e.Pos }
 func (e *IsSetExpr) exprNode()     {}
+
+// ImplicitIsExpr is a world-level kind check with no explicit subject:
+//
+//	if is development
+//	if is release
+//
+// The kind name is inferred from the value name at codegen time via kof.
+type ImplicitIsExpr struct {
+	Pos    Pos
+	Value  string
+	Negate bool // true for "isnt"
+}
+
+func (e *ImplicitIsExpr) Position() Pos { return e.Pos }
+func (e *ImplicitIsExpr) exprNode()     {}
 
 // FuncCallExpr is a built-in math function call:
 //

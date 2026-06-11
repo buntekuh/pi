@@ -1,0 +1,110 @@
+# list — tests for library/list.grue linked list operations
+
+"List" by Test
+
+library "standard"
+library "list"
+
+List items
+
+on clear items:
+    items.value = unset
+    items.next = unset
+
+on add item Text:name:
+    append name to items
+
+on prepend item Text:name:
+    prepend name to items
+
+on show items:
+    for item in items:
+        say "{item}"
+
+on count items:
+    say "{items.length}"
+
+on get item Number:index:
+    var result
+    result = at index in items
+    say "{result}"
+
+on pop first:
+    var result
+    result = take first from items
+    say "{result}"
+
+on pop last:
+    var result
+    result = take last from items
+    say "{result}"
+
+test
+    test "append and iterate".
+    test "prepend".
+    test "length".
+    test "at index".
+    test "take first".
+    test "take last".
+    test "empty list".
+
+test "append and iterate"
+    clear items.
+    add item "alpha".
+    add item "beta".
+    add item "gamma".
+    show items. "alpha"
+    show items. "beta"
+    show items. "gamma"
+
+test "prepend"
+    clear items.
+    add item "beta".
+    add item "gamma".
+    prepend item "alpha".
+    show items. "alpha"
+    show items. "beta"
+    show items. "gamma"
+
+test "length"
+    clear items.
+    count items. "0"
+    add item "one".
+    count items. "1"
+    add item "two".
+    add item "three".
+    count items. "3"
+
+test "at index"
+    clear items.
+    add item "red".
+    add item "green".
+    add item "blue".
+    get item 0. "red"
+    get item 1. "green"
+    get item 2. "blue"
+
+test "take first"
+    clear items.
+    add item "first".
+    add item "second".
+    add item "third".
+    pop first. "first"
+    count items. "2"
+    show items. "second"
+    show items. "third"
+
+test "take last"
+    clear items.
+    add item "one".
+    add item "two".
+    add item "three".
+    pop last. "three"
+    count items. "2"
+    show items. "one"
+    show items. "two"
+
+test "empty list"
+    clear items.
+    count items. "0"
+    show items. not "alpha"

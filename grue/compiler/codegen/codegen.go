@@ -146,7 +146,6 @@ func Emit(w *world.World, g *grammar.Grammar) string {
 	writeNodes(&b, w)
 	writeStart(&b, w)
 	c.writeHandlers(&b)
-	c.writeTurnRanges(&b)
 	writeGrammar(&b, g)
 	writeVocab(&b, w)
 	c.writeTests(&b)
@@ -498,13 +497,27 @@ func (c *cg) buildHandlerChains() map[string][]handlerEntry {
 		}
 	}
 
+	// Same inheritance for global (root) handlers: a handler like "greet Item"
+	// needs the "greet Object" handler appended so that `parent` can cross the
+	// class boundary.
+	for _, h := range c.w.Root.Handlers {
+		for _, part := range h.ResolvedSig {
+			if p, ok := part.(ast.SigParam); ok {
+				if cls, ok := c.w.ClassMap[p.Type]; ok && cls.Parent != "" {
+					c.appendAncestorHandlers(chains, h.SigKey, p.Type, cls.Parent, add)
+				}
+			}
+		}
+	}
+
 	return chains
 }
 
 // compileEveryTurnFn compiles an every-turn handler body into a JS function.
-// If ownerName is non-empty (node-scoped), the function takes a `self` param
-// so that bare property names (e.g. `fuse`) resolve via _prop(self, "fuse").
-// Instance props are added to clsProps so they compile as self-accesses.
+// Both class-scoped and node-scoped handlers receive `self` — the runtime
+// passes the current instance name in both cases. clsProps is populated from
+// the class hierarchy so bare property names resolve via _prop(self, key).
+// Instance props are also added for node-scoped handlers.
 func (c *cg) compileEveryTurnFn(body []ast.Stmt, ownerName, ownerClass string) string {
 	sc := &scope{
 		vars:     make(map[string]bool),
@@ -512,8 +525,10 @@ func (c *cg) compileEveryTurnFn(body []ast.Stmt, ownerName, ownerClass string) s
 		clsProps: make(map[string]bool),
 	}
 	paramStr := ""
-	if ownerName != "" {
+	if ownerName != "" || ownerClass != "" {
 		sc.selfName = "self"
+		sc.vars["self"] = true
+		sc.varTypes["self"] = ownerClass
 		// Collect class hierarchy props.
 		cls := ownerClass
 		for cls != "" {
@@ -539,45 +554,6 @@ func (c *cg) compileEveryTurnFn(body []ast.Stmt, ownerName, ownerClass string) s
 		return fmt.Sprintf("function(%s) {}", paramStr)
 	}
 	return fmt.Sprintf("function(%s) {\n%s      }", paramStr, compiled)
-}
-
-// writeTurnRanges emits the turnRanges array used by _fireTurnRangeHandlers.
-func (c *cg) writeTurnRanges(b *strings.Builder) {
-	type rangeEntry struct {
-		from, to   int
-		owner      string
-		ownerClass string
-		body       []ast.Stmt
-	}
-	var entries []rangeEntry
-	collect := func(owner, ownerClass string, trs []*world.TurnRangeHandler) {
-		for _, tr := range trs {
-			entries = append(entries, rangeEntry{tr.From, tr.To, owner, ownerClass, tr.Body})
-		}
-	}
-	for _, node := range worldNodes(c.w) {
-		collect(node.Name, node.ClassName, node.TurnRanges)
-	}
-	for _, cls := range c.w.Classes {
-		collect(cls.Name, cls.Name, cls.TurnRanges)
-	}
-	collect("", "", c.w.Root.TurnRanges)
-
-	if len(entries) == 0 {
-		b.WriteString("  turnRanges: [],\n")
-		return
-	}
-	b.WriteString("  turnRanges: [\n")
-	for _, e := range entries {
-		owner := "null"
-		if e.owner != "" {
-			owner = jsStr(e.owner)
-		}
-		fn := c.compileEveryTurnFn(e.body, e.owner, e.ownerClass)
-		fmt.Fprintf(b, "    { from: %d, to: %d, owner: %s, fn: %s },\n",
-			e.from, e.to, owner, fn)
-	}
-	b.WriteString("  ],\n")
 }
 
 // appendAncestorHandlers walks up the class hierarchy from parentName and
@@ -641,6 +617,57 @@ func replaceClassInSigKey(sigKey, oldClass, newClass string) string {
 
 // ── handler compilation ────────────────────────────────────────────────────
 
+// nodeVarEscapes reports whether varName is ever stored into a property
+// anywhere in stmts (including nested blocks). Used to decide whether to
+// emit _freeNode cleanup at handler end.
+func nodeVarEscapes(name string, stmts []ast.Stmt) bool {
+	for _, s := range stmts {
+		if nodeVarStmtEscapes(name, s) {
+			return true
+		}
+	}
+	return false
+}
+
+func nodeVarStmtEscapes(name string, s ast.Stmt) bool {
+	switch s := s.(type) {
+	case *ast.AssignStmt:
+		if _, ok := s.Target.(*ast.PropertyAccess); ok {
+			if n, ok := s.Value.(*ast.NameExpr); ok && n.Name == name {
+				return true
+			}
+		}
+	case *ast.IfStmt:
+		if nodeVarEscapes(name, s.Body) || nodeVarEscapes(name, s.Else) {
+			return true
+		}
+		for _, elif := range s.ElseIf {
+			if nodeVarStmtEscapes(name, elif) {
+				return true
+			}
+		}
+	case *ast.ForInStmt:
+		return nodeVarEscapes(name, s.Body)
+	case *ast.ForFromStmt:
+		return nodeVarEscapes(name, s.Body)
+	case *ast.RepeatStmt:
+		return nodeVarEscapes(name, s.Body)
+	case *ast.WhenStmt:
+		for _, arm := range s.Arms {
+			if nodeVarEscapes(name, arm.Body) {
+				return true
+			}
+		}
+	case *ast.ChooseStmt:
+		for _, arm := range s.Arms {
+			if nodeVarEscapes(name, arm.Body) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (c *cg) compileHandler(h *world.Handler, ownerClass string) string {
 	var params []string
 	for _, part := range h.ResolvedSig {
@@ -649,12 +676,48 @@ func (c *cg) compileHandler(h *world.Handler, ownerClass string) string {
 		}
 	}
 	sc := newScope(h, ownerClass, c.w)
+
+	// Collect leading node-var declarations (Pascal-style: must appear before
+	// any executable statement). Extend scope so the body can use them.
+	var nodeVars []*ast.VarStmt
+	for _, stmt := range h.Body {
+		vs, ok := stmt.(*ast.VarStmt)
+		if !ok || !vs.IsNodeVar {
+			break
+		}
+		nodeVars = append(nodeVars, vs)
+		sc = sc.extendTyped(vs.Name, vs.TypeName)
+	}
+
 	body := c.compileStmts(h.Body, sc, "        ")
-	if body == "" {
+
+	if body == "" && len(nodeVars) == 0 {
 		return fmt.Sprintf("function(%s) {}", strings.Join(params, ", "))
 	}
-	return fmt.Sprintf("function(%s) {\n%s      }",
-		strings.Join(params, ", "), body)
+	if len(nodeVars) == 0 {
+		return fmt.Sprintf("function(%s) {\n%s      }", strings.Join(params, ", "), body)
+	}
+
+	// Emit _newNode declarations and collect non-escaped vars for cleanup.
+	var decls strings.Builder
+	var frees []string
+	for _, nv := range nodeVars {
+		decls.WriteString(fmt.Sprintf("        const %s = %s_newNode(%q);\n", nv.Name, rt, nv.TypeName))
+		if !nodeVarEscapes(nv.Name, h.Body) {
+			frees = append(frees, nv.Name)
+		}
+	}
+
+	if len(frees) == 0 {
+		return fmt.Sprintf("function(%s) {\n%s%s      }", strings.Join(params, ", "), decls.String(), body)
+	}
+
+	var cleanup strings.Builder
+	for _, name := range frees {
+		cleanup.WriteString(fmt.Sprintf("            %s_freeNode(%s);\n", rt, name))
+	}
+	return fmt.Sprintf("function(%s) {\n%s        try {\n%s        } finally {\n%s        }\n      }",
+		strings.Join(params, ", "), decls.String(), body, cleanup.String())
 }
 
 func (c *cg) compileStmts(stmts []ast.Stmt, sc *scope, indent string) string {
@@ -664,7 +727,7 @@ func (c *cg) compileStmts(stmts []ast.Stmt, sc *scope, indent string) string {
 		// block, so that {d} in a following say compiles to the local var, not
 		// to R._get("d").
 		if vs, ok := stmt.(*ast.VarStmt); ok {
-			sc = sc.extendTyped(vs.Name, "")
+			sc = sc.extendTyped(vs.Name, vs.TypeName)
 		}
 		b.WriteString(c.compileStmt(stmt, sc, indent))
 	}
@@ -687,30 +750,51 @@ func (c *cg) compileStmt(stmt ast.Stmt, sc *scope, indent string) string {
 		return c.withGuard(line, s.Guard, sc, indent) + "\n"
 
 	case *ast.FailStmt:
-		var tok string
+		var line string
 		if s.Token == nil {
-			tok = `""`
+			line = fmt.Sprintf("%s%s_fail();", indent, rt)
 		} else {
-			tok = c.compileSignalToken(s.Token, sc)
+			line = fmt.Sprintf("%s%s_fail(%s);", indent, rt, c.compileSignalToken(s.Token, sc))
 		}
-		line := fmt.Sprintf("%s%s_fail(%s);", indent, rt, tok)
 		return c.withGuard(line, s.Guard, sc, indent) + "\n"
 
 	case *ast.SucceedStmt:
-		var tok string
+		var line string
 		if s.Token == nil {
-			tok = `""`
+			line = fmt.Sprintf("%s%s_succeed();", indent, rt)
 		} else {
-			tok = c.compileSignalToken(s.Token, sc)
+			line = fmt.Sprintf("%s%s_succeed(%s);", indent, rt, c.compileSignalToken(s.Token, sc))
 		}
-		line := fmt.Sprintf("%s%s_succeed(%s);", indent, rt, tok)
 		return c.withGuard(line, s.Guard, sc, indent) + "\n"
 
 	case *ast.ParentStmt:
+		if s.Silently {
+			return fmt.Sprintf("%s%s_parentS();\n", indent, rt)
+		}
 		return fmt.Sprintf("%s%s_parent();\n", indent, rt)
 
 	case *ast.StopStmt:
 		return fmt.Sprintf("%s%s_stop();\n", indent, rt)
+
+	case *ast.KindUseDecl:
+		// `is release` / `is lit` as a runtime statement — same semantics as
+		// the declaration form but executed at handler call time.
+		var key, val string
+		if kindName, isValue := c.kof[s.Value]; isValue {
+			key, val = kindName, s.Value
+		} else {
+			// boolean kind: `is lit` → lit=true, `is not lit` → lit=false
+			key = s.Value
+			if s.Negate {
+				val = "false"
+			} else {
+				val = "true"
+			}
+		}
+		if sc.clsProps[key] && sc.selfName != "" {
+			return fmt.Sprintf("%s%s_setProp(%s, %s, %s);\n", indent, rt, sc.selfName, jsStr(key), jsStr(val))
+		}
+		return fmt.Sprintf("%s%s_set(%s, %s);\n", indent, rt, jsStr(key), jsStr(val))
 
 	case *ast.AssignStmt:
 		rhs := c.compileExpr(s.Value, sc)
@@ -727,6 +811,9 @@ func (c *cg) compileStmt(stmt ast.Stmt, sc *scope, indent string) string {
 		return c.withGuard(line, s.Guard, sc, indent) + "\n"
 
 	case *ast.VarStmt:
+		if s.IsNodeVar {
+			return "" // emitted as const at handler top by compileHandler
+		}
 		if s.Initial != nil {
 			init := c.compileExpr(s.Initial, sc)
 			return fmt.Sprintf("%slet %s = %s;\n", indent, s.Name, init)
@@ -758,7 +845,7 @@ func (c *cg) compileStmt(stmt ast.Stmt, sc *scope, indent string) string {
 		return c.compileWhen(s, sc, indent)
 
 	case *ast.ChooseStmt:
-		return fmt.Sprintf("%s%s_choose(%s);\n", indent, rt, jsStr(s.Prompt))
+		return c.compileChoose(s, sc, indent)
 
 	case *ast.CallStmt:
 		expr := c.compileExpr(s.Call, sc)
@@ -766,6 +853,11 @@ func (c *cg) compileStmt(stmt ast.Stmt, sc *scope, indent string) string {
 		return c.withGuard(line, s.Guard, sc, indent) + "\n"
 
 	case *ast.BareCallStmt:
+		if nameExpr, ok := s.Expr.(*ast.NameExpr); ok {
+			if words := strings.Fields(nameExpr.Name); len(words) == 1 {
+				return fmt.Sprintf("%s%s_call(%s);\n", indent, rt, jsStr(nameExpr.Name))
+			}
+		}
 		expr := c.compileExpr(s.Expr, sc)
 		return fmt.Sprintf("%s%s;\n", indent, expr)
 
@@ -776,8 +868,24 @@ func (c *cg) compileStmt(stmt ast.Stmt, sc *scope, indent string) string {
 	return ""
 }
 
+// compileBoolCond wraps an expression for use as a boolean condition.
+// Comparisons and explicit boolean ops already produce JS booleans; everything
+// else (names, property reads, handler calls) goes through _truthy() so that
+// only null/unset and the string "false" are falsy — 0 is truthy in Grue.
+func (c *cg) compileBoolCond(e ast.Expr, sc *scope) string {
+	switch t := e.(type) {
+	case *ast.BinaryExpr, *ast.IsSetExpr:
+		return c.compileExpr(e, sc)
+	case *ast.UnaryExpr:
+		if t.Op == "not" {
+			return c.compileExpr(e, sc)
+		}
+	}
+	return fmt.Sprintf("%s_truthy(%s)", rt, c.compileExpr(e, sc))
+}
+
 func (c *cg) compileIf(s *ast.IfStmt, sc *scope, indent string) string {
-	cond := c.compileExpr(s.Cond, sc)
+	cond := c.compileBoolCond(s.Cond, sc)
 	if s.Unless {
 		cond = "!(" + cond + ")"
 	}
@@ -785,7 +893,7 @@ func (c *cg) compileIf(s *ast.IfStmt, sc *scope, indent string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%sif (%s) {\n%s%s}", indent, cond, body, indent)
 	for _, elif := range s.ElseIf {
-		elifCond := c.compileExpr(elif.Cond, sc)
+		elifCond := c.compileBoolCond(elif.Cond, sc)
 		if elif.Unless {
 			elifCond = "!(" + elifCond + ")"
 		}
@@ -810,7 +918,7 @@ func (c *cg) compileForIn(s *ast.ForInStmt, sc *scope, indent string) string {
 			return fmt.Sprintf("%sfor (const %s of %s) {\n%s%s}\n",
 				indent, s.Key, coll, body, indent)
 		}
-		return fmt.Sprintf("%sfor (const %s of %s_children(%s)) {\n%s%s}\n",
+		return fmt.Sprintf("%sfor (const %s of %s_iter(%s)) {\n%s%s}\n",
 			indent, s.Key, rt, coll, body, indent)
 	}
 	inner := sc.extend(s.Key).extend(s.Value)
@@ -821,9 +929,17 @@ func (c *cg) compileForIn(s *ast.ForInStmt, sc *scope, indent string) string {
 
 func (c *cg) compileWhen(s *ast.WhenStmt, sc *scope, indent string) string {
 	var expr string
-	if hce, ok := s.Expr.(*ast.HandlerCallExpr); ok {
-		expr = c.compileHandlerCall(hce, sc, true)
-	} else {
+	switch e := s.Expr.(type) {
+	case *ast.HandlerCallExpr:
+		expr = c.compileHandlerCall(e, sc, true)
+	case *ast.NameExpr:
+		words := strings.Fields(e.Name)
+		if len(words) > 1 && !c.nod[e.Name] {
+			expr = c.compileBareCall(words, sc, true)
+		} else {
+			expr = c.compileExpr(s.Expr, sc)
+		}
+	default:
 		expr = c.compileExpr(s.Expr, sc)
 	}
 	var b strings.Builder
@@ -840,6 +956,18 @@ func (c *cg) compileWhen(s *ast.WhenStmt, sc *scope, indent string) string {
 		fmt.Fprintf(&b, "%s    break;\n%s  }\n", indent, indent)
 	}
 	fmt.Fprintf(&b, "%s}\n", indent)
+	return b.String()
+}
+
+func (c *cg) compileChoose(s *ast.ChooseStmt, sc *scope, indent string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s%s_choose(%s, [\n", indent, rt, jsStr(s.Prompt))
+	for _, arm := range s.Arms {
+		body := c.compileStmts(arm.Body, sc, indent+"        ")
+		fmt.Fprintf(&b, "%s    { label: %s, fn: function() {\n%s%s    }},\n",
+			indent, jsStr(arm.Label), body, indent)
+	}
+	fmt.Fprintf(&b, "%s]);\n", indent)
 	return b.String()
 }
 
@@ -900,7 +1028,7 @@ func (c *cg) withGuard(line string, g *ast.Guard, sc *scope, indent string) stri
 	if g == nil {
 		return line
 	}
-	cond := c.compileExpr(g.Cond, sc)
+	cond := c.compileBoolCond(g.Cond, sc)
 	if g.Unless {
 		return fmt.Sprintf("%sif (!(%s)) { %s }", indent, cond, strings.TrimLeft(line, " \t"))
 	}
@@ -939,14 +1067,23 @@ func (c *cg) compileExpr(e ast.Expr, sc *scope) string {
 			return fmt.Sprintf("%s_isset(%s)", rt, inner)
 		}
 		return fmt.Sprintf("(!%s_isset(%s))", rt, inner)
+	case *ast.ImplicitIsExpr:
+		kindName := c.kof[e.Value]
+		if kindName == "" {
+			kindName = e.Value // fallback; sema should catch unknown values
+		}
+		var cmp string
+		if sc.clsProps[kindName] && sc.selfName != "" {
+			cmp = fmt.Sprintf("(%s_prop(%s, %s) === %s)", rt, sc.selfName, jsStr(kindName), jsStr(e.Value))
+		} else {
+			cmp = fmt.Sprintf("(%s_get(%s) === %s)", rt, jsStr(kindName), jsStr(e.Value))
+		}
+		if e.Negate {
+			return "!(" + cmp + ")"
+		}
+		return cmp
 	case *ast.HandlerCallExpr:
 		return c.compileHandlerCallExpr(e, sc)
-	case *ast.ArrayLit:
-		items := make([]string, len(e.Items))
-		for i, item := range e.Items {
-			items[i] = c.compileExpr(item, sc)
-		}
-		return "[" + strings.Join(items, ", ") + "]"
 	}
 	return "undefined"
 }
@@ -957,6 +1094,7 @@ func (c *cg) compileExpr(e ast.Expr, sc *scope) string {
 //   - Class properties (when self is in scope) → _prop(self, key)
 //   - Known kind values → quoted string (kind values stored by name at runtime)
 //   - Known instance names → quoted string (node key in the world tree)
+//   - Multi-word names → bare handler call (_call / _callS for "silently" suffix)
 //   - Anything else → _get(key) (world-level property lookup)
 func (c *cg) compileName(name string, sc *scope) string {
 	if sc.vars[name] {
@@ -974,7 +1112,85 @@ func (c *cg) compileName(name string, sc *scope) string {
 	if c.nod[name] {
 		return jsStr(name)
 	}
+	words := strings.Fields(name)
+	if len(words) > 1 {
+		return c.compileBareCall(words, sc, false)
+	}
 	return rt + "_get(" + jsStr(name) + ")"
+}
+
+// compileBareCall compiles a multi-word bare handler call (no braces).
+// Words that are scope variables become args (with their declared type in the
+// sigKey); all other words become sigKey keywords. A trailing "silently" suffix
+// switches _call to _callS. tokenCtx=true uses _callT (for when expressions).
+func (c *cg) compileBareCall(words []string, sc *scope, tokenCtx bool) string {
+	silently := len(words) > 0 && words[len(words)-1] == "silently"
+	if silently {
+		words = words[:len(words)-1]
+	}
+	var sigParts []string
+	var argExprs []string
+	i := 0
+	for i < len(words) {
+		// Scope variable (always single word) — becomes a typed arg.
+		if sc.vars[words[i]] {
+			typ := sc.varTypes[words[i]]
+			if typ == "" {
+				typ = "_"
+			}
+			sigParts = append(sigParts, typ)
+			argExprs = append(argExprs, words[i])
+			i++
+			continue
+		}
+		// Try longest-first span of words as a known node instance.
+		// Skip a single-word node match when the immediately following word is a
+		// scope variable — "beep self" should resolve to verb "beep" + Robot arg,
+		// not Command arg + Robot arg, even though "beep" is also a node name.
+		matched := false
+		for end := len(words); end > i; end-- {
+			span := strings.Join(words[i:end], " ")
+			if n, ok := c.w.NodeMap[span]; ok {
+				if end-i == 1 && end < len(words) && sc.vars[words[end]] {
+					break // single-word node followed by scope var → treat as keyword
+				}
+				cls := n.ClassName
+				if cls == "" {
+					cls = "_"
+				}
+				sigParts = append(sigParts, cls)
+				argExprs = append(argExprs, jsStr(span))
+				i = end
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			// World-level var: type unknown at compile time; runtime resolves via _class().
+			if c.isWorldVar(words[i]) {
+				sigParts = append(sigParts, "_")
+				argExprs = append(argExprs, rt+"_get("+jsStr(words[i])+")")
+				i++
+				continue
+			}
+			sigParts = append(sigParts, words[i])
+			i++
+		}
+	}
+	sigKey := strings.Join(sigParts, " ")
+	var fn string
+	switch {
+	case tokenCtx:
+		fn = rt + "_callT"
+	case silently:
+		fn = rt + "_callS"
+	default:
+		fn = rt + "_call"
+	}
+	if len(argExprs) > 0 {
+		return fmt.Sprintf("%s(%s, %s)", fn, jsStr(sigKey), strings.Join(argExprs, ", "))
+	}
+	return fmt.Sprintf("%s(%s)", fn, jsStr(sigKey))
 }
 
 func (c *cg) compileBinary(e *ast.BinaryExpr, sc *scope) string {
@@ -1023,6 +1239,12 @@ func (c *cg) compileIs(e *ast.BinaryExpr, sc *scope) string {
 	if kindName, ok := c.kof[right.Name]; ok {
 		left := c.compileExpr(e.Left, sc)
 		if leftName, leftIsName := e.Left.(*ast.NameExpr); leftIsName {
+			// "topic is nothing_to_talk_about" — left IS the kind variable itself
+			// (e.g., a world-level kind var named the same as the kind). The var
+			// already stores the value directly, so compare without _prop.
+			if leftName.Name == kindName && !sc.vars[leftName.Name] {
+				return fmt.Sprintf("(%s === %s)", left, jsStr(right.Name))
+			}
 			if sc.clsProps[leftName.Name] && sc.selfName != "" {
 				// left is a class property already compiled as R._prop(self,"propName")
 				// — it already holds the kind value, so compare directly
@@ -1045,6 +1267,17 @@ func (c *cg) compileIs(e *ast.BinaryExpr, sc *scope) string {
 }
 
 // isKindExpr reports whether an expression statically resolves to a kind value.
+// isWorldVar reports whether name is a world-level property (var declared at
+// world scope). These have no compile-time type; dispatch uses runtime _class().
+func (c *cg) isWorldVar(name string) bool {
+	for _, p := range c.w.Root.Props {
+		if p.Key == name {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *cg) isKindExpr(e ast.Expr) bool {
 	name, ok := e.(*ast.NameExpr)
 	if !ok {

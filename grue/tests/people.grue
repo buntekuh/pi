@@ -1,0 +1,21 @@
+"People" by Test
+
+library "standard"
+
+Room lab "A lab."
+Man bob "Bob"
+Woman alice "Alice"
+Animal cat "A cat"
+
+on test pronouns:
+    say "{pronoun of bob}"
+    say "{pronoun of alice}"
+    say "{pronoun of cat}"
+
+test
+    test "pronouns".
+
+test "pronouns"
+    test pronouns. "he"
+    test pronouns. "she"
+    test pronouns. "it"

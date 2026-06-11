@@ -5,6 +5,7 @@
 #   build.sh -r game.grue   run      → compile + open in browser
 #   build.sh -t game.grue   test     → compile + open in browser with tests auto-run
 #   build.sh -ct game.grue  compile and test (flags combine freely)
+#   build.sh -a             compile all files in tests/
 #
 # If no flag is given, -c is assumed.
 # Errors and warnings are printed to stderr with file:line references.
@@ -29,21 +30,90 @@ fi
 do_compile=false
 do_run=false
 do_test=false
+do_all=false
+do_all_test=false
 
-while getopts 'crt' opt; do
+while getopts 'crtaA' opt; do
     case "$opt" in
         c) do_compile=true ;;
         r) do_run=true ;;
         t) do_test=true ;;
-        *) printf 'usage: build.sh [-c|-r|-t] <file.grue>\n' >&2; exit 1 ;;
+        a) do_all=true ;;
+        A) do_all_test=true ;;
+        *) printf 'usage: build.sh [-c|-r|-t|-a|-A] [file.grue]\n' >&2; exit 1 ;;
     esac
 done
 shift $((OPTIND - 1))
 
+# ── open helpers ──────────────────────────────────────────────────────────
+
+open_file() {
+    if command -v open &>/dev/null; then
+        open "$1"
+    elif command -v xdg-open &>/dev/null; then
+        xdg-open "$1"
+    else
+        printf 'build.sh: no browser opener found (tried open, xdg-open)\n' >&2
+        exit 1
+    fi
+}
+
+# ── compile all tests ─────────────────────────────────────────────────────
+
+compile_all_tests() {
+    local tests_dir="$SCRIPT_DIR/tests"
+    local ok=0 fail=0
+    for f in "$tests_dir"/*.grue; do
+        [[ -f "$f" ]] || continue
+        local name
+        name="$(basename "$f" .grue)"
+        local out="$DIST_DIR/${name}.html"
+        if "$GRUC" -o "$out" "$f" 2>/dev/null; then
+            printf 'OK  %s\n' "$name"
+            (( ok++ )) || true
+        else
+            printf 'ERR %s\n' "$name" >&2
+            (( fail++ )) || true
+        fi
+    done
+    printf '%d compiled, %d failed\n' "$ok" "$fail"
+    [[ $fail -eq 0 ]]
+}
+
+test_all_in_browser() {
+    local tests_dir="$SCRIPT_DIR/tests"
+    local inject='<script>window.addEventListener("DOMContentLoaded",function(){var b=document.getElementById("tests-btn");if(b)b.click();});</script></body>'
+    for f in "$tests_dir"/*.grue; do
+        [[ -f "$f" ]] || continue
+        local name out test_out
+        name="$(basename "$f" .grue)"
+        out="$DIST_DIR/${name}.html"
+        test_out="$DIST_DIR/${name}.test.html"
+        if ! "$GRUC" -o "$out" "$f" 2>/dev/null; then
+            printf 'ERR %s (compile failed — skipping)\n' "$name" >&2
+            continue
+        fi
+        sed "s|</body>|${inject}|" "$out" > "$test_out"
+        open_file "$test_out"
+        #printf '%s — press Enter for next: ' "$name"
+        #IFS= read -r _
+    done
+}
+
+if $do_all; then
+    compile_all_tests
+    exit
+fi
+
+if $do_all_test; then
+    test_all_in_browser
+    exit
+fi
+
 src="${1:-}"
 
 if [[ -z "$src" ]]; then
-    printf 'usage: build.sh [-c|-r|-t] <file.grue>\n' >&2
+    printf 'usage: build.sh [-c|-r|-t|-a|-A] [file.grue]\n' >&2
     exit 1
 fi
 
@@ -82,19 +152,6 @@ if ! "$GRUC" -o "$out" "$src_abs"; then
 fi
 
 printf '%s\n' "$out"
-
-# ── open helpers ──────────────────────────────────────────────────────────
-
-open_file() {
-    if command -v open &>/dev/null; then
-        open "$1"
-    elif command -v xdg-open &>/dev/null; then
-        xdg-open "$1"
-    else
-        printf 'build.sh: no browser opener found (tried open, xdg-open)\n' >&2
-        exit 1
-    fi
-}
 
 # ── run ───────────────────────────────────────────────────────────────────
 # -t supersedes -r (tests implies run; don't open two tabs)

@@ -12,10 +12,10 @@
 //	├── Game       — title/author/version
 //	├── Kinds      — all declared kind types
 //	├── Classes    — class definitions (templates, not instances)
-//	│   └── each Class: Parent, Props, Handlers, EveryTurn, TurnRanges
+//	│   └── each Class: Parent, Props, Handlers, EveryTurn
 //	├── Root       — the singleton world node
 //	│   ├── Props  — world-level vars and kind variables
-//	│   ├── Handlers / EveryTurn / TurnRanges — global handlers
+//	│   ├── Handlers / EveryTurn — global handlers
 //	│   └── Children — all top-level instances (rooms, objects, doors, player…)
 //	│       └── each Node: Props, Handlers, Children (nested instances)
 //	├── NodeMap    — instance name → *Node for fast lookup
@@ -105,9 +105,8 @@ type Class struct {
 	Props      []*Prop
 	Handlers   []*Handler
 	Interfaces []*InterfaceHandler
-	EveryTurn  []*EveryTurnHandler
-	TurnRanges []*TurnRangeHandler
-	Children   []*Node // instances declared inside the class body (rare)
+	EveryTurn []*EveryTurnHandler
+	Children  []*Node // instances declared inside the class body (rare)
 	IsLibrary  bool
 }
 
@@ -131,10 +130,9 @@ type Node struct {
 	Props      []*Prop
 	Handlers   []*Handler
 	Interfaces []*InterfaceHandler
-	EveryTurn  []*EveryTurnHandler
-	TurnRanges []*TurnRangeHandler
-	Children   []*Node
-	Parent     *Node // nil for direct children of Root
+	EveryTurn []*EveryTurnHandler
+	Children  []*Node
+	Parent    *Node // nil for direct children of Root
 	IsLibrary  bool
 }
 
@@ -178,17 +176,12 @@ type SubObjectValue struct{ ClassName string }
 // (e.g. context: mood, location). Used for multi-value properties.
 type ListValue struct{ Items []Value }
 
-// ArrayValue is an Array literal (e.g. primes: [2, 3, 5, 7, 11]).
-// The code generator emits an inline Array object with integer keys 0..N-1.
-type ArrayValue struct{ Items []Value }
-
-func (NumberValue) valueNode()   {}
-func (StringValue) valueNode()   {}
-func (RefValue) valueNode()      {}
-func (KindValue) valueNode()     {}
-func (UnsetValue) valueNode()    {}
-func (ListValue) valueNode()     {}
-func (ArrayValue) valueNode()    {}
+func (NumberValue) valueNode()    {}
+func (StringValue) valueNode()    {}
+func (RefValue) valueNode()       {}
+func (KindValue) valueNode()      {}
+func (UnsetValue) valueNode()     {}
+func (ListValue) valueNode()      {}
 func (SubObjectValue) valueNode() {}
 
 // =============================================================================
@@ -230,19 +223,6 @@ type InterfaceHandler struct {
 // EveryTurnHandler fires unconditionally on every turn.
 // Multiple EveryTurnHandlers at the same level fire in declaration order.
 type EveryTurnHandler struct {
-	Body      []ast.Stmt
-	IsLibrary bool
-}
-
-// TurnRangeHandler fires on a specific turn or turn range.
-// Multiple TurnRangeHandlers with the same range fire in declaration order.
-//
-// From and To are inclusive. To == -1 means no upper bound (fires from From
-// onward). The special case From == 0, To == -1 is never produced — use
-// EveryTurnHandler for unconditional turn firing.
-type TurnRangeHandler struct {
-	From      int // inclusive lower bound
-	To        int // inclusive upper bound; -1 = no upper bound
 	Body      []ast.Stmt
 	IsLibrary bool
 }

@@ -230,6 +230,8 @@ func (p *parser) parseTopLevelDecl() (ast.Decl, error) {
 			return p.parseIncludeDecl()
 		case "kind":
 			return p.parseKindDecl()
+		case "is":
+			return p.parseKindUseDecl()
 		case "var":
 			return p.parseVarDecl()
 		case "class":
@@ -747,12 +749,21 @@ func (p *parser) parsePropertyValue() (ast.Expr, error) {
 		n, _ := strconv.Atoi(tok.Value)
 		return &ast.NumberLit{Pos: pos, Value: n}, nil
 
+	case lexer.MINUS:
+		p.advance()
+		next := p.peek()
+		if next.Type != lexer.NUMBER {
+			return nil, fmt.Errorf("%s: expected number after '-', got %s %q",
+				p.pos2str(next), next.Type, next.Value)
+		}
+		p.advance()
+		n, _ := strconv.Atoi(next.Value)
+		return &ast.NumberLit{Pos: pos, Value: -n}, nil
+
 	case lexer.STRING:
 		p.advance()
 		return &ast.StringLit{Pos: pos, Value: tok.Value}, nil
 
-	case lexer.LBRACKET:
-		return p.parseArrayLit()
 	}
 
 	return nil, fmt.Errorf("%s: expected property value, got %s %q",
@@ -788,14 +799,13 @@ func (p *parser) parseKindUseDecl() (*ast.KindUseDecl, error) {
 // Handler declaration
 // =============================================================================
 
-// parseHandlerDecl parses a handler or turn-handler declaration.
+// parseHandlerDecl parses a handler declaration.
 //
 // Forms:
 //
 //	on open Ledger:ledger at number:page:
 //	internal has object:thing:
 //	on every turn:
-//	on turn 1:  /  on turn 5-6:  /  on turn 7-:  /  on turn -8:
 //
 // The "internal" modifier is checked before consuming "on" because it changes
 // what follows ("internal on ..." with explicit "on", or "internal has ..."
@@ -816,15 +826,6 @@ func (p *parser) parseHandlerDecl() (ast.Decl, error) {
 	} else {
 		if err := p.expectWord("on"); err != nil {
 			return nil, err
-		}
-	}
-
-	// Special case: "on turn N:" / "on turn N-M:" / "on turn N-:" / "on turn -N:"
-	if p.atWord("turn") {
-		next := p.peekAt(1)
-		if next.Type == lexer.NUMBER || next.Type == lexer.MINUS {
-			_ = internal // turn handlers fire unconditionally; internal is ignored
-			return p.parseTurnHandlerDecl(pos)
 		}
 	}
 
@@ -870,71 +871,6 @@ func (p *parser) parseHandlerDecl() (ast.Decl, error) {
 		Signature: sig,
 		Body:      body,
 	}, nil
-}
-
-// parseTurnHandlerDecl parses:
-//
-//	on turn 1:        exact turn
-//	on turn 5-6:      inclusive range
-//	on turn 7-:       7 and beyond (To = -1)
-//	on turn -8:       up to and including 8 (From = 0)
-func (p *parser) parseTurnHandlerDecl(pos ast.Pos) (*ast.TurnHandlerDecl, error) {
-	p.advance() // consume "turn"
-
-	from, to := 0, -1
-
-	if p.at(lexer.MINUS) {
-		// "-N" form: up to and including N
-		p.advance() // consume "-"
-		tok, err := p.expect(lexer.NUMBER)
-		if err != nil {
-			return nil, err
-		}
-		to = atoi(tok.Value)
-	} else {
-		// starts with a number
-		tok, err := p.expect(lexer.NUMBER)
-		if err != nil {
-			return nil, err
-		}
-		from = atoi(tok.Value)
-		to = from // default: exact turn
-
-		if p.at(lexer.MINUS) {
-			p.advance() // consume "-"
-			if p.at(lexer.NUMBER) {
-				// "N-M" range
-				tok2, err := p.expect(lexer.NUMBER)
-				if err != nil {
-					return nil, err
-				}
-				to = atoi(tok2.Value)
-			} else {
-				// "N-" form: N and beyond
-				to = -1
-			}
-		}
-	}
-
-	if _, err := p.expect(lexer.COLON); err != nil {
-		return nil, err
-	}
-	if err := p.expectNewline(); err != nil {
-		return nil, err
-	}
-	body, err := p.parseStmtBlock()
-	if err != nil {
-		return nil, err
-	}
-	return &ast.TurnHandlerDecl{Pos: pos, From: from, To: to, Body: body}, nil
-}
-
-func atoi(s string) int {
-	n := 0
-	for _, c := range s {
-		n = n*10 + int(c-'0')
-	}
-	return n
 }
 
 // internal interface Object:response Object:request:
@@ -1094,10 +1030,16 @@ func (p *parser) parseStmt() (ast.Stmt, error) {
 	case "parent":
 		p.advance()
 		stmt := &ast.ParentStmt{Pos: ast.Pos{Line: tok.Line, Col: tok.Col}}
+		if p.peek().Value == "silently" {
+			p.advance()
+			stmt.Silently = true
+		}
 		if err := p.expectNewline(); err != nil {
 			return nil, err
 		}
 		return stmt, nil
+	case "is":
+		return p.parseKindUseDecl()
 	case "if", "unless":
 		return p.parseIfStmt()
 	case "for":
@@ -1188,12 +1130,12 @@ func (p *parser) parseSucceedStmt() (*ast.SucceedStmt, error) {
 	p.advance() // consume "succeed"
 
 	var token ast.Expr
-	if p.at(lexer.WORD) && !isGuardKeyword(p.peek().Value) && !p.at(lexer.NEWLINE) {
-		tok := p.advance()
-		token = &ast.NameExpr{Pos: ast.Pos{Line: tok.Line, Col: tok.Col}, Name: tok.Value}
-	} else if p.at(lexer.STRING) {
-		tok := p.advance()
-		token = &ast.StringLit{Pos: ast.Pos{Line: tok.Line, Col: tok.Col}, Value: tok.Value}
+	if !p.at(lexer.NEWLINE) && !p.at(lexer.EOF) && !isGuardKeyword(p.peek().Value) {
+		var err error
+		token, err = p.parseExpr()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	guard, err := p.parseOptionalGuard()
@@ -1517,12 +1459,37 @@ func (p *parser) parseCallStmt() (*ast.CallStmt, error) {
 func (p *parser) parseVarDeclStmt() (*ast.VarStmt, error) {
 	pos := p.currentPos()
 	p.advance() // consume "var"
+
+	// Node var: var ClassName varName  (ClassName starts with uppercase, then varName, then newline)
+	if p.at(lexer.WORD) && len(p.peek().Value) > 0 && p.peek().Value[0] >= 'A' && p.peek().Value[0] <= 'Z' {
+		tok1 := p.peekAt(1)
+		tok2 := p.peekAt(2)
+		if tok1.Type == lexer.WORD && (tok2.Type == lexer.NEWLINE || tok2.Type == lexer.EOF) {
+			className := p.advance().Value
+			varName := p.advance().Value
+			if err := p.expectNewline(); err != nil {
+				return nil, err
+			}
+			return &ast.VarStmt{Pos: pos, Name: varName, TypeName: className, IsNodeVar: true}, nil
+		}
+	}
+
 	name, err := p.expect(lexer.WORD)
 	if err != nil {
 		return nil, err
 	}
+	var typeName string
 	var initial ast.Expr
-	if p.match(lexer.COLON) {
+	// Optional type annotation: var name TypeName: expr
+	// Detected by WORD followed immediately by COLON (distinguishes from plain var name: expr).
+	if p.at(lexer.WORD) && p.peekAt(1).Type == lexer.COLON {
+		typeName = p.advance().Value
+		p.advance() // consume ":"
+		initial, err = p.parseExpr()
+		if err != nil {
+			return nil, err
+		}
+	} else if p.match(lexer.COLON) {
 		initial, err = p.parseExpr()
 		if err != nil {
 			return nil, err
@@ -1531,7 +1498,7 @@ func (p *parser) parseVarDeclStmt() (*ast.VarStmt, error) {
 	if err := p.expectNewline(); err != nil {
 		return nil, err
 	}
-	return &ast.VarStmt{Pos: pos, Name: name.Value, Initial: initial}, nil
+	return &ast.VarStmt{Pos: pos, Name: name.Value, TypeName: typeName, Initial: initial}, nil
 }
 
 // =============================================================================
@@ -1666,8 +1633,69 @@ func (p *parser) parseAssignOrMutateStmt() (ast.Stmt, error) {
 		return &ast.BareCallStmt{Pos: pos, Expr: lhs}, nil
 	}
 
+	// Bare handler call with non-word argument (number, string, or braced expression):
+	//   score 10
+	//   say "text"  — but "say" is dispatched earlier, so this handles other handlers
+	if nameExpr, ok := lhs.(*ast.NameExpr); ok {
+		if tok.Type == lexer.NUMBER || tok.Type == lexer.STRING ||
+			tok.Type == lexer.LBRACE || tok.Type == lexer.LPAREN || tok.Type == lexer.LBRACKET {
+			call, err := p.parseBareCallTail(pos, nameExpr.Name)
+			if err != nil {
+				return nil, err
+			}
+			guard, err := p.parseOptionalGuard()
+			if err != nil {
+				return nil, err
+			}
+			if err := p.expectNewline(); err != nil {
+				return nil, err
+			}
+			return &ast.CallStmt{Pos: pos, Call: call, Guard: guard}, nil
+		}
+	}
+
 	return nil, fmt.Errorf("%s: expected assignment or mutation, got %s %q",
 		p.pos2str(tok), tok.Type, tok.Value)
+}
+
+// parseBareCallTail builds a HandlerCallExpr from an initial word-only name plus
+// any following non-word arguments. Words that follow an argument are added as
+// additional keywords. "silently" is recognised as a modifier rather than a keyword.
+//
+//	score 10           → HandlerCallExpr[Word("score"), Arg(10)]
+//	foo 5 bar "baz"    → HandlerCallExpr[Word("foo"), Arg(5), Word("bar"), Arg("baz")]
+func (p *parser) parseBareCallTail(pos ast.Pos, initialName string) (*ast.HandlerCallExpr, error) {
+	var parts []ast.HandlerCallPart
+	for _, word := range strings.Fields(initialName) {
+		parts = append(parts, ast.HandlerCallWord{Word: word})
+	}
+	silently := false
+	for !p.at(lexer.NEWLINE) && !p.at(lexer.EOF) {
+		tok := p.peek()
+		if tok.Type == lexer.WORD {
+			if isGuardKeyword(tok.Value) {
+				break
+			}
+			if tok.Value == "silently" {
+				silently = true
+				p.advance()
+				continue
+			}
+			parts = append(parts, ast.HandlerCallWord{Word: tok.Value})
+			p.advance()
+		} else if tok.Type == lexer.NUMBER || tok.Type == lexer.STRING ||
+			tok.Type == lexer.LBRACE || tok.Type == lexer.LPAREN ||
+			tok.Type == lexer.LBRACKET {
+			expr, err := p.parsePrimary()
+			if err != nil {
+				return nil, err
+			}
+			parts = append(parts, ast.HandlerCallArg{Expr: expr})
+		} else {
+			break
+		}
+	}
+	return &ast.HandlerCallExpr{Pos: pos, Parts: parts, Silently: silently}, nil
 }
 
 // =============================================================================
@@ -1759,29 +1787,53 @@ func (p *parser) isTestStmtKeyword() bool {
 		"var", "fail", "succeed", "stop", "parent":
 		return true
 	}
+	// WORD immediately followed by '(' is a function call — always a statement.
+	if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Type == lexer.LPAREN {
+		return true
+	}
 	return false
 }
 
 // lineHasAssignment scans forward from the current position to determine
-// whether this line is an assignment statement. It looks for =, +=, or -=
-// before the next NEWLINE/EOF, without consuming any tokens.
+// whether this line is an assignment statement. It looks for =, +=, -=, or
+// the "is" keyword (kind assignment) before the next NEWLINE/EOF, without
+// consuming any tokens.
 //
 // This scan is needed in test blocks to distinguish:
-//   - "lamp.light = lit"  → regular assignment statement (set up test state)
-//   - "lamp lit"          → player command (issue to the game engine)
+//   - "lamp.light = lit"   → regular assignment statement (set up test state)
+//   - "topic is nothing"   → kind assignment (= and is are equivalent)
+//   - "lamp lit"           → player command (issue to the game engine)
+//   - "open box. "Opened"" → player command with assertion (DOT present)
 //
-// Without the scan, the parser could not decide which path to take on a line
-// starting with a bare WORD — both forms start the same way.
+// "is" is only treated as an assignment indicator when no DOT appears on the
+// line — a DOT marks the end of a player command, so "open box." stays a
+// command even if some other word on the line could be "is".
 func (p *parser) lineHasAssignment() bool {
+	hasIs := false
 	for i := p.pos; i < len(p.tokens); i++ {
 		switch p.tokens[i].Type {
 		case lexer.EQ, lexer.PLUSEQ, lexer.MINUSEQ:
 			return true
-		case lexer.NEWLINE, lexer.EOF:
+		case lexer.DOT:
+			// DOT followed by a WORD or LBRACE is a property access (lamp.light,
+			// log.{page}) — keep scanning. DOT followed by anything else (STRING,
+			// NEWLINE, EOF) ends a player command.
+			if i+1 < len(p.tokens) {
+				next := p.tokens[i+1].Type
+				if next == lexer.WORD || next == lexer.LBRACE {
+					continue
+				}
+			}
 			return false
+		case lexer.NEWLINE, lexer.EOF:
+			return hasIs
+		case lexer.WORD:
+			if p.tokens[i].Value == "is" {
+				hasIs = true
+			}
 		}
 	}
-	return false
+	return hasIs
 }
 
 // parseTestCmd parses one test command line.
@@ -1827,6 +1879,26 @@ func (p *parser) parseTestCmd() (*ast.TestCmdStmt, error) {
 			return nil, err
 		}
 		// sub-test calls may have no assertion
+		if !p.at(lexer.NEWLINE) {
+			if err := p.parseTestAssertion(cmd); err != nil {
+				return nil, err
+			}
+		}
+		if err := p.expectNewline(); err != nil {
+			return nil, err
+		}
+		return cmd, nil
+	}
+
+	// "choose" followed by string: choice-selection step — the label is sent as
+	// the player's input when the runtime is in pending-choice mode.
+	if p.atWord("choose") && p.peekAt(1).Type == lexer.STRING {
+		p.advance() // consume "choose"
+		label := p.advance().Value
+		cmd := &ast.TestCmdStmt{Pos: pos, Command: []string{label}}
+		if _, err := p.expect(lexer.DOT); err != nil {
+			return nil, err
+		}
 		if !p.at(lexer.NEWLINE) {
 			if err := p.parseTestAssertion(cmd); err != nil {
 				return nil, err
@@ -2066,6 +2138,17 @@ func (p *parser) parseUnary() (ast.Expr, error) {
 		}
 		return &ast.UnaryExpr{Pos: pos, Op: "-", Expr: expr}, nil
 	}
+	// `is <kindvalue>` / `isnt <kindvalue>` — implicit world-level kind check.
+	if p.atWord("is") || p.atWord("isnt") {
+		pos := p.currentPos()
+		negate := p.peek().Value == "isnt"
+		p.advance() // consume "is" / "isnt"
+		val, err := p.expect(lexer.WORD)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.ImplicitIsExpr{Pos: pos, Value: val.Value, Negate: negate}, nil
+	}
 	return p.parsePostfix()
 }
 
@@ -2146,9 +2229,6 @@ func (p *parser) parsePrimary() (ast.Expr, error) {
 	case lexer.LBRACE:
 		// Inline handler call: {handler args silently?}
 		return p.parseHandlerCallExpr()
-
-	case lexer.LBRACKET:
-		return p.parseArrayLit()
 
 	case lexer.LPAREN:
 		p.advance()
@@ -2240,54 +2320,6 @@ func (p *parser) parseFuncCall() (*ast.FuncCallExpr, error) {
 	return &ast.FuncCallExpr{Pos: pos, Name: name, Args: args}, nil
 }
 
-// parseArrayLit parses an array literal: [expr, expr, ...]
-// Keys are auto-assigned 0, 1, 2, … in declaration order by the compiler.
-// NEWLINE, INDENT, and DEDENT tokens are skipped so multiline arrays work.
-// Named keys are explicitly rejected here (use an Object instead) because
-// allowing "key: value" inside [...] would create ambiguity between arrays
-// and objects, and would require a different AST node type.
-//
-//	primes: [
-//	    2, 3, 5,
-//	    7, 11
-//	]
-func (p *parser) parseArrayLit() (*ast.ArrayLit, error) {
-	pos := p.currentPos()
-	p.advance() // consume [
-	p.skipArrayWhitespace()
-	var items []ast.Expr
-	for !p.at(lexer.RBRACKET) && !p.at(lexer.EOF) {
-		item, err := p.parseExpr()
-		if err != nil {
-			return nil, err
-		}
-		p.skipArrayWhitespace()
-		if p.at(lexer.COLON) {
-			tok := p.peek()
-			return nil, fmt.Errorf("%s: named properties are not allowed in array literals; use an Object instead",
-				p.pos2str(tok))
-		}
-		items = append(items, item)
-		if !p.match(lexer.COMMA) {
-			p.skipArrayWhitespace()
-			break
-		}
-		p.skipArrayWhitespace()
-	}
-	if _, err := p.expect(lexer.RBRACKET); err != nil {
-		return nil, err
-	}
-	return &ast.ArrayLit{Pos: pos, Items: items}, nil
-}
-
-// skipArrayWhitespace discards NEWLINE, INDENT, and DEDENT tokens that the
-// lexer emits inside a multiline [...] literal. These are structural tokens
-// whose indentation meaning is irrelevant once we are inside brackets.
-func (p *parser) skipArrayWhitespace() {
-	for p.at(lexer.NEWLINE) || p.at(lexer.INDENT) || p.at(lexer.DEDENT) {
-		p.advance()
-	}
-}
 
 // parseHandlerCallExpr parses {handler args silently?}
 func (p *parser) parseHandlerCallExpr() (*ast.HandlerCallExpr, error) {

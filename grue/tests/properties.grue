@@ -2,6 +2,8 @@
 
 "Properties" by Test
 
+library "standard"
+
 Room kitchen "A kitchen."
     north: hallway
 
@@ -33,6 +35,7 @@ test "exits"
 
 test "seal and unseal"
     go north. "hallway"
+    go south. "kitchen"
     seal north. "sealed"
     go north. "no exit to the north"
     unseal north. "open"

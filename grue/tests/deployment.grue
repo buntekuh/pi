@@ -1,0 +1,22 @@
+# deployment — build mode kind from standard library
+
+"Deployment" by Test
+
+library "standard"
+
+Room lab "A laboratory."
+
+on check mode:
+    say "mode is development" if is development
+    say "mode is release" if is release
+
+on deploy:
+    is release
+
+test
+    test "default is development".
+
+test "default is development"
+    check mode. "mode is development"
+    deploy
+    check mode. "mode is release"

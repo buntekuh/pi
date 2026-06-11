@@ -2,28 +2,40 @@
 
 "Choose" by Test
 
-kind topic: *unset, jason, help, farewell
-kind opinion: *unset, exasperating, love_interest
+class Topic
+Topic Jason
+Topic Help
+Topic Farewell
+
+class Opinion
+Opinion Exasperating
+Opinion Beloved
+
+var topic
+var opinion
 
 Object Medea "A woman of fierce intelligence."
 
 on talk to Medea:
+    say "we are talking"
     choose "What do you want to talk about?":
         "Tell me about Jason.":
-            topic is jason
+            topic = Jason
             choose:
                 "Exasperating.":
-                    opinion is exasperating
+                    opinion = Exasperating
                     say "She grimaces."
                 "The man I love.":
-                    opinion is love interest
+                    opinion = Beloved
                     say "Her eyes soften."
         "I need your help.":
-            topic is help
+            topic = Help
             say "Medea considers your request."
         "Farewell.":
-            topic is farewell
+            topic = Farewell
             say "She nods curtly."
+
+Room home
 
 test
     test "top-level choice".

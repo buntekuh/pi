@@ -2,6 +2,7 @@ package grammar
 
 import (
 	"sort"
+	"strings"
 
 	"gruc/ast"
 	"gruc/world"
@@ -91,24 +92,31 @@ func insert(node *TrieNode, sig []ast.SigPart, sigKey string) {
 			if node.Keywords == nil {
 				node.Keywords = make(map[string]*TrieNode)
 			}
-			next, ok := node.Keywords[p.Word]
+			next, ok := node.Keywords[strings.ToLower(p.Word)]
 			if !ok {
 				next = newTrieNode()
-				node.Keywords[p.Word] = next
+				node.Keywords[strings.ToLower(p.Word)] = next
 			}
 			node = next
 
 		case ast.SigParam:
+			typ := p.Type
+			switch typ {
+			case "Text":
+				typ = "string"
+			case "Number":
+				typ = "number"
+			}
 			var next *TrieNode
 			for _, edge := range node.Params {
-				if edge.Type == p.Type {
+				if edge.Type == typ {
 					next = edge.Next
 					break
 				}
 			}
 			if next == nil {
 				next = newTrieNode()
-				node.Params = append(node.Params, &ParamEdge{Type: p.Type, Next: next})
+				node.Params = append(node.Params, &ParamEdge{Type: typ, Next: next})
 			}
 			node = next
 		}

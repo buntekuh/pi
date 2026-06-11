@@ -50,34 +50,23 @@ type Diagnostic struct {
 
 // builtinClasses exist without being declared.
 var builtinClasses = map[string]bool{
-	"Object": true, "Room": true, "Door": true, "Array": true,
-	"Player": true, "Item": true, "Container": true, "Supporter": true,
-	"Scenery": true, "Person": true, "Man": true, "Woman": true,
-	"Animal": true, "Font": true, "Box": true,
+	"Object": true, "Room": true, "Door": true,
+	"Player": true, "Item": true, "Scenery": true,
+	"Number": true, "Text": true,
 }
 
 // builtinClassParents defines the inheritance hierarchy for built-in classes.
 var builtinClassParents = map[string]string{
-	"Array":     "Object",
-	"Player":    "Object",
-	"Room":      "Object",
-	"Door":      "Room",
-	"Item":      "Object",
-	"Container": "Item",
-	"Supporter": "Item",
-	"Scenery":   "Object",
-	"Person":    "Object",
-	"Man":       "Person",
-	"Woman":     "Person",
-	"Animal":    "Object",
-	"Font":      "Object",
-	"Box":       "Font",
+	"Player":  "Object",
+	"Room":    "Object",
+	"Door":    "Room",
+	"Item":    "Object",
+	"Scenery": "Object",
 }
 
 // builtinKinds are world-level kinds pre-declared by the runtime.
 // Values are listed without true/false (boolean kinds are handled separately).
 var builtinKinds = map[string][]string{
-	"gender":     {"neuter", "male", "female"},
 	"game_state": {"running", "won", "lost", "ended"},
 }
 
@@ -139,8 +128,9 @@ type analyser struct {
 	// failTokens and whenLabels are collected in pass 1 alongside declarations
 	// so that forward references work — a when arm can appear before the handler
 	// that produces its token.  Cross-references are checked at the end of pass 2.
-	failTokens   map[string]int // identifier token → first fail/succeed line
-	whenLabels   map[string]int // unquoted when arm label → first line
+	failTokens    map[string]int  // identifier token → first fail/succeed line
+	libFailTokens map[string]bool // tokens produced only by library handlers
+	whenLabels    map[string]int  // unquoted when arm label → first line (handler-call when only)
 }
 
 // newAnalyser returns an analyser pre-populated with all built-in classes,
@@ -153,8 +143,9 @@ func newAnalyser() *analyser {
 		classNames:   make(map[string]int),
 		classParents: make(map[string]string),
 		instances:    make(map[string]instanceInfo),
-		failTokens:   make(map[string]int),
-		whenLabels:   make(map[string]int),
+		failTokens:    make(map[string]int),
+		libFailTokens: make(map[string]bool),
+		whenLabels:    make(map[string]int),
 	}
 	for name := range builtinClasses {
 		a.classNames[name] = 0
@@ -253,6 +244,7 @@ func (s *Symbols) CheckFiles(ownFiles, libFiles []*ast.File) []Diagnostic {
 	s.a.checkKindUseRefs(allDecls)
 	s.a.checkPropertyValueRefs(allDecls)
 	s.a.checkCallArgs(allDecls)
+	s.a.markLibFailTokens(libDecls)
 	s.a.checkTokenCrossRefs()
 	s.a.checkSingletons(allDecls)
 	return s.a.diags
@@ -379,6 +371,12 @@ func (a *analyser) checkKinds(decls []ast.Decl) {
 			if v == "true" || v == "false" {
 				continue
 			}
+			// unset is a reserved value; it cannot be a kind value.
+			if v == "unset" {
+				a.errorf("kind_value_forbidden", kd.Pos.Line,
+					"'unset' is reserved and cannot be used as a kind value")
+				continue
+			}
 			if existingKind, exists := a.kindValues[v]; exists {
 				if existingKind != kd.Name {
 					a.errorf("kind_value_conflict", kd.Pos.Line,
@@ -493,8 +491,10 @@ func (a *analyser) checkPropertyValueRefsInBody(decls []ast.Decl) {
 			continue
 		}
 		if _, exists := a.instances[name.Name]; !exists {
-			a.errorf("unknown_instance_ref", prop.Pos.Line,
-				"property %q refers to unknown instance %q", prop.Key, name.Name)
+			if _, isKindValue := a.kindValues[name.Name]; !isKindValue {
+				a.errorf("unknown_instance_ref", prop.Pos.Line,
+					"property %q refers to unknown instance %q", prop.Key, name.Name)
+			}
 		}
 	}
 }
@@ -706,8 +706,19 @@ func (a *analyser) checkClassRefsInStmt(s ast.Stmt) {
 		a.checkClassRefsInStmts(s.Body)
 	case *ast.WhenStmt:
 		a.checkClassRefsInExpr(s.Expr)
+		hasDefault := false
+		hasUnquoted := false
 		for _, arm := range s.Arms {
+			if arm.Label == "default" {
+				hasDefault = true
+			} else if !arm.Quoted && arm.Label != "fail" && arm.Label != "succeed" {
+				hasUnquoted = true
+			}
 			a.checkClassRefsInStmts(arm.Body)
+		}
+		if hasUnquoted && !hasDefault {
+			a.warnf("when_no_default", s.Pos.Line,
+				"when block has no default arm — unmatched instances will be silently ignored")
 		}
 	case *ast.ChooseStmt:
 		for _, arm := range s.Arms {
@@ -722,6 +733,10 @@ func (a *analyser) checkClassRefsInStmt(s ast.Stmt) {
 		a.checkClassRefsInExpr(s.Expr)
 	case *ast.BareCallWithBodyStmt:
 		a.checkClassRefsInExpr(s.Expr)
+	case *ast.VarStmt:
+		if s.IsNodeVar {
+			a.checkClassRef(s.TypeName, s.Pos.Line)
+		}
 	}
 }
 
@@ -747,6 +762,7 @@ func (a *analyser) checkClassRefsInExpr(e ast.Expr) {
 		a.checkClassRefsInExpr(e.Collection)
 		a.checkClassRef(e.ClassName, e.Pos.Line)
 	case *ast.HandlerCallExpr:
+		a.checkHandlerCallExpr(e)
 		for _, part := range e.Parts {
 			if arg, ok := part.(ast.HandlerCallArg); ok {
 				a.checkClassRefsInExpr(arg.Expr)
@@ -758,6 +774,10 @@ func (a *analyser) checkClassRefsInExpr(e ast.Expr) {
 		}
 	case *ast.IsSetExpr:
 		a.checkClassRefsInExpr(e.Expr)
+	case *ast.ImplicitIsExpr:
+		if _, ok := a.kindValues[e.Value]; !ok {
+			a.errorf("unknown_kind_value", e.Pos.Line, "unknown kind value %q in implicit is check", e.Value)
+		}
 	}
 }
 
@@ -803,7 +823,7 @@ func resolveParamType(paramType, ownerClass string) string {
 func matchCallToHandler(words []string, sig []ast.SigPart) map[string]string {
 	result := make(map[string]string)
 	wi := 0
-	for _, part := range sig {
+	for si, part := range sig {
 		switch p := part.(type) {
 		case ast.SigKeyword:
 			if wi >= len(words) || words[wi] != p.Word {
@@ -814,8 +834,26 @@ func matchCallToHandler(words []string, sig []ast.SigPart) map[string]string {
 			if wi >= len(words) {
 				return nil
 			}
-			result[words[wi]] = p.Type
-			wi++
+			// Consume words up to the next keyword in the signature so that
+			// multi-word instance names ("living room", "brass key") are matched
+			// as a single argument rather than one word at a time.
+			end := len(words)
+			for _, rest := range sig[si+1:] {
+				if kw, ok := rest.(ast.SigKeyword); ok {
+					for wj := wi + 1; wj < len(words); wj++ {
+						if words[wj] == kw.Word {
+							end = wj
+							break
+						}
+					}
+					break
+				}
+			}
+			if end <= wi {
+				return nil
+			}
+			result[strings.Join(words[wi:end], " ")] = p.Type
+			wi = end
 		}
 	}
 	if wi != len(words) {
@@ -909,8 +947,57 @@ func (a *analyser) checkBareCallExpr(expr ast.Expr, pos ast.Pos) {
 					argWord, inst.className, expected)
 			}
 		}
-		break // matched a handler — stop searching
+		return // matched a handler — stop searching
 	}
+	a.errorf("no_handler", pos.Line, "no handler matches %q", strings.Join(words, " "))
+}
+
+// handlerCallWords extracts a flat word list from a HandlerCallExpr, using the
+// NameExpr text for arg expressions and a synthetic placeholder for others.
+func handlerCallWords(parts []ast.HandlerCallPart) []string {
+	words := make([]string, 0, len(parts))
+	for i, p := range parts {
+		switch p := p.(type) {
+		case ast.HandlerCallWord:
+			words = append(words, p.Word)
+		case ast.HandlerCallArg:
+			if name, ok := p.Expr.(*ast.NameExpr); ok {
+				words = append(words, name.Name)
+			} else {
+				words = append(words, fmt.Sprintf("__arg%d__", i))
+			}
+		}
+	}
+	return words
+}
+
+// checkHandlerCallExpr verifies that a braced handler call {…} matches a known
+// handler signature and that instance arguments satisfy the declared parameter types.
+func (a *analyser) checkHandlerCallExpr(e *ast.HandlerCallExpr) {
+	words := handlerCallWords(e.Parts)
+	for _, h := range a.handlers {
+		argMap := matchCallToHandler(words, h.sig)
+		if argMap == nil {
+			continue
+		}
+		for argWord, paramType := range argMap {
+			expected := resolveParamType(paramType, h.ownerClass)
+			if expected == "" || expected == "object" || expected == "number" || expected == "string" {
+				continue
+			}
+			inst, exists := a.instances[argWord]
+			if !exists {
+				continue
+			}
+			if !a.isSubclassOf(inst.className, expected) {
+				a.errorf("argument_type_mismatch", e.Pos.Line,
+					"argument %q is of class %q, expected %q or a subclass",
+					argWord, inst.className, expected)
+			}
+		}
+		return // matched
+	}
+	a.errorf("no_handler", e.Pos.Line, "no handler matches %q", strings.Join(words, " "))
 }
 
 // =============================================================================
@@ -964,12 +1051,16 @@ func (a *analyser) collectTokensInStmt(s ast.Stmt) {
 			}
 		}
 	case *ast.WhenStmt:
+		// Only cross-reference arm labels against fail/succeed tokens when the
+		// when subject is a handler call. Property-access subjects (e.g.
+		// prop.{i}.field) compare values, not tokens.
+		subjectIsCall := whenSubjectIsCall(s.Expr)
 		for _, arm := range s.Arms {
 			switch arm.Label {
 			case "fail", "succeed", "default":
 				// special labels — not cross-referenced
 			default:
-				if !arm.Quoted {
+				if !arm.Quoted && subjectIsCall {
 					if _, exists := a.whenLabels[arm.Label]; !exists {
 						a.whenLabels[arm.Label] = arm.Pos.Line
 					}
@@ -992,6 +1083,78 @@ func (a *analyser) collectTokensInStmt(s ast.Stmt) {
 	case *ast.ChooseStmt:
 		for _, arm := range s.Arms {
 			a.collectTokensInStmts(arm.Body)
+		}
+	}
+}
+
+// whenSubjectIsCall returns true if the when expression dispatches through the
+// handler chain and can produce fail/succeed tokens. Property accesses and plain
+// variable references compare values directly and must not be cross-referenced.
+func whenSubjectIsCall(e ast.Expr) bool {
+	switch e := e.(type) {
+	case *ast.HandlerCallExpr:
+		return true
+	case *ast.NameExpr:
+		return len(strings.Fields(e.Name)) > 1
+	}
+	return false
+}
+
+// markLibFailTokens walks library declarations and records every identifier
+// fail/succeed token into a.libFailTokens so that checkTokenCrossRefs can
+// suppress token_mismatch for tokens that only library code produces.
+func (a *analyser) markLibFailTokens(decls []ast.Decl) {
+	for _, d := range decls {
+		switch d := d.(type) {
+		case *ast.HandlerDecl:
+			a.markLibFailStmts(d.Body)
+		case *ast.ClassDecl:
+			a.markLibFailTokens(d.Body)
+		case *ast.InstanceDecl:
+			a.markLibFailTokens(d.Body)
+		}
+	}
+}
+
+func (a *analyser) markLibFailStmts(stmts []ast.Stmt) {
+	for _, s := range stmts {
+		a.markLibFailStmt(s)
+	}
+}
+
+func (a *analyser) markLibFailStmt(s ast.Stmt) {
+	switch s := s.(type) {
+	case *ast.FailStmt:
+		if s.Token != nil {
+			if name, ok := s.Token.(*ast.NameExpr); ok {
+				a.libFailTokens[name.Name] = true
+			}
+		}
+	case *ast.SucceedStmt:
+		if s.Token != nil {
+			if name, ok := s.Token.(*ast.NameExpr); ok {
+				a.libFailTokens[name.Name] = true
+			}
+		}
+	case *ast.IfStmt:
+		a.markLibFailStmts(s.Body)
+		for _, e := range s.ElseIf {
+			a.markLibFailStmt(e)
+		}
+		a.markLibFailStmts(s.Else)
+	case *ast.WhenStmt:
+		for _, arm := range s.Arms {
+			a.markLibFailStmts(arm.Body)
+		}
+	case *ast.ForInStmt:
+		a.markLibFailStmts(s.Body)
+	case *ast.ForFromStmt:
+		a.markLibFailStmts(s.Body)
+	case *ast.RepeatStmt:
+		a.markLibFailStmts(s.Body)
+	case *ast.ChooseStmt:
+		for _, arm := range s.Arms {
+			a.markLibFailStmts(arm.Body)
 		}
 	}
 }
@@ -1111,6 +1274,9 @@ func (a *analyser) mergeDoorDecls(decls []ast.Decl) {
 // called silently (the token is intentionally ignored by all callers).
 func (a *analyser) checkTokenCrossRefs() {
 	for token, line := range a.failTokens {
+		if a.libFailTokens[token] {
+			continue // library token — game code need not catch it
+		}
 		if _, exists := a.whenLabels[token]; !exists {
 			a.warnf("token_mismatch", line,
 				"token %q produced by fail/succeed is never matched by a when arm", token)

@@ -70,8 +70,25 @@ kind mood: happy, *neutral, sad
 	}
 }
 
-func TestTopLevelKindCreatesWorldProp(t *testing.T) {
+func TestTopLevelKindDoesNotAutoSeedWorldProp(t *testing.T) {
+	// `kind` declares values only — `is <value>` is required to set the world prop.
 	src := `kind mood: happy, *neutral, sad`
+	f := parseSource(t, src)
+	w := world.Build([]*ast.File{f}, nil)
+
+	for _, p := range w.Root.Props {
+		if p.Key == "mood" {
+			t.Fatal("kind declaration alone should not create a world prop")
+		}
+	}
+}
+
+func TestTopLevelIsKindSetsWorldProp(t *testing.T) {
+	// `is neutral` at world level sets the world prop.
+	src := `
+kind mood: happy, *neutral, sad
+is neutral
+`
 	f := parseSource(t, src)
 	w := world.Build([]*ast.File{f}, nil)
 
@@ -82,14 +99,14 @@ func TestTopLevelKindCreatesWorldProp(t *testing.T) {
 		}
 	}
 	if found == nil {
-		t.Fatal("world root missing 'mood' prop from top-level kind")
+		t.Fatal("world root missing 'mood' prop after `is neutral`")
 	}
 	kv, ok := found.Value.(world.KindValue)
 	if !ok {
 		t.Fatalf("mood prop value type = %T, want KindValue", found.Value)
 	}
 	if kv.Name != "neutral" {
-		t.Errorf("mood default = %q, want %q", kv.Name, "neutral")
+		t.Errorf("mood = %q, want %q", kv.Name, "neutral")
 	}
 }
 
@@ -408,34 +425,6 @@ on every turn:
 	}
 }
 
-func TestTurnRangeHandlers(t *testing.T) {
-	src := `
-on turn 1:
-    say "First turn."
-
-on turn 3-5:
-    say "Middle turns."
-
-on turn 10-:
-    say "Late game."
-`
-	f := parseSource(t, src)
-	w := world.Build([]*ast.File{f}, nil)
-
-	if len(w.Root.TurnRanges) != 3 {
-		t.Fatalf("Root has %d turn-range handlers, want 3", len(w.Root.TurnRanges))
-	}
-	tr := w.Root.TurnRanges
-	if tr[0].From != 1 || tr[0].To != 1 {
-		t.Errorf("turn-range[0]: {%d,%d}, want {1,1}", tr[0].From, tr[0].To)
-	}
-	if tr[1].From != 3 || tr[1].To != 5 {
-		t.Errorf("turn-range[1]: {%d,%d}, want {3,5}", tr[1].From, tr[1].To)
-	}
-	if tr[2].From != 10 || tr[2].To != -1 {
-		t.Errorf("turn-range[2]: {%d,%d}, want {10,-1}", tr[2].From, tr[2].To)
-	}
-}
 
 // ───────────────────────────────────────────────────────────────────────────
 // Vocabulary
@@ -581,30 +570,6 @@ var energy: 100
 // Array literals
 // ───────────────────────────────────────────────────────────────────────────
 
-func TestArrayLiteralProp(t *testing.T) {
-	src := `
-Object game
-    primes: [2, 3, 5, 7, 11]
-`
-	f := parseSource(t, src)
-	w := world.Build([]*ast.File{f}, nil)
-
-	game := w.NodeMap["game"]
-	if len(game.Props) != 1 {
-		t.Fatalf("game has %d props, want 1", len(game.Props))
-	}
-	av, ok := game.Props[0].Value.(world.ArrayValue)
-	if !ok {
-		t.Fatalf("primes value type = %T, want ArrayValue", game.Props[0].Value)
-	}
-	if len(av.Items) != 5 {
-		t.Errorf("primes has %d items, want 5", len(av.Items))
-	}
-	first, ok := av.Items[0].(world.NumberValue)
-	if !ok || first.V != 2 {
-		t.Errorf("primes[0] = %v, want NumberValue{2}", av.Items[0])
-	}
-}
 
 // ───────────────────────────────────────────────────────────────────────────
 // Library vs own

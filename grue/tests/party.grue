@@ -2,49 +2,49 @@
 
 "The Party" by Bernd Eickhoff version social_hell
 
-on go Room:destination:
-    turn = 0
+library "standard"
+
+var counter: 0
+
+on enter Room:destination:
+    say "you drift through the rooms of the party and end up in"
+    counter = 0
     parent
 
 Room kitchen "A cramped kitchen, busy with party overflow."
     east: living room
 
-    on turn 0:
-        say "You wander into the kitchen."
-
-    on turn 1:
-        say "A blonde and John are in the corner. They have only eyes for each other."
-
-    on turn 2:
-        say "You feel your presence is an inconvenience."
-        go living room
+    on every turn:
+        say "You wander into the kitchen." if counter is 0
+        say "A blonde and John are in the corner. They have only eyes for each other." if counter is 1
+        say "You feel your presence is an inconvenience." if counter is 2
+        counter += 1
+        if counter > 2:
+            go living room
+            
 
 Room living room "The main room. Music thumps."
     west: kitchen
     north: garden
 
-    on turn 0:
-        say "You drift into the living room."
-
-    on turn 1:
-        say "A group huddles around the TV. Nobody looks up."
-
-    on turn 2:
-        say "The silence is deafening."
-        go garden
+    on every turn:
+        say "You drift into the living room." if counter is 0
+        say "A group huddles around the TV. Nobody looks up." if counter is 1
+        say "The silence is deafening." if counter is 2
+        counter += 1
+        if counter > 2:
+            go garden
 
 Room garden "A small patio. Cold air and the smell of cigarettes."
     south: living room
 
-    on turn 0:
-        say "You slip out into the back garden."
-
-    on turn 1:
-        say "Two people are deep in conversation. One angles away as you approach."
-
-    on turn 2:
-        say "Even outside you can't escape the awkwardness."
-        go kitchen
+    on every turn:
+        say "You slip out into the back garden." if counter is 0
+        say "Two people are deep in conversation. One angles away as you approach." if counter is 1
+        say "Even outside you can't escape the awkwardness." if counter is 2
+        counter += 1
+        if counter > 2:
+            go kitchen
 
 test
     test "kitchen sequence".
@@ -58,4 +58,5 @@ test "kitchen sequence"
 test "cycling"
     wait. "drift into the living room"
     wait. "Nobody looks up"
+    wait. "deafening"
     wait. "garden"

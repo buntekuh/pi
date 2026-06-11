@@ -17,6 +17,10 @@ on examine brass lantern:
     else:
         say "The lantern is dark."
 
+on extinguish Object:lamp:
+    say "blowing out the lamp"
+    lamp.light = extinguished
+
 on examine Peter:
     say "Peter looks miserable." if Peter is sad
     say "Peter seems content." unless Peter is sad
@@ -45,7 +49,7 @@ test "and"
     check both. "Bright and gloomy"
 
 test "extinguished"
-    brass lantern.light = extinguished
+    extinguish brass lantern.
     examine brass lantern. "dark"
     check both. not "Bright and gloomy"
     check both. "Something is off"

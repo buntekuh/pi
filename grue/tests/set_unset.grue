@@ -1,13 +1,16 @@
-# set_unset — unset as null type, is set / is unset, kind unset vs null
+# set_unset — unset as null type, is set / is unset, property unset vs set
 
 "Set and Unset" by Test
 
-kind topic: *unset, jason, help
+class Topic
+Topic Jason
 
 Object notebook "A notebook."
     Object log
 
 var page
+
+Object Discussion
 
 on write string:entry:
     say "Already written." if log.{page} is set
@@ -24,13 +27,18 @@ on clear:
     log.{page} = unset
     say "Cleared."
 
+on talk about Topic:subject:
+    Discussion.topic = subject
+    say "Now talking about {subject}."
+
 on check topic:
-    say "Topic is unset." if topic is unset
-    say "Topic is jason." if topic is jason
+    say "Topic is unset." unless Discussion.topic is set
+    say "Topic is {Discussion.topic}." if Discussion.topic is set
+
 
 test
     test "write and read".
-    test "kind unset vs null".
+    test "property unset vs set".
 
 test "write and read"
     write "hello". "Written."
@@ -39,8 +47,8 @@ test "write and read"
     clear. "Cleared."
     read. "Nothing here."
 
-test "kind unset vs null"
+test "property unset vs set"
     check topic. "Topic is unset."
-    topic is jason
-    check topic. "Topic is jason."
+    talk about Jason.
+    check topic. "Topic is Jason."
     check topic. not "Topic is unset."

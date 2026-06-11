@@ -70,6 +70,8 @@ for item in npc_queue:
     say "Queued: {item}."
 ```
 
+Map: iterate over items in the list and generate a new list
+
 The primary outstanding work is writing and testing the `List` library class itself, not language changes.
 
 ---
@@ -352,6 +354,34 @@ go to Mare Tranquillitatis.
 
 ---
 
+## `has <kindname>` — declare kind participation with default value
+
+`is <value>` sets a property to a specific value. Sometimes the intent is
+different: "this object participates in this kind" without caring which value
+it starts at — the default is fine.
+
+```grue
+Object door
+    has open      # door is openable; starts at the default (closed)
+    has locked    # door is lockable; starts at the default (unlocked)
+```
+
+`has open` is equivalent to `is closed` when `kind open: *closed, open` — it
+applies the default value. The distinction is expressive: `has open` says
+"this object is openable," `is closed` says "this object is currently closed."
+
+Can be combined with an explicit override:
+
+```grue
+Object front door
+    has open, is open    # openable, and starts open
+```
+
+`has` would be a new body declaration form. All existing `is <value>` usage
+stays valid. Purely additive.
+
+---
+
 ## Drop `var` at top level
 
 Top-level `var score: 0` is redundant — it declares a world-level property, which is exactly what a bare `score: 0` declaration would do (same as `capacity: 10` in a class body). The `var` keyword at file scope adds nothing the parser could not infer from `word: value`.
@@ -424,6 +454,42 @@ Both features together unlock natural-language sentence assembly without resorti
 
 ---
 
+## Typed properties
+
+`when` dispatching on instance names already works today. `fail`/`succeed` with object names as tokens cross-reference against `when` arms in sema. What is missing is the type safety layer: ensuring the value stored in a property is always an instance of the right class.
+
+### Syntax
+
+A property declaration prefixed with a class name declares a typed slot:
+
+```grue
+class CommandCube extends Item
+    Command command: unset
+```
+
+`command` may only hold a `Command` instance or `unset`. Assigning anything else is a compile error:
+
+```grue
+CommandCube beep cube
+    command: lantern    # error: lantern is not a Command
+```
+
+Without a type annotation the property is untyped — any value accepted (current behaviour).
+
+### Implementation
+
+`isSubclassOf` is already implemented for handler argument checking. Typed property assignments use the same check: the right-hand side must be an instance whose class is a subclass of the declared type.
+
+---
+
+## Polymorphic dispatch
+
+Currently sigkeys are resolved at **compile time** from declared parameter types. True polymorphism would let `{execute program.{program_counter} for self}` walk the class hierarchy at runtime, selecting the most specific handler for the actual runtime type.
+
+This requires typed property declarations (above) so the compiler knows the declared type of the slot. Each command class would then define its own `on execute for Robot:robot:` handler, replacing the `when` block entirely.
+
+---
+
 ## Output post-processor and `print`
 
 ### The pipeline
@@ -457,3 +523,66 @@ print inventory list:
 ```
 
 The exact syntax and scope of `print` rules needs to be designed before implementation.
+
+---
+
+## Output styling — block classes and inline spans
+
+Grue expresses **semantic intent**; the theme engine controls **visual presentation**. No fonts, colours, or layout values appear in `.grue` source.
+
+### Block styles
+
+`say <style> "text"` emits a block element. Three predefined styles:
+
+| Keyword    | HTML emitted              | Notes                        |
+|------------|---------------------------|------------------------------|
+| `text`     | `<p>text</p>`             | default — same as bare `say` |
+| `headline` | `<h1>text</h1>`           | structural heading           |
+| `box`      | `<p class="box">text</p>` | aside / callout box          |
+
+`headline` uses `<h1>` because it carries structural meaning (room name, chapter title). All other styles emit `<p class="name">` so the theme can override freely.
+
+Authors may use any word as a block style — `say alert "Warning: …"` emits `<p class="alert">…</p>`. Unknown classes are valid; the theme simply has no rule for them until one is added.
+
+### Inline spans
+
+`[tag]text[/tag]` inside a `say` string emits `<span class="tag">text</span>`. The predefined tags match HTML semantics that most themes will honour without explicit rules:
+
+- `[em]…[/em]` → `<span class="em">` (emphasis)
+- `[strong]…[/strong]` → `<span class="strong">` (strong importance)
+- `[mono]…[/mono]` → `<span class="mono">` (monospace / code)
+
+```grue
+say "L'état c'est [strong]moi[/strong]."
+say "Press [mono]ENTER[/mono] to continue."
+say mono "Wir sind die Roboter."
+```
+
+Inline tags are parsed by the runtime's `say()` function using a small stack-based DOM builder — safe against injection regardless of what `{interpolation}` produces. Unrecognised or malformed tags render as plain text.
+
+**Relation to layout directives**: `[nobreak]`, `[br]`, `[p]` are post-processor layout controls (no closing tag). Span tags always have a matching `[/tag]` and emit DOM content. The two syntaxes coexist without ambiguity.
+
+---
+
+## Theme engine and Wails authoring app
+
+The intended delivery vehicle for Grue is a **Wails desktop app** — a Go backend wrapping a web frontend — similar in spirit to Pico-8 and the Inform 7 IDE. The app hosts:
+
+- **Editor** — syntax-highlighted `.grue` source editing
+- **Map editor** — visual room/exit graph, round-trips with source
+- **Live game view** — the compiled HTML runtime embedded in a webview, with hot-reload on save
+- **Debugger** — world-state inspector, breakpoints on handler dispatch, turn replay
+- **Tutorial and manual** — built-in, browseable without leaving the app
+- **Theme tab** — CSS variable editor; the only place visual presentation is configured
+
+### Theme engine
+
+The theme engine maps Grue's semantic class names (`headline`, `box`, `em`, `mono`, author-defined names) to CSS. It is a CSS variable sheet — no framework required. Authors who need full control can:
+
+1. Override individual variables in the theme tab
+2. Drop in a `.css` file that is injected into the compiled HTML's `<head>`
+3. Embed a CSS framework via that same mechanism
+
+The compiled HTML uses CSS custom properties throughout (`--grue-bg`, `--grue-fg`, `--grue-font`, `--grue-mono-font`, etc.) so theme overrides are isolated to variable declarations, not selector hunting.
+
+The theme tab generates a `<style>:root { … }</style>` block; author-supplied CSS files are appended after it so they can override anything.

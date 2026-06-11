@@ -2,37 +2,45 @@
 
 "Internal" by Test
 
+library "standard"
+
+sc: 0
+
 internal has Object:thing:
-    succeed if player has thing
+    succeed if thing.location is player
     fail not_here
 
 internal move Object:thing to Room:destination:
     thing.location = destination
 
-internal score points:number:
-    score + points
+internal score number:points:
+    sc += points
 
 on take Object:item:
-    say "You don't see that here." unless {has item silently}
-    fail unless {has item silently}
+    say "You don't see that here." if item.location isnt location
+    fail if item.location isnt location
+    item.location = player
     say "Taken."
 
 on deposit Object:item in Room:room:
-    say "You don't have that." unless {has item silently}
-    fail unless {has item silently}
-    {move item to room}
-    {score 10}
-    say "Deposited. Score: {score}."
+    unless has item silently:
+        say "You don't have that." 
+        fail
+    item.location is room
+    #move item to room
+    score 10
+    say "Deposited. Score: {sc}."
 
-Object crate "A wooden crate."
+
 Room vault "A secure vault."
+    Item crate "A wooden crate."
 
 test
     test "internal not player-accessible".
     test "internal via handler".
 
 test "internal not player-accessible"
-    has crate. "You can't do that."
+    has crate. "You don't know how to do that."
 
 test "internal via handler"
     take crate. "Taken."

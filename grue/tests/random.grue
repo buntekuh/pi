@@ -19,6 +19,9 @@ on compare seeded:
 on roll wide:
     say "{random(0, 10000000)}"
 
+on seedling number:number:
+    seed(number)
+
 test
     test "randomness".
     test "seed reproducibility".
@@ -36,18 +39,22 @@ test "seed reproducibility"
 # Three rolls from the same seed must produce the same three values each time.
 # Placeholder expected values — replace once the runtime is implemented.
 test "seed sequence"
-    seed(1)
-    roll wide. "0"
-    roll wide. "0"
-    roll wide. "0"
-    seed(1)
-    roll wide. "0"
-    roll wide. "0"
-    roll wide. "0"
+    seedling(1)
+    say "seed 1"
+    roll wide. "2364555"
+    roll wide. "3692707"
+    roll wide. "5042420"
+    seedling(1)
+    say "seed 1 again"
+    say "seed 1"
+    roll wide. "2364555"
+    roll wide. "3692707"
+    roll wide. "5042420"
 
 # Specific seeded values — placeholders, update once runtime is implemented.
 test "seed known values"
-    seed(1000)
-    roll wide. "0"
-    roll wide. "0"
-    roll wide. "0"
+    say "seed 1 again again"
+    seedling(1000)
+    roll wide. "6236204"
+    roll wide. "9823321"
+    roll wide. "5278061"

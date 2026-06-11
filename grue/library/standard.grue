@@ -1,5 +1,46 @@
 # standard — core handlers available in every game
 
+# ── People ────────────────────────────────────────────────────────────────────
+kind gender: male, female, neuter, *plural
+kind perspective: first, *second, third
+
+class Person
+
+    internal pronoun of self:
+        succeed "they"
+
+class Man extends Person
+    is male
+
+    internal pronoun of self:
+        succeed "he"
+
+class Woman extends Person
+    is female
+
+    internal pronoun of self:
+        succeed "she"
+
+class Animal extends Person
+    is neuter
+
+    internal pronoun of self:
+        succeed "it"
+
+# Player pronoun: perspective-first, then gender for third person.
+internal pronoun of Player:player:
+    succeed "I" if player.perspective is first
+    succeed "you" if player.perspective is second
+    succeed "he" if player.gender is male
+    succeed "she" if player.gender is female
+    succeed "it" if player.gender is neuter
+    succeed "they"
+
+# ── Build mode ────────────────────────────────────────────────────────────────
+# Games default to development. Add `is release` to your game file to ship.
+kind deployment: *development, release
+is development
+
 # ── Containment check ─────────────────────────────────────────────────────────
 # Usage: if player has lamp:
 #        fail unless player has key silently
@@ -13,39 +54,63 @@ internal Object:object has Item:item:
 # on start game fires once at the very beginning.
 # Authors override these in room bodies or at world level.
 
-var last_room: unset
+var last_location: unset
 
 internal every turn:
-    if last_room isnt location:
-        if last_room is unset:
+    if last_location isnt player.location:
+        if last_location is unset:
             start game
         else:
-            leave last_room
-            enter location
-        last_room = location
+            leave last_location
+            {enter player.location}
+        last_location = player.location
 
 internal start game:
+    say headline "{player.location}"
+    look
 
 internal enter Room:room:
+    say headline "{player.location}"
+    look
 
 internal leave Room:room:
 
 # ── Movement ──────────────────────────────────────────────────────────────────
 # Base go handler: moves the player to the destination room.
-# The runtime calls describeLocation() after dispatch if location changed.
 # Authors override on go Room:destination: for per-action customisation;
 # call parent to execute the move, skip it to block movement.
 internal on go Room:destination:
-    location = destination
+    player.location = destination
 
 # ── Look ──────────────────────────────────────────────────────────────────────
 # Displays the current room description (desc + items at location).
 # Exits are listed by the runtime on room entry; this handler covers
 # the player-typed "look" command and explicit handler calls.
 on look:
-    say "{location.desc}" if location.desc is set
-    for item in location.filter(Item):
-        say "You can see {item} here."
+    say "{player.location.desc}" if player.location.desc is set
+    for item in player.location.filter(Item):
+        say "I can see {item} here." if player.perspective is first
+        say "You can see {item} here." if player.perspective is second
+        say "{pronoun of player} can see {item} here."
+    for direction, destination in player.location:
+        if destination is Room:
+            say "I can go {direction}." if player.perspective is first
+            say "You can go {direction}." if player.perspective is second
+            say "{pronoun of player} can go {direction}."
+
+# ── Switchable ────────────────────────────────────────────────────────────────
+kind switchable: *on, off
+
+# ── Wait ──────────────────────────────────────────────────────────────────────
+on wait:
+    say "I wait." if player.perspective is first
+    say "You wait." if player.perspective is second
+    say "{pronoun of player} waits."
+
+on z:
+    say "I wait." if player.perspective is first
+    say "You wait." if player.perspective is second
+    say "{pronoun of player} waits."
 
 # ── Examine ───────────────────────────────────────────────────────────────────
 # Shows the thing's description if it has one; fallback for featureless objects.
@@ -54,7 +119,9 @@ on examine Object:thing:
     if thing.desc is set:
         say "{thing.desc}"
     else:
-        say "You see nothing special."
+        say "I see nothing special." if player.perspective is first
+        say "You see nothing special." if player.perspective is second
+        say "{pronoun of player} sees nothing special."
 
 # ── Take and drop ─────────────────────────────────────────────────────────────
 # Move the item to the player's inventory / current room.
@@ -64,17 +131,27 @@ on take Item:thing:
     say "Taken."
 
 on drop Item:thing:
-    thing.location = location
+    thing.location = player.location
     say "Dropped."
+
+internal has Item:thing:
+    for item in player.filter(Item):
+        succeed if item is thing
+    fail not_here
 
 # ── Inventory ─────────────────────────────────────────────────────────────────
 # List everything in the player's inventory.
 on inventory:
     var carried
     for item in player.filter(Item):
-        say "You are carrying {item}."
+        say "I am carrying {item}." if player.perspective is first
+        say "You are carrying {item}." if player.perspective is second
+        say "{pronoun of player} is carrying {item}."
         carried = 1
-    say "You are carrying nothing." if carried == 0
+    if carried == 0:
+        say "I am carrying nothing." if player.perspective is first
+        say "You are carrying nothing." if player.perspective is second
+        say "{pronoun of player} is carrying nothing."
 
 # ── Doors ─────────────────────────────────────────────────────────────────────
 # kind open:   false = closed (default), true = open

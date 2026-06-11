@@ -109,6 +109,22 @@ Declaring the same instance name a second time is a compiler error. Every
 instance has exactly one declaration point, which is its initial location.
 `item.location = X` in code moves the item at runtime.
 
+**The containment edge is owned by the item, not the container.** Although the
+source tree is written top-down (items declared inside rooms), the runtime
+flattens this into a dictionary of back-references: every item carries a
+`location` property pointing at its parent. Rooms do not store child lists.
+`filter()` reconstructs the parent→children direction by scanning all nodes:
+
+```
+for item in player.location.filter(Item):   # O(n) scan — item.location == player.location
+```
+
+This reads container-centrically but the data is item-centric. The distinction
+matters: adding an item to a room is always `item.location = room`, never an
+operation on the room itself. A future optimisation could maintain explicit
+`children` arrays on each node to make `filter()` O(k), but the `.location`
+back-reference model is load-bearing throughout the engine and is not changing.
+
 ### The tree as authoring tool
 
 Because the world is a single well-defined tree, the IDE can expose it as a
@@ -346,8 +362,10 @@ kind mood: happy, *neutral, sad
 kind wet: *dry, damp, wet, drenched, drowned
 ```
 
-**Declaring a kind** — `kind` always declares. At the top level it also creates
-a global variable of that type:
+**Declaring a kind** — `kind` registers the kind and its values. It does not
+set any property anywhere. Use `is <value>` to apply a kind to a specific
+context (world, class, instance, or handler body):
+
 ```
 kind topic: *unset, jason, help, stealing_the_fleece
 kind mood: happy, *neutral, sad
@@ -364,15 +382,15 @@ if door is lockable:
 if peter is not sad:
 ```
 
-**Using a kind on an object or class** — `is` references an existing kind from
-the global namespace and sets its value for this instance:
+**Applying a kind** — `is <value>` sets the kind property on the current
+context. The same syntax works in class bodies, instance bodies, the world
+body, and handler bodies:
 
 | Syntax | Meaning |
 |--------|---------|
 | `is lockable` | boolean kind — sets to `true` |
 | `is not lockable` | boolean kind — sets to `false` |
 | `is sad` | named list kind — sets to `sad` |
-| `is wet` | named list kind — uses declared default |
 
 ```
 Object iron door "A heavy iron door."
@@ -382,6 +400,33 @@ Object fog "A low coastal fog."
     is not lockable
     is damp
 ```
+
+At the world level (top of a game file), `is <value>` sets a property on the
+world object itself:
+
+```
+kind deployment: *development, release   # declares the kind
+is development                           # world.deployment = development
+```
+
+Override it later in the file or in a handler body:
+```
+is release                               # top-level: sets world.deployment = release
+
+on deploy:
+    is release                           # handler body: same effect at runtime
+```
+
+**Implicit world-level kind check** — `is <value>` used as a condition (in an
+`if`, `unless`, or postfix guard) checks the world's property for that kind:
+
+```
+seed(1) if is development
+say "Debug info." if is development
+```
+
+This is equivalent to `deployment is development` but does not require naming
+the kind explicitly.
 
 Assign and compare in code:
 ```
@@ -835,6 +880,37 @@ on turn -2:
 
 All `on turn` forms follow the same multiple-declaration rule: any number of
 handlers with the same form may be declared at the same level and all fire.
+
+#### Proximity guards
+
+Object and class turn handlers fire every turn regardless of where the player
+is. Output inside them should normally be guarded so the player only receives
+it when they can actually perceive it:
+
+```
+internal on beep Robot:robot:
+    say "{robot} beeps happily." if robot.location is player.location
+```
+
+Without the guard, the player would hear every robot in the game world on every
+turn — including ones in other rooms. The guard `robot.location is player.location`
+limits the output to robots the player is standing next to.
+
+To force output regardless of location — a public address system, a loud
+explosion, a dream sequence — simply omit the guard:
+
+```
+internal on alarm Robot:robot:
+    say "Warning! {robot} has detected an intruder!"
+```
+
+Or override the handler in your game file without the proximity condition:
+
+```
+on beep Robot:robot:
+    say "{robot} beeps."    # no location guard — always heard
+    parent                  # still runs the default beep behaviour
+```
 
 ---
 

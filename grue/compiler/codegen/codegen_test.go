@@ -533,8 +533,8 @@ func TestEmitFailNoToken(t *testing.T) {
 on take Object:thing:
     fail
 `)
-	if !strings.Contains(out, `R._fail("")`) {
-		t.Errorf(`fail should compile to R._fail(""):\n%s`, out)
+	if !strings.Contains(out, `R._fail()`) {
+		t.Errorf(`fail should compile to R._fail():\n%s`, out)
 	}
 }
 
@@ -653,6 +653,38 @@ on look:
 `)
 	if !strings.Contains(out, `R._kindOrd(`) {
 		t.Errorf("kind ordinal comparison should use R._kindOrd:\n%s", out)
+	}
+}
+
+func TestEmitDeploymentDefaultDevelopment(t *testing.T) {
+	// `is development` at world level seeds the world prop.
+	out := emit(t, `
+kind deployment: *development, release
+is development
+
+on check:
+    say "dev" if deployment is development
+`)
+	if !strings.Contains(out, `"deployment": "development"`) {
+		t.Errorf("is development at world level should set world prop:\n%s", out)
+	}
+	if !strings.Contains(out, `R._get("deployment") === "development"`) {
+		t.Errorf("deployment is development should use R._get:\n%s", out)
+	}
+}
+
+func TestEmitDeploymentIsReleaseOverride(t *testing.T) {
+	// `is release` at world level overrides a prior `is development`.
+	out := emit(t, `
+kind deployment: *development, release
+is development
+is release
+
+on check:
+    say "release" if deployment is release
+`)
+	if !strings.Contains(out, `"deployment": "release"`) {
+		t.Errorf("is release at world level should override world prop:\n%s", out)
 	}
 }
 
@@ -783,8 +815,9 @@ on list:
 	}
 }
 
-func TestForInPlainCollectionUsesChildren(t *testing.T) {
-	// A plain node reference (no filter) must still use _children — regression guard.
+func TestForInPlainCollectionUsesIter(t *testing.T) {
+	// A plain node reference (no filter) must use _iter so that List nodes
+	// get linked-list traversal while regular nodes fall back to _children.
 	out := emit(t, `
 Room kitchen "The kitchen."
     Object bowl "A bowl."
@@ -793,8 +826,8 @@ on list:
     for item in kitchen:
         say "{item}"
 `)
-	if !strings.Contains(out, `R._children("kitchen")`) {
-		t.Errorf("plain for/in over a node should use R._children:\n%s", out)
+	if !strings.Contains(out, `R._iter("kitchen")`) {
+		t.Errorf("plain for/in over a node should use R._iter:\n%s", out)
 	}
 }
 
@@ -860,11 +893,11 @@ on take Object:item:
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestBuiltinClassStubsEmitted(t *testing.T) {
-	// Built-in class stubs (Object, Room, Person, …) must appear in the
+	// Built-in class stubs (Object, Room, Item, …) must appear in the
 	// descriptor's classes map with isLibrary: true so the runtime
 	// _instanceof walk spans the full hierarchy.
 	out := emit(t, `Room kitchen "The kitchen."`)
-	for _, name := range []string{"Object", "Room", "Item", "Person", "Player"} {
+	for _, name := range []string{"Object", "Room", "Item", "Player"} {
 		if !strings.Contains(out, `"`+name+`"`) {
 			t.Errorf("built-in class %q missing from classes descriptor:\n%s", name, out)
 		}

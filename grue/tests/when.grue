@@ -2,18 +2,26 @@
 
 "When" by Test
 
+library "standard"
+
 on traverse passage in the dark:
-    say "You are eaten by a grue." if location is dark room
-    fail eaten_by_grue if location is dark room
+    say "You are eaten by a grue." if player.location is dark room
+    fail eaten_by_grue if player.location is dark room
     say "You stumble through."
 
 Room entrance "A lit entrance."
     north: dark room
+    south: Sunny Glades
 
 Room dark room "It is pitch black."
+    test "named token arm"
+        go north. "likely to be eaten"
+
+Room Sunny Glades "The Sun emanates a warm glow."
+    north: entrance
 
 on go north:
-    when {traverse passage in the dark}:
+    when traverse passage in the dark:
         eaten_by_grue:
             say "It is very dark. You are likely to be eaten by a grue."
             stop
@@ -23,11 +31,14 @@ on go north:
             say "Something went wrong."
 
 test
+    test "for warmer shores".
     test "succeed arm".
     test "named token arm".
 
 test "succeed arm"
     traverse passage in the dark. "stumble through"
+    go north. "dark room"
 
-test "named token arm"
-    go north. "likely to be eaten"
+test "for warmer shores"
+    go south. "a warm glow"
+    go north. "a lit entrance"

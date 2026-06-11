@@ -2,36 +2,43 @@
 #
 # Robots execute a cyclic program of command cubes. Insert cubes to program
 # a robot. Red button: power on/off. Yellow button: eject all cubes.
+# Inserted cubes live inside the robot (location = robot); ejected cubes
+# fall to the floor.
 
-kind robot_power: *off, on
+library "standard"
 
-class CommandCube
-    command: "beep"
+class Command
+Command dance
+Command beep
+
+class CommandCube extends Item
+    command: unset
 
     on examine self:
         say "{self}: command is '{command}'."
 
 class Robot
-    kind robot_power: *off, on
+    is off
     max_slots: 4
     program_counter: 0
     Object program
 
     on every turn:
-        fail if robot_power is off
+        fail if is off
         if program.{program_counter} is set:
+            say "command-{program_counter}: {program.{program_counter}.command}"
             when program.{program_counter}.command:
-                "beep":
-                    {beep self}
-                "dance":
-                    {dance self}
+                beep:
+                    beep self
+                dance:
+                    dance self
                 default:
                     say "{self}: unknown command '{program.{program_counter}.command}'."
         program_counter + 1
         program_counter = 0 if program_counter >= max_slots
 
     on examine self:
-        say "{self} is {robot_power}."
+        say "{self} is {switchable}."
         for i from 0 to max_slots:
             if program.{i} is set:
                 say "Slot {i}: {program.{i}.command}."
@@ -42,17 +49,18 @@ class Robot
         for i from 0 to max_slots:
             if program.{i} is unset:
                 program.{i} = cube
+                cube.location = self
                 say "You slot {cube} into position {i}."
                 succeed "inserted"
         say "The stack is full."
         fail "stack is full"
 
     on press red button of self:
-        if robot_power is on:
-            robot_power = off
+        if is on:
+            is off
             say "{self} falls silent."
         else:
-            robot_power = on
+            is on
             say "{self} whirrs into action."
 
     on press yellow button of self:
@@ -60,31 +68,34 @@ class Robot
         for i from 0 to max_slots:
             if program.{i} is set:
                 say "{program.{i}} falls out."
+                program.{i}.location = self.location
                 program.{i} = unset
 
 # Prevent taking cubes directly from a robot's stack
 on take CommandCube:cube:
-    say "The cube is embedded in the robot. Press the yellow button to release." if cube.location.class is Robot
-    fail if cube.location.class is Robot
+    if cube.location is Robot:
+        say "The cube is inserted in a robot. Press the yellow button to release."
+        fail
     parent
 
 # Command activities — override to customise robot behaviour
-internal on beep Robot:robot:
-    say "{robot} beeps happily." if robot.location is location
+internal beep Robot:robot:
+    say "{robot} beeps happily." if robot.location is player.location
 
-internal on dance Robot:robot:
-    say "{robot} waltzes gracefully." if robot.location is location
+internal dance Robot:robot:
+    say "{robot} waltzes gracefully." if robot.location is player.location
 
 # ---------------------------------------------------------------
 
 CommandCube beep cube "A small grey cube. It says 'BEEP' on the side."
-    command: "beep"
+    command: beep
 
 CommandCube dance cube "A small blue cube. It says 'DANCE' on the side."
-    command: "dance"
+    command: dance
 
-Robot Benson "A stocky iron robot."
-Robot Willoughby "A tall, spindly robot."
+Room Factory Floor
+    Robot Benson "A stocky iron robot."
+    Robot Willoughby "A tall, spindly robot."
 
 test
     test "power".
@@ -109,8 +120,8 @@ test "insert and examine"
     examine Benson. "Slot 2: empty"
 
 test "stack full"
-    from 0 to 4:
-        insert beep cube in Benson.
+    insert beep cube in Benson.
+    insert beep cube in Benson.
     insert dance cube in Benson. "stack is full"
 
 test "eject"
@@ -122,11 +133,15 @@ test "eject"
 test "execution"
     press red button of Benson. "whirrs into action"
     insert beep cube in Benson.
+    insert beep cube in Benson.
+    wait
+    wait
+    wait
     . "beeps happily"
     . "beeps happily"
 
 test "take blocked"
     insert beep cube in Benson.
-    take beep cube. "embedded in the robot"
+    take beep cube. "inserted in a robot"
     press yellow button of Benson. "falls out"
     take beep cube. "Taken."

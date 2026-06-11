@@ -16,28 +16,47 @@ const GrueRuntime = (function () {
   let _tree;
   let _game;
   let _location; // canonical name of the room the player is currently in
+  let _muted = false;
+  let _currentPara = null;
 
   // ── Output ──────────────────────────────────────────────────────────────────
 
+  // Seal the current paragraph. The <p>'s browser margin provides the
+  // paragraph break before the next turn's output.
+  function _flushPara() {
+    _currentPara = null;
+  }
+
   function say(text) {
-    const p = document.createElement("p");
-    p.textContent = text;
-    _out.appendChild(p);
+    if (_muted) return;
+    if (!_currentPara) {
+      _currentPara = document.createElement("p");
+      _out.appendChild(_currentPara);
+    } else {
+      _currentPara.appendChild(document.createElement("br"));
+    }
+    _currentPara.appendChild(document.createTextNode(text));
   }
 
   function heading(text) {
+    if (_muted) return;
+    _flushPara();
     const h1 = document.createElement("h1");
     h1.textContent = text;
     _out.appendChild(h1);
   }
 
   function rule() {
+    if (_muted) return;
+    _flushPara();
     _out.appendChild(document.createElement("hr"));
   }
 
   function echo(text) {
+    if (_muted) return;
     const p = document.createElement("p");
     p.textContent = "> " + text;
+    p.dataset.echo = "1";
     _out.appendChild(p);
   }
 
@@ -82,7 +101,11 @@ const GrueRuntime = (function () {
     const k = String(key);
     const node = _nodeOf(nameOrRef);
     if (!node) return;
-    if (k === "location") { node.location = value; return; }
+    if (k === "location") {
+      node.location = value;
+      if (nameOrRef === "player") _location = value;
+      return;
+    }
     if (!node.props) node.props = {};
     node.props[k] = value;
   }
@@ -91,6 +114,18 @@ const GrueRuntime = (function () {
   function _move(item, dest) {
     const node = _nodeOf(item);
     if (node) node.location = dest;
+  }
+
+  // _newNode / _freeNode — runtime allocation for var Class l declarations.
+  // The name is a unique string; the node lives in _game.nodes like any other.
+  let _varSeq = 0;
+  function _newNode(className) {
+    const name = "__var_" + (++_varSeq);
+    (_game.nodes || (_game.nodes = {}))[name] = { class: className, props: {} };
+    return name;
+  }
+  function _freeNode(name) {
+    delete (_game.nodes || {})[name];
   }
 
   // _inScope(name) — true when the player can currently perceive / refer to name.
@@ -120,7 +155,6 @@ const GrueRuntime = (function () {
   }
   function _set(key, value) {
     _worldState[key] = value;
-    if (key === "location") _location = value; // keep player location in sync
   }
 
   // _kindOrd(value) returns the ordinal (integer index) of a kind value name.
@@ -139,17 +173,60 @@ const GrueRuntime = (function () {
   // _isset(v) is Grue's set/unset test — only null (unset) is false.
   function _isset(v) { return v !== null && v !== undefined; }
 
+  // _truthy(v) is Grue's boolean coercion: only null/undefined and the string
+  // "false" (a kind value) are falsy. 0 and "" are truthy.
+  function _truthy(v) {
+    return v !== null && v !== undefined && v !== false && v !== "false";
+  }
+
   // _length(node) returns the count of set properties on a node.
+  // For List nodes, traverses the linked chain and counts items instead.
   function _length(nameOrRef) {
+    if (_instanceof(nameOrRef, "List")) {
+      let count = 0, cur = nameOrRef;
+      while (cur) {
+        const n = _nodeOf(cur);
+        if (!n || (n.props || {}).value == null) break;
+        count++;
+        cur = (n.props || {}).next ?? null;
+      }
+      return count;
+    }
     const node = _nodeOf(nameOrRef);
     if (!node || !node.props) return 0;
     return Object.values(node.props).filter(v => v !== null).length;
   }
 
-  // _class(node) returns the class name of a node.
+  // _listIter(name) traverses a linked List chain and returns an array of values.
+  function _listIter(nameOrRef) {
+    const result = [];
+    let cur = nameOrRef;
+    while (cur) {
+      const n = _nodeOf(cur);
+      if (!n) break;
+      const val = (n.props || {}).value ?? null;
+      if (val === null) break;
+      result.push(val);
+      cur = (n.props || {}).next ?? null;
+    }
+    return result;
+  }
+
+  // _iter(node) — for item in expr: dispatches to _listIter for List nodes,
+  // otherwise falls back to _children (containment-based iteration).
+  function _iter(nameOrRef) {
+    if (_instanceof(nameOrRef, "List")) return _listIter(nameOrRef);
+    return _children(nameOrRef);
+  }
+
+  // _class(node) returns the class name of a node, or "Number"/"Text" for
+  // primitive JS values — enables dynamic dispatch for typed handler parameters.
   function _class(nameOrRef) {
+    if (typeof nameOrRef === "number") return "Number";
     const node = _nodeOf(nameOrRef);
-    return node ? node.class : null;
+    if (node) return node.class;
+    if (typeof nameOrRef === "string") return "Text";
+    return null;
   }
 
   // _name(node) returns the canonical name string of a node reference.
@@ -158,6 +235,8 @@ const GrueRuntime = (function () {
   // _instanceof(node, className) checks whether a node is an instance of a
   // class or any of its subclasses.
   function _instanceof(nameOrRef, className) {
+    if (className === "Number") return typeof nameOrRef === "number" || (typeof nameOrRef === "string" && nameOrRef !== "" && !isNaN(Number(nameOrRef)));
+    if (className === "Text")   return typeof nameOrRef === "string";
     const node = _nodeOf(nameOrRef);
     if (!node) return false;
     let clsName = node.class;
@@ -210,10 +289,20 @@ const GrueRuntime = (function () {
   // return also stops the chain. The only way to continue is via parent().
   class _FailSignal    { constructor(t) { this.token = t; } }
   class _SucceedSignal { constructor(t) { this.token = t; } }
+  class _ChooseSignal  { constructor(p, a) { this.prompt = p; this.arms = a; } }
 
   function _fail(token)    { throw new _FailSignal(token); }
-  function _succeed(token) { throw new _SucceedSignal(token); }
-  function _stop()         { throw new _SucceedSignal(); }
+  function _succeed(token) { throw new _SucceedSignal(token ?? "succeed"); }
+  let _handlerStopped = false;
+  function _stop()         { _handlerStopped = true; throw new _SucceedSignal(); }
+
+  let _pendingChoice = null;
+  function _choose(prompt, arms) { throw new _ChooseSignal(prompt, arms); }
+  function _presentChoice(prompt, arms) {
+    _pendingChoice = arms;
+    if (prompt) say(prompt);
+    for (const arm of arms) say("  > " + arm.label);
+  }
 
   // _currentChain / _currentChainPos / _currentArgs / _currentRan track the
   // in-progress dispatch so _parent() can invoke the next handler.
@@ -241,9 +330,36 @@ const GrueRuntime = (function () {
     }
   }
 
+  function _parentS() {
+    const prev = _muted;
+    _muted = true;
+    try { _parent(); } finally { _muted = prev; }
+  }
+
   // _call(sigKey, ...args) dispatches a handler call from within handler code.
-  function _call(sigKey, ...args) {
-    const chain = (_game.handlers || {})[sigKey];
+  // _resolveKey replaces "_" placeholders in a sigKey with the runtime class of
+  // the corresponding positional arg, enabling dynamic dispatch for world vars
+  // and property-access expressions where the type is not known at compile time.
+  // Concrete type markers (uppercase-leading words, "number", "string") also
+  // advance the arg index so that mixed sigKeys like "append Object to _" map
+  // "_" to the correct positional arg.
+  function _resolveKey(raw, args) {
+    if (!raw.includes("_")) return raw;
+    let i = 0;
+    return raw.split(" ").map(p => {
+      if (p === "_") return _class(args[i++]) || "_";
+      if (/^[A-Z]/.test(p) || p === "number" || p === "string") i++;
+      return p;
+    }).join(" ");
+  }
+
+  function _call(rawKey, ...args) {
+    let sigKey = _resolveKey(rawKey, args);
+    let chain = (_game.handlers || {})[sigKey];
+    if (!chain || chain.length === 0) {
+      const fb = sigKey.replace(/\b(Text|Number)\b/g, "Object");
+      if (fb !== sigKey) { sigKey = fb; chain = (_game.handlers || {})[sigKey]; }
+    }
     if (!chain || chain.length === 0) return null;
     const savedChain = _currentChain;
     const savedPos   = _currentChainPos;
@@ -267,13 +383,22 @@ const GrueRuntime = (function () {
     }
     return result;
   }
-  function _callS(sigKey, ...args) { return _call(sigKey, ...args); }
+  function _callS(sigKey, ...args) {
+    const prev = _muted;
+    _muted = true;
+    try { return _call(sigKey, ...args); } finally { _muted = prev; }
+  }
 
   // _callT is like _call but returns the token for both _SucceedSignal and
   // _FailSignal. Used when the call is the switch expression of a when statement,
   // where arms need to match named failure outcomes as well as success tokens.
-  function _callT(sigKey, ...args) {
-    const chain = (_game.handlers || {})[sigKey];
+  function _callT(rawKey, ...args) {
+    let sigKey = _resolveKey(rawKey, args);
+    let chain = (_game.handlers || {})[sigKey];
+    if (!chain || chain.length === 0) {
+      const fb = sigKey.replace(/\b(Text|Number)\b/g, "Object");
+      if (fb !== sigKey) { sigKey = fb; chain = (_game.handlers || {})[sigKey]; }
+    }
     if (!chain || chain.length === 0) return null;
     const savedChain = _currentChain;
     const savedPos   = _currentChainPos;
@@ -283,7 +408,7 @@ const GrueRuntime = (function () {
     _currentChainPos = 0;
     _currentArgs     = args;
     _currentRan      = new Set();
-    let result = null;
+    let result = "succeed"; // normal return = succeed
     try {
       chain[0].fn(...args);
     } catch (e) {
@@ -311,7 +436,13 @@ const GrueRuntime = (function () {
   // ── Input parsing ────────────────────────────────────────────────────────────
 
   function tokenize(input) {
-    return input.trim().toLowerCase().split(/\s+/).filter(t => t.length > 0);
+    const tokens = [];
+    const re = /"([^"]*)"|(\S+)/g;
+    let m;
+    while ((m = re.exec(input)) !== null) {
+      tokens.push(m[1] !== undefined ? m[1] : m[2].toLowerCase());
+    }
+    return tokens;
   }
 
   function matchParam(type, tokens, pos) {
@@ -336,6 +467,16 @@ const GrueRuntime = (function () {
     return null;
   }
 
+  function _classDepth(typeName) {
+    let depth = 0, name = typeName;
+    while (name) {
+      const cls = (_game.classes || {})[name];
+      name = cls ? cls.parent : null;
+      depth++;
+    }
+    return depth;
+  }
+
   function walkTrie(node, tokens, pos, args) {
     if (pos === tokens.length) {
       return node.sigKey ? { sigKey: node.sigKey, args } : null;
@@ -345,14 +486,20 @@ const GrueRuntime = (function () {
       const r = walkTrie(node.keywords[word], tokens, pos + 1, args);
       if (r) return r;
     }
+    // Try all param edges and keep the most-specific successful match so that
+    // "on greet Item:x:" wins over "on greet Object:x:" for an Item argument.
+    let best = null, bestDepth = -1;
     for (const edge of (node.params || [])) {
       const m = matchParam(edge.type, tokens, pos);
       if (m) {
         const r = walkTrie(edge.next, tokens, pos + m.consumed, [...args, m.value]);
-        if (r) return r;
+        if (r) {
+          const d = _classDepth(edge.type);
+          if (d > bestDepth) { best = r; bestDepth = d; }
+        }
       }
     }
-    return null;
+    return best;
   }
 
   function parseInput(input) {
@@ -362,24 +509,6 @@ const GrueRuntime = (function () {
   }
 
   // ── Dispatch ─────────────────────────────────────────────────────────────────
-
-  function describeLocation() {
-    const nodes = _game.nodes || {};
-    const room  = nodes[_location];
-    if (!room) return;
-    heading(_location);
-    if (room.desc) say(room.desc);
-    // Objects visible at this location (anything that isn't a Room or Door)
-    for (const [name, node] of Object.entries(nodes)) {
-      if (node.location === _location && !_instanceof(name, "Room") && !_instanceof(name, "Door")) {
-        say("You can see " + name + " here.");
-      }
-    }
-    // Available exits
-    const exits = room.exits || {};
-    const dirs  = Object.keys(exits);
-    if (dirs.length) say("Exits: " + dirs.join(", ") + ".");
-  }
 
   function dispatch(sigKey, args) {
     const chain = (_game.handlers || {})[sigKey];
@@ -411,10 +540,7 @@ const GrueRuntime = (function () {
     _currentRan      = savedRan;
   }
 
-  const _builtins = {
-    "look": () => describeLocation(),
-    "wait": () => {},
-  };
+  const _builtins = {};
 
   // ── Every-turn and turn-range handlers ───────────────────────────────────────
 
@@ -430,23 +556,35 @@ const GrueRuntime = (function () {
   function _fireEveryTurn() {
     const chain = (_game.handlers || {})["every turn"];
     if (!chain) return;
+    const turnRoom = _location; // freeze room for this turn — mid-turn teleports don't trigger other rooms
+    const nodes = _game.nodes || {};
     for (const h of chain) {
-      if (h.owner && !_ownerInScope(h.owner)) continue;
-      try { h.fn(h.owner); } catch(e) {
-        if (e instanceof _FailSignal || e instanceof _SucceedSignal) continue;
-        throw e;
+      if (h.owner) {
+        const ownerNode = nodes[h.owner];
+        if (!ownerNode) {
+          // h.owner is a class name — fire once per in-scope instance of that class.
+          if ((_game.classes || {})[h.owner]) {
+            for (const [name, node] of Object.entries(nodes)) {
+              if (!_instanceof(name, h.owner)) continue;
+              if (_instanceof(name, "Room")) {
+                if (name !== turnRoom) continue;
+              } else if (node.location && node.location !== _location && node.location !== "player") {
+                continue;
+              }
+              try { h.fn(name); } catch(e) {
+                if (e instanceof _FailSignal || e instanceof _SucceedSignal) continue;
+                throw e;
+              }
+            }
+          }
+          continue;
+        }
+        if (_instanceof(h.owner, "Room")) {
+          if (h.owner !== turnRoom) continue;
+        } else if (ownerNode.location && ownerNode.location !== _location && ownerNode.location !== "player") {
+          continue;
+        }
       }
-    }
-  }
-
-  function _fireTurnRangeHandlers() {
-    const turn   = _get("turn") ?? 0;
-    const ranges = _game.turnRanges || [];
-    for (const h of ranges) {
-      if (h.owner && !_ownerInScope(h.owner)) continue;
-      const lo = h.from === 0 || turn >= h.from;
-      const hi = h.to   === -1 || turn <= h.to;
-      if (!lo || !hi) continue;
       try { h.fn(h.owner); } catch(e) {
         if (e instanceof _FailSignal || e instanceof _SucceedSignal) continue;
         throw e;
@@ -489,64 +627,97 @@ const GrueRuntime = (function () {
     _turnPending = 0;
     _turnResolve = null;
     _set("turn", (_get("turn") ?? 0) + 1);
-    _set("location", _location); // keep _get("location") in sync with current room
     if (input) handleInput(input);
     _fireEveryTurn();
-    _fireTurnRangeHandlers();
-    if (_turnPending === 0) return Promise.resolve();
-    return new Promise(r => { _turnResolve = r; });
+    if (_turnPending === 0) {
+      _flushPara();
+      return Promise.resolve();
+    }
+    return new Promise(r => { _turnResolve = function() { _flushPara(); r(); }; });
   }
 
   // ── Turn loop ────────────────────────────────────────────────────────────────
+
+  function _doExitMove(dest) {
+    const destNode = (_game.nodes || {})[dest];
+    if (destNode && _instanceof(dest, "Door")) {
+      if (_prop(dest, "locked") === "true") { say("The " + dest + " is locked."); return; }
+      if (_prop(dest, "open") !== "true") { say("The " + dest + " is closed."); return; }
+      const connects = destNode.connects || [];
+      const through  = connects.find(r => r !== _location) ?? connects[0];
+      if (!through) { say("The " + dest + " doesn't lead anywhere."); return; }
+      dispatch("go Room", [through]);
+    } else {
+      dispatch("go Room", [dest]);
+    }
+  }
+
+  function _runChoiceArm(arm) {
+    try {
+      arm.fn();
+    } catch (e) {
+      if (e instanceof _ChooseSignal) { _presentChoice(e.prompt, e.arms); return; }
+      if (e instanceof _SucceedSignal || e instanceof _FailSignal) return;
+      throw e;
+    }
+  }
 
   function handleInput(raw) {
     const input = raw.trim();
     if (!input) return;
     echo(input);
+
+    // Pending choice: match input against arm labels (case-insensitive, trailing
+    // punctuation stripped) rather than running normal grammar dispatch.
+    if (_pendingChoice) {
+      const arms = _pendingChoice;
+      _pendingChoice = null;
+      const normalize = s => s.toLowerCase().replace(/[.!?,;]+$/, "").trim();
+      const key = normalize(input);
+      const arm = arms.find(a => normalize(a.label) === key);
+      if (arm) { _runChoiceArm(arm); } else {
+        say("Please choose one of the options.");
+        _presentChoice(null, arms);
+      }
+      return;
+    }
+
     const words = tokenize(input);
 
-    // Exit-phrase lookup: "go <direction>" resolved against current room's exits.
-    // This runs before grammar so multi-word directions like "top of ladder" work
-    // without needing every exit name registered in the vocabulary.
+    // Grammar dispatch first — user-defined handlers like "on go north:" fire
+    // before the built-in exit-lookup movement. If the handler calls stop(),
+    // movement is blocked; otherwise the exit lookup runs afterwards so the
+    // player actually moves.
+    const parsed = parseInput(input);
+    if (parsed) {
+      _handlerStopped = false;
+      const prevLoc = _location;
+      try {
+        dispatch(parsed.sigKey, parsed.args);
+      } catch (e) {
+        if (e instanceof _ChooseSignal) { _presentChoice(e.prompt, e.arms); return; }
+        throw e;
+      }
+      if (_location !== prevLoc) return;
+      if (_handlerStopped) return;
+      // Handler ran without stopping or moving — try exit lookup so that
+      // direction handlers act as before-movement hooks.
+      if (words[0] === "go" && words.length > 1) {
+        const phrase = words.slice(1).join(" ");
+        const room   = (_game.nodes || {})[_location];
+        const exits  = (room && room.exits) ? room.exits : {};
+        if (phrase in exits) { _doExitMove(exits[phrase]); }
+      }
+      return;
+    }
+
+    // Exit-phrase lookup: fallback for directions not in the grammar (e.g.,
+    // multi-word exits like "top of ladder" used without a grammar rule).
     if (words[0] === "go" && words.length > 1) {
       const phrase = words.slice(1).join(" ");
       const room   = (_game.nodes || {})[_location];
       const exits  = (room && room.exits) ? room.exits : {};
-      if (phrase in exits) {
-        const dest     = exits[phrase];
-        const destNode = (_game.nodes || {})[dest];
-        if (destNode && _instanceof(dest, "Door")) {
-          // Door traversal: check state then move to the through-room.
-          if (_prop(dest, "locked") === "true") {
-            say("The " + dest + " is locked.");
-            return;
-          }
-          if (_prop(dest, "open") !== "true") {
-            say("The " + dest + " is closed.");
-            return;
-          }
-          const connects = destNode.connects || [];
-          const through  = connects.find(r => r !== _location) ?? connects[0];
-          if (!through) { say("The " + dest + " doesn't lead anywhere."); return; }
-          const prevLoc = _location;
-          dispatch("go Room", [through]);
-          if (_location !== prevLoc) describeLocation();
-        } else {
-          const prevLoc = _location;
-          dispatch("go Room", [dest]);
-          if (_location !== prevLoc) describeLocation();
-        }
-        return;
-      }
-    }
-
-    // Normal grammar dispatch; also describes the new room if movement occurred.
-    const parsed = parseInput(input);
-    if (parsed) {
-      const prevLoc = _location;
-      dispatch(parsed.sigKey, parsed.args);
-      if (_location !== prevLoc) describeLocation();
-      return;
+      if (phrase in exits) { _doExitMove(exits[phrase]); return; }
     }
 
     const key = words.join(" ");
@@ -1032,6 +1203,14 @@ const GrueRuntime = (function () {
     if (!tests[""]) { say("No tests defined."); return; }
 
     _out.innerHTML = "";
+    _currentPara = null;
+    _location = _game.start;
+    if ((_game.nodes || {})["player"]) _game.nodes["player"].location = _location;
+    Object.keys(_worldState).forEach(k => delete _worldState[k]);
+    _worldState["player"] = "player";
+    _fireEveryTurn();
+    _flushPara();
+
     const steps = [];
     _flattenTest("", tests, steps, new Set());
 
@@ -1039,6 +1218,7 @@ const GrueRuntime = (function () {
 
     for (const step of steps) {
       if (step._header) {
+        _pendingChoice = null;
         const el = document.createElement("p");
         el.style.cssText = "color:#888; margin-top:1em";
         el.textContent = `-- test "${step._header}"`;
@@ -1049,6 +1229,8 @@ const GrueRuntime = (function () {
 
       if (step._teleport) {
         _location = step._teleport;
+        if ((_game.nodes || {})["player"]) _game.nodes["player"].location = _location;
+        _set("last_location", _location);
         continue;
       }
 
@@ -1073,7 +1255,9 @@ const GrueRuntime = (function () {
 
       let outputText = "";
       for (let j = before; j < _out.children.length; j++) {
-        outputText += " " + _out.children[j].textContent;
+        const el = _out.children[j];
+        if (el.dataset && el.dataset.echo) continue;
+        outputText += " " + el.textContent;
       }
       outputText = outputText.trim();
 
@@ -1110,10 +1294,10 @@ const GrueRuntime = (function () {
     // the R parameter of the (function(R){...})(GrueRuntime) wrapper.
     say,
     _str, _prop, _setProp, _get, _set,
-    _kindOrd, _isset, _length, _class, _name, _instanceof,
-    _filter, _children, _entries,
-    _move, _inScope,
-    _fail, _succeed, _parent, _stop,
+    _kindOrd, _isset, _truthy, _length, _class, _name, _instanceof,
+    _filter, _children, _entries, _iter, _listIter,
+    _move, _inScope, _newNode, _freeNode,
+    _fail, _succeed, _parent, _parentS, _stop, _choose,
     _call, _callS, _callT, _holdTurn,
     _random, _seed,
 
@@ -1122,8 +1306,13 @@ const GrueRuntime = (function () {
       _out      = document.getElementById("output");
       _tree     = document.getElementById("tree");
       _location = game.start;
-      _worldState["player"]   = "player";   // _get("player") → "player" (inventory container)
-      _worldState["location"] = _location;  // _get("location") → current room
+      _worldState["player"] = "player";   // _get("player") → "player" (inventory container)
+      if (!_game.nodes) _game.nodes = {};
+      if (!_game.nodes["player"]) {
+        _game.nodes["player"] = { class: "Player", location: _location, props: {} };
+      } else {
+        _game.nodes["player"].location = _location;
+      }
 
       window.say = say;
 
@@ -1132,7 +1321,7 @@ const GrueRuntime = (function () {
         say("by " + game.meta.author);
         rule();
       }
-      describeLocation();
+      _fireEveryTurn();
 
       const input   = document.getElementById("cmd");
       const goBtn   = document.getElementById("go");

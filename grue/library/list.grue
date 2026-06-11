@@ -1,0 +1,77 @@
+# list — singly-linked list
+#
+# Usage:
+#   library "list"
+#   var List l
+#   append <item> to l
+#   prepend <item> to l
+#   take first from l      → succeed item (removes head value)
+#   take last from l       → succeed item (removes tail value)
+#   at Number:index in l   → succeed item at zero-based index
+#   l.length               → item count (computed, not stored)
+#   for item in l:         → iterate all values head to tail
+
+class List
+    value: unset
+    next: unset
+
+    internal append Object:item to self:
+        var List node
+        var next_node
+        if self.value is unset:
+            self.value = item
+        else:
+            if self.next is set:
+                next_node = self.next
+                append item to next_node
+            else:
+                node.value = item
+                self.next = node
+
+    internal prepend Object:item to self:
+        var List node
+        node.value = self.value
+        node.next = self.next
+        self.value = item
+        self.next = node
+
+    internal take first from self:
+        var result
+        fail if self.value is unset
+        result = self.value
+        if self.next is set:
+            self.value = self.next.value
+            self.next = self.next.next
+        else:
+            self.value = unset
+        succeed result
+
+    internal take last from self:
+        var result
+        var next_node
+        fail if self.value is unset
+        if self.next is unset:
+            result = self.value
+            self.value = unset
+            succeed result
+        if self.next.next is unset:
+            result = self.next.value
+            self.next = unset
+            succeed result
+        next_node = self.next
+        result = take last from next_node
+        fail if result is unset
+        succeed result
+
+    internal at Number:index in self:
+        var result
+        var next_index
+        var next_node
+        fail if self.value is unset
+        succeed self.value if index == 0
+        fail if self.next is unset
+        next_index = index - 1
+        next_node = self.next
+        result = at next_index in next_node
+        fail if result is unset
+        succeed result

@@ -1,29 +1,27 @@
-# turn_handlers — on turn N, on turn N-M, on turn N-, on turn -N
+# counters — every-turn counter with < > <= >= comparison operators
 
-"Turn Handlers" by Test
+"Counters" by Test
 
-Room cell "A bare stone cell."
+library "standard"
 
-on turn 1:
-    say "You wake up on the cold floor."
+var n: -1
 
-on turn 3-5:
-    say "Time passes slowly."
+Room lab "A lab."
 
-on turn 10-:
-    say "You have been here a long time."
-
-on turn -2:
-    say "The first moments."
+on every turn:
+    say "n: {n}"
+    n += 1
 
 test
-    test "turn start".
-    test "turn range".
-
-test "turn start"
-    wait. "You wake up"
-
-test "turn range"
+    {n == 0}. "true"
     wait.
+    {n == 1}. "true"
+    {n < 2}. "true"
+    {n > 0}. "true"
+    {n <= 1}. "true"
+    {n >= 1}. "true"
     wait.
-    wait. "Time passes"
+    {n <= 2}. "true"
+    {n >= 2}. "true"
+    {n <= 1}. "false"
+    {n >= 3}. "false"

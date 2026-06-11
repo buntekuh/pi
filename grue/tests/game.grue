@@ -46,6 +46,10 @@ class Robot
         robot_status = fetching
         say "{self} heads to the parts room."
 
+    on break self:
+        robot_status = malfunctioning
+        say "{self} breaks down!"
+
     on repair self:
         say "{self} is not broken." unless robot_status is malfunctioning
         fail not_broken unless robot_status is malfunctioning
@@ -59,6 +63,10 @@ on every turn:
         else:
             say "Day complete. Only {biros_made} biros. Deeply disappointing."
         stop
+
+on produce number:n biros:
+    biros_made + n
+    say "Produced {n} biros. Total: {biros_made}."
 
 on check quota:
     say "{biros_made} of {quota} biros produced."
@@ -94,7 +102,7 @@ test "fetch and assemble"
     . "assembles a biro"
 
 test "malfunctioning"
-    Benson.robot_status = malfunctioning
+    break Benson. "breaks down"
     direct Benson to fetch parts. "broken. Repair it first."
     repair Benson. "whirs back to life"
     examine Benson. "idle"
@@ -102,6 +110,6 @@ test "malfunctioning"
 
 test "quota"
     check quota. "10 more needed"
-    biros_made = 10
+    produce 10 biros. "Total: 10"
     check quota. "Quota met!"
     check quota. not "more needed"
