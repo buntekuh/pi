@@ -62,6 +62,7 @@ const GrueRuntime = (function () {
 
   function echo(text) {
     if (_muted) return;
+    _flushPara();
     const p = document.createElement("p");
     p.textContent = "> " + text;
     p.dataset.echo = "1";
@@ -1356,6 +1357,7 @@ const GrueRuntime = (function () {
         rule();
       }
       _fireEveryTurn();
+      _flushPara();
 
       const input   = document.getElementById("cmd");
       const goBtn   = document.getElementById("go");

@@ -6,6 +6,8 @@ Style key
 Style header
 Style alert
 
+Room home "Your stylish Apartment"
+
 on status:
     say header "SYSTEM STATUS"
     say mono "All systems nominal."
