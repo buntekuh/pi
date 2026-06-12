@@ -33,7 +33,7 @@ const GrueRuntime = (function () {
     if (cls || !_currentPara) {
       _flushPara();
       _currentPara = document.createElement("p");
-      if (cls) _currentPara.className = cls;
+      _currentPara.className = cls || "text";
       _out.appendChild(_currentPara);
     } else {
       _currentPara.insertAdjacentHTML("beforeend", "<br>");

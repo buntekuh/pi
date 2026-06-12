@@ -11,11 +11,14 @@ on status:
     say mono "All systems nominal."
     say "Press [key]ENTER[/key] to continue."
     say alert "WARNING: reactor unstable."
+    say "The [strong]primary core[/strong] is [em]stable[/em]."
+    say "Use [code]REPAIR[/code] if readings drop."
 
 test
     test "block style".
     test "inline span".
     test "alert".
+    test "semantic tags".
 
 test "block style"
     status. "SYSTEM STATUS"
@@ -27,3 +30,9 @@ test "inline span"
 test "alert"
     status. "WARNING"
     status. "reactor unstable"
+
+test "semantic tags"
+    status. "primary core"
+    status. "stable"
+    status. "REPAIR"
+

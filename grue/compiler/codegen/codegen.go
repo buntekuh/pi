@@ -165,6 +165,14 @@ func HTML(w *world.World, g *grammar.Grammar) string {
 <head>
   <meta charset="UTF-8">
   <title>%s</title>
+  <!-- TEST CSS — move to wrapper once host container exists; see wrapper.md -->
+  <style>
+    body       { max-width: 680px; margin: 40px auto; font: 1.05em/1.7 Georgia, serif; color: #222; background: #f7f6f2; }
+    p.text     { background: #eeede6; padding: 6px 10px; border-radius: 3px; margin: 4px 0; }
+    p.headline { font-size: 1.25em; font-weight: bold; margin: 1.2em 0 0.2em; color: #333; letter-spacing: 0.02em; }
+    #input-area { margin-top: 12px; }
+    #cmd        { width: 420px; font-size: 1em; }
+  </style>
 </head>
 <body>
 <div id="output"></div>
@@ -1407,6 +1415,13 @@ func htmlEscape(s string) string {
 	return s
 }
 
+// semanticHTMLInlineTags are [word] tags that emit native HTML elements, not
+// <span>. They need no Style declaration and are not validated against Styles.
+var semanticHTMLInlineTags = map[string]bool{
+	"em": true, "strong": true, "code": true,
+	"mark": true, "s": true, "u": true,
+}
+
 // isStyleName reports whether name is a declared Style instance (or subclass).
 func (c *cg) isStyleName(name string) bool {
 	node, ok := c.w.NodeMap[name]
@@ -1427,10 +1442,17 @@ func (c *cg) isStyleName(name string) bool {
 	return false
 }
 
-// sayTok is one token from a say string: literal text, {expr} slot, or span tag.
+// sayTok is one token from a say string: literal text, {expr} slot, or a tag.
+// kind values:
+//   "text"     — literal text (will be HTML-escaped)
+//   "expr"     — {expr} interpolation slot
+//   "spanOpen" — [StyleName] → <span class="StyleName">
+//   "spanClose"— [/StyleName] → </span>
+//   "htmlOpen" — [em], [strong], etc. → <em>, <strong>, etc.
+//   "htmlClose"— [/em], [/strong], etc. → </em>, etc.
 type sayTok struct {
-	kind  string // "text", "expr", "spanOpen", "spanClose"
-	value string // text/expr content, or span class name
+	kind  string
+	value string // text/expr content, span class, or HTML tag name
 }
 
 // splitSayInterp tokenises a raw say string, recognising {expr} interpolation
@@ -1472,7 +1494,10 @@ func (c *cg) splitSayInterp(raw string) []sayTok {
 			i = end + 1
 			if strings.HasPrefix(tag, "/") {
 				word := tag[1:]
-				if c.isStyleName(word) {
+				if semanticHTMLInlineTags[word] {
+					flushText()
+					toks = append(toks, sayTok{"htmlClose", word})
+				} else if c.isStyleName(word) {
 					flushText()
 					toks = append(toks, sayTok{"spanClose", word})
 				} else {
@@ -1480,6 +1505,9 @@ func (c *cg) splitSayInterp(raw string) []sayTok {
 					buf.WriteString(tag)
 					buf.WriteByte(']')
 				}
+			} else if semanticHTMLInlineTags[tag] {
+				flushText()
+				toks = append(toks, sayTok{"htmlOpen", tag})
 			} else if c.isStyleName(tag) {
 				flushText()
 				toks = append(toks, sayTok{"spanOpen", tag})
@@ -1499,10 +1527,13 @@ func (c *cg) splitSayInterp(raw string) []sayTok {
 
 // compileSayString produces an HTML-safe JS template-literal expression:
 // literal text is HTML-escaped at compile time, {expr} uses R._hstr() for
-// runtime HTML-escaping, and [Style]...[/Style] becomes <span> elements.
+// runtime HTML-escaping, [Style]...[/Style] becomes <span> elements, and
+// [em]/[strong]/etc. become native HTML elements. Unclosed tags are
+// automatically closed at the end of the string.
 func (c *cg) compileSayString(raw string, sc *scope) string {
 	toks := c.splitSayInterp(raw)
 	var b strings.Builder
+	var openStack []sayTok // tracks unclosed span/html opens for auto-close
 	b.WriteRune('`')
 	for _, tok := range toks {
 		switch tok.kind {
@@ -1519,8 +1550,29 @@ func (c *cg) compileSayString(raw string, sc *scope) string {
 			b.WriteString(")}")
 		case "spanOpen":
 			fmt.Fprintf(&b, `<span class="%s">`, tok.value)
+			openStack = append(openStack, tok)
 		case "spanClose":
 			b.WriteString("</span>")
+			if len(openStack) > 0 {
+				openStack = openStack[:len(openStack)-1]
+			}
+		case "htmlOpen":
+			fmt.Fprintf(&b, "<%s>", tok.value)
+			openStack = append(openStack, tok)
+		case "htmlClose":
+			fmt.Fprintf(&b, "</%s>", tok.value)
+			if len(openStack) > 0 {
+				openStack = openStack[:len(openStack)-1]
+			}
+		}
+	}
+	// Auto-close any unclosed tags in reverse open order.
+	for i := len(openStack) - 1; i >= 0; i-- {
+		switch openStack[i].kind {
+		case "spanOpen":
+			b.WriteString("</span>")
+		case "htmlOpen":
+			fmt.Fprintf(&b, "</%s>", openStack[i].value)
 		}
 	}
 	b.WriteRune('`')

@@ -65,12 +65,19 @@ var builtinClassParents = map[string]string{
 }
 
 // knownSayDirectives are [word] tags in say strings that are formatting
-// directives, not inline style spans.
+// directives, not inline style spans or HTML elements.
 var knownSayDirectives = map[string]bool{
 	"the": true, "The": true, "a": true, "A": true, "s": true,
 	"comma": true, "nobreak": true, "nobr": true,
 	"break": true, "br": true, "paragraph": true, "p": true,
 	`"`: true, "[": true, "]": true, "{": true, "}": true,
+}
+
+// semanticHTMLInlineTags are [word] tags that emit native HTML inline elements
+// rather than <span class="...">. No Style declaration is needed for these.
+var semanticHTMLInlineTags = map[string]bool{
+	"em": true, "strong": true, "code": true,
+	"mark": true, "s": true, "u": true,
 }
 
 // builtinKinds are world-level kinds pre-declared by the runtime.
@@ -626,7 +633,7 @@ func (a *analyser) checkSaySpans(raw string, line int) {
 		if strings.HasPrefix(word, "/") {
 			word = word[1:]
 		}
-		if knownSayDirectives[word] {
+		if knownSayDirectives[word] || semanticHTMLInlineTags[word] {
 			continue
 		}
 		// Must start with a letter to be a potential style name.
