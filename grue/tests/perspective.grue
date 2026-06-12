@@ -26,6 +26,7 @@ test
     test "second person".
     test "third person (they)".
     test "third person (he)".
+    test "failure messages".
 
 test "first person"
     perspective first.
@@ -57,3 +58,12 @@ test "third person (he)"
     wait. not "I wait"
     wait. not "You wait"
     inventory. "he is carrying nothing"
+
+test "failure messages"
+    perspective second.
+    xyzzy. "You don't know how to do that"
+    perspective first.
+    xyzzy. "I don't know how to do that"
+    perspective third.
+    gender they.
+    xyzzy. "they don't know how to do that"

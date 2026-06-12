@@ -544,7 +544,7 @@ const GrueRuntime = (function () {
   function dispatch(sigKey, args) {
     const chain = (_game.handlers || {})[sigKey];
     if (!chain || chain.length === 0) {
-      say("You can't do that.");
+      _call("no action");
       return;
     }
     const savedChain = _currentChain;
@@ -753,7 +753,7 @@ const GrueRuntime = (function () {
 
     const key = words.join(" ");
     if (_builtins[key]) { _builtins[key](); return; }
-    say("You don't know how to do that.");
+    _call("unknown command");
   }
 
   // ── Tree / inspector helpers ─────────────────────────────────────────────────

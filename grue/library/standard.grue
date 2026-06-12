@@ -77,6 +77,31 @@ internal Object:object has Item:item:
         succeed if thing is item
     fail
 
+# ── Input failure handlers ────────────────────────────────────────────────────
+# no action:      grammar recognised the command but no handler processed it.
+# unknown command: input did not match any grammar entry.
+# Authors override either to change the wording for their game.
+
+internal on no action:
+    if player.perspective is first:
+        say "I can't do that."
+    else if player.perspective is second:
+        say "You can't do that."
+    else if player.gender is plural:
+        say "they can't do that."
+    else:
+        say "{pronoun of player} can't do that."
+
+internal on unknown command:
+    if player.perspective is first:
+        say "I don't know how to do that."
+    else if player.perspective is second:
+        say "You don't know how to do that."
+    else if player.gender is plural:
+        say "they don't know how to do that."
+    else:
+        say "{pronoun of player} doesn't know how to do that."
+
 # ── Game lifecycle ────────────────────────────────────────────────────────────
 # on enter / on leave fire when the player moves between rooms.
 # on start game fires once at the very beginning.
