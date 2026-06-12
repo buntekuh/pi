@@ -117,14 +117,20 @@ on look:
     say "{player.location.desc}" if player.location.desc is set
     for item in player.location.filter(Item):
         if item.scenery isnt true:
-            say "I can see {item} here." if player.perspective is first
-            say "You can see {item} here." if player.perspective is second
-            say "{pronoun of player} can see {item} here."
+            if player.perspective is first:
+                say "I can see {item} here."
+            else if player.perspective is second:
+                say "You can see {item} here."
+            else:
+                say "{pronoun of player} can see {item} here."
     for direction, destination in player.location:
         if destination is Room:
-            say "I can go {direction}." if player.perspective is first
-            say "You can go {direction}." if player.perspective is second
-            say "{pronoun of player} can go {direction}."
+            if player.perspective is first:
+                say "I can go {direction}."
+            else if player.perspective is second:
+                say "You can go {direction}."
+            else:
+                say "{pronoun of player} can go {direction}."
 
 on l:
     look
@@ -142,14 +148,24 @@ kind switchable: *on, off
 
 # ── Wait ──────────────────────────────────────────────────────────────────────
 on wait:
-    say "I wait." if player.perspective is first
-    say "You wait." if player.perspective is second
-    say "{pronoun of player} waits."
+    if player.perspective is first:
+        say "I wait."
+    else if player.perspective is second:
+        say "You wait."
+    else if player.gender is plural:
+        say "they wait."
+    else:
+        say "{pronoun of player} waits."
 
 on z:
-    say "I wait." if player.perspective is first
-    say "You wait." if player.perspective is second
-    say "{pronoun of player} waits."
+    if player.perspective is first:
+        say "I wait."
+    else if player.perspective is second:
+        say "You wait."
+    else if player.gender is plural:
+        say "they wait."
+    else:
+        say "{pronoun of player} waits."
 
 # ── Examine ───────────────────────────────────────────────────────────────────
 # Shows the thing's description if it has one; fallback for featureless objects.
@@ -158,9 +174,14 @@ on examine Object:thing:
     if thing.desc is set:
         say "{thing.desc}"
     else:
-        say "I see nothing special." if player.perspective is first
-        say "You see nothing special." if player.perspective is second
-        say "{pronoun of player} sees nothing special."
+        if player.perspective is first:
+            say "I see nothing special."
+        else if player.perspective is second:
+            say "You see nothing special."
+        else if player.gender is plural:
+            say "they see nothing special."
+        else:
+            say "{pronoun of player} sees nothing special."
 
 # ── Take and drop ─────────────────────────────────────────────────────────────
 # Move the item to the player's inventory / current room.
@@ -183,14 +204,24 @@ internal has Item:thing:
 on inventory:
     var carried
     for item in player.filter(Item):
-        say "I am carrying {item}." if player.perspective is first
-        say "You are carrying {item}." if player.perspective is second
-        say "{pronoun of player} is carrying {item}."
+        if player.perspective is first:
+            say "I am carrying {item}."
+        else if player.perspective is second:
+            say "You are carrying {item}."
+        else if player.gender is plural:
+            say "they are carrying {item}."
+        else:
+            say "{pronoun of player} is carrying {item}."
         carried = 1
     if carried == 0:
-        say "I am carrying nothing." if player.perspective is first
-        say "You are carrying nothing." if player.perspective is second
-        say "{pronoun of player} is carrying nothing."
+        if player.perspective is first:
+            say "I am carrying nothing."
+        else if player.perspective is second:
+            say "You are carrying nothing."
+        else if player.gender is plural:
+            say "they are carrying nothing."
+        else:
+            say "{pronoun of player} is carrying nothing."
 
 on i:
     inventory

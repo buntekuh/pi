@@ -87,6 +87,10 @@ func (b *builder) pass0Builtins() {
 		b.w.Classes = append(b.w.Classes, cls)
 		b.w.ClassMap[bc.Name] = cls
 	}
+	// Register the runtime singleton "player" so compileBareCall resolves it
+	// as a typed argument (Player) rather than a literal keyword in sigKeys.
+	playerStub := &Node{Name: "player", ClassName: "Player", IsLibrary: true}
+	b.w.NodeMap["player"] = playerStub
 }
 
 // =============================================================================

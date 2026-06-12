@@ -1198,15 +1198,34 @@ func (p *parser) parseIfStmt() (*ast.IfStmt, error) {
 	stmt := &ast.IfStmt{Pos: pos, Unless: unless, Cond: cond, Body: body}
 
 	// else if / else
+	// Each "else if" is parsed inline (not via recursive parseIfStmt) so that
+	// all branches are siblings in stmt.ElseIf and "else:" lands in stmt.Else,
+	// not buried inside the last ElseIf's Else field.
 	p.skipNewlines()
 	for p.atWord("else") {
 		p.advance() // consume "else"
 		if p.atWord("if") || p.atWord("unless") {
-			elif, err := p.parseIfStmt()
+			elifPos := p.currentPos()
+			elifUnless := p.peek().Value == "unless"
+			p.advance() // consume "if" or "unless"
+			elifCond, err := p.parseCond()
 			if err != nil {
 				return nil, err
 			}
-			stmt.ElseIf = append(stmt.ElseIf, elif)
+			if _, err := p.expect(lexer.COLON); err != nil {
+				return nil, err
+			}
+			if err := p.expectNewline(); err != nil {
+				return nil, err
+			}
+			elifBody, err := p.parseStmtBlock()
+			if err != nil {
+				return nil, err
+			}
+			stmt.ElseIf = append(stmt.ElseIf, &ast.IfStmt{
+				Pos: elifPos, Unless: elifUnless, Cond: elifCond, Body: elifBody,
+			})
+			p.skipNewlines()
 		} else {
 			if _, err := p.expect(lexer.COLON); err != nil {
 				return nil, err

@@ -1,0 +1,59 @@
+"Perspective" by Test
+library "standard"
+
+Room home "A cosy room."
+
+on perspective first:
+    player.perspective = first
+
+on perspective second:
+    player.perspective = second
+
+on perspective third:
+    player.perspective = third
+
+on gender male:
+    player.gender = male
+
+on gender female:
+    player.gender = female
+
+on gender they:
+    player.gender = plural
+
+test
+    test "first person".
+    test "second person".
+    test "third person (they)".
+    test "third person (he)".
+
+test "first person"
+    perspective first.
+    wait. "I wait"
+    wait. not "I waits"
+    inventory. "I am carrying nothing"
+    inventory. not "is carrying nothing"
+
+test "second person"
+    perspective second.
+    wait. "You wait"
+    wait. not "you waits"
+    inventory. "You are carrying nothing"
+    inventory. not "is carrying nothing"
+
+test "third person (they)"
+    perspective third.
+    gender they.
+    wait. "they wait"
+    wait. not "I wait"
+    wait. not "You wait"
+    inventory. "they are carrying nothing"
+    inventory. not "am carrying nothing"
+    inventory. not "is carrying nothing"
+
+test "third person (he)"
+    gender male.
+    wait. "he waits"
+    wait. not "I wait"
+    wait. not "You wait"
+    inventory. "he is carrying nothing"

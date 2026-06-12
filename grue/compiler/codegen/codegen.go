@@ -1357,6 +1357,15 @@ func (c *cg) compileHandlerCall(e *ast.HandlerCallExpr, sc *scope, tokenCtx bool
 				}
 				words = append(words, typ)
 				argExprs = append(argExprs, c.compileName(word, sc))
+			} else if node, ok := c.w.NodeMap[word]; ok {
+				// Known node instance (e.g. "player"): use its class as the type
+				// so the sigKey matches the handler (e.g. "pronoun of Player").
+				cls := node.ClassName
+				if cls == "" {
+					cls = "_"
+				}
+				words = append(words, cls)
+				argExprs = append(argExprs, jsStr(word))
 			} else {
 				words = append(words, word)
 			}
