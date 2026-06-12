@@ -1,0 +1,90 @@
+"Navigation" by Test
+library "standard"
+library "navigation"
+
+# World layout
+#
+#   study ─────────────────────────────────────────────────
+#     │                                                    │
+#  closed door "inner door"                            (direct, one-way east)
+#     │                                                    │
+#   foyer ←→ hall ←→ passage ←→ reading room ←→ vault
+#                                     (locked door "iron door")
+#
+# Shortest path foyer→reading room is 2 hops via the inner door + study, but
+# the door is closed so BFS finds the 3-hop detour foyer→hall→passage→reading room.
+# Vault is only reachable through the locked iron door (permanently blocked to BFS).
+
+Room foyer "A marble foyer."
+    east: hall
+    north: Door inner door "A stout panelled door."
+        leads to: study
+
+Room hall "A grand hall."
+    west: foyer
+    east: passage
+
+Room passage "A narrow passage."
+    west: hall
+    east: reading room
+
+Room reading room "A book-lined reading room."
+    west: passage
+    east: Door iron door "An iron-bound door."
+        leads to: vault
+        is locked
+        key: vault key
+
+Room study "A private study."
+    south: Door inner door
+        leads to: foyer
+    east: reading room
+
+Room vault "A locked vault."
+    west: Door iron door
+        leads to: reading room
+
+Item vault key "A heavy iron key."
+    location: foyer
+
+test
+    test "already there".
+    test "detour around closed door".
+    test "blocked by closed door".
+    test "blocked by locked door".
+    test "route home".
+    test "one hop".
+
+# ── tests ──────────────────────────────────────────────────────────────────
+
+# Start: player at foyer.
+test "already there"
+    go to foyer.  "already there"
+
+# foyer → reading room: 3 hops (hall, passage, reading room).
+# The 2-hop shortcut via the closed inner door + study is invisible to BFS.
+test "detour around closed door"
+    go to reading room.  ""
+    .                    "hall"
+    .                    "passage"
+    .                    "reading room"
+
+# study is only accessible from foyer via the closed inner door — BFS skips it.
+test "blocked by closed door"
+    go to study.  "can't find"
+
+# vault is only accessible via the locked iron door — BFS skips it.
+test "blocked by locked door"
+    go to vault.  "can't find"
+
+# reading room → foyer: same 3-hop route in reverse (passage, hall, foyer).
+test "route home"
+    go to foyer.  ""
+    .             "passage"
+    .             "hall"
+    .             "foyer"
+
+# foyer → hall: one hop, arrival on the following tick.
+test "one hop"
+    go to hall.  ""
+    .            "hall"

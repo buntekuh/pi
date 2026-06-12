@@ -18,6 +18,7 @@ const GrueRuntime = (function () {
   let _location; // canonical name of the room the player is currently in
   let _muted = false;
   let _currentPara = null;
+  let _pendingDirection = null; // set by directions(); applied to input field after each turn
 
   // ── Output ──────────────────────────────────────────────────────────────────
 
@@ -50,6 +51,10 @@ const GrueRuntime = (function () {
     if (_muted) return;
     _flushPara();
     _out.appendChild(document.createElement("hr"));
+  }
+
+  function directions(text) {
+    _pendingDirection = text;
   }
 
   function echo(text) {
@@ -116,6 +121,15 @@ const GrueRuntime = (function () {
     if (node) node.location = dest;
   }
 
+  // _through(door, fromRoom) returns the room on the far side of a door —
+  // the entry in door.connects that is not fromRoom.
+  function _through(door, fromRoom) {
+    const n = _nodeOf(door);
+    if (!n) return null;
+    const cs = n.connects || [];
+    return cs.find(r => r !== fromRoom) ?? null;
+  }
+
   // _newNode / _freeNode — runtime allocation for var Class l declarations.
   // The name is a unique string; the node lives in _game.nodes like any other.
   let _varSeq = 0;
@@ -124,8 +138,16 @@ const GrueRuntime = (function () {
     (_game.nodes || (_game.nodes = {}))[name] = { class: className, props: {} };
     return name;
   }
+  // _freeNode deletes a node only if no persistent node still references it
+  // by name — either as a location or as a property value. This lets node vars
+  // survive handler return when they have been stored in a world object.
   function _freeNode(name) {
-    delete (_game.nodes || {})[name];
+    const nodes = _game.nodes || {};
+    for (const node of Object.values(nodes)) {
+      if (node.location === name) return;
+      if (Object.values(node.props || {}).includes(name)) return;
+    }
+    delete nodes[name];
   }
 
   // _inScope(name) — true when the player can currently perceive / refer to name.
@@ -1248,9 +1270,13 @@ const GrueRuntime = (function () {
         el.textContent = step.exprFn();
         _out.appendChild(el);
       } else if (step.cmd) {
+        _pendingDirection = null;
         await executeTurn(step.cmd);
       } else if (step.tick) {
-        await executeTurn("");
+        // A bare tick (.) accepts the pending direction, as if the player pressed Enter.
+        const cmd = _pendingDirection || "";
+        _pendingDirection = null;
+        await executeTurn(cmd);
       }
 
       let outputText = "";
@@ -1292,11 +1318,11 @@ const GrueRuntime = (function () {
     // All helpers are exposed so that handler functions and exprFn closures
     // compiled into the game script (outside the IIFE) can reach them via
     // the R parameter of the (function(R){...})(GrueRuntime) wrapper.
-    say,
+    say, directions,
     _str, _prop, _setProp, _get, _set,
     _kindOrd, _isset, _truthy, _length, _class, _name, _instanceof,
     _filter, _children, _entries, _iter, _listIter,
-    _move, _inScope, _newNode, _freeNode,
+    _move, _inScope, _newNode, _freeNode, _through,
     _fail, _succeed, _parent, _parentS, _stop, _choose,
     _call, _callS, _callT, _holdTurn,
     _random, _seed,
@@ -1328,15 +1354,25 @@ const GrueRuntime = (function () {
       const treeBtn = document.getElementById("tree-btn");
 
       if (input && goBtn) {
+        function applyPendingDirection() {
+          if (_pendingDirection) {
+            input.value = _pendingDirection;
+            input.select();
+            _pendingDirection = null;
+          }
+        }
         async function submit() {
           const raw = input.value.trim();
           if (!raw) return;
           input.value = "";
+          _pendingDirection = null;
           await executeTurn(raw);
+          applyPendingDirection();
           input.focus();
         }
         goBtn.addEventListener("click", submit);
         input.addEventListener("keydown", e => { if (e.key === "Enter") submit(); });
+        applyPendingDirection(); // catch any direction set during init's _fireEveryTurn
       }
 
       const testsBtn = document.getElementById("tests-btn");

@@ -665,6 +665,10 @@ func (a *analyser) checkClassRefsInStmt(s ast.Stmt) {
 		if s.Guard != nil {
 			a.checkClassRefsInExpr(s.Guard.Cond)
 		}
+	case *ast.DirectionsStmt:
+		if s.Guard != nil {
+			a.checkClassRefsInExpr(s.Guard.Cond)
+		}
 	case *ast.FailStmt:
 		if s.Guard != nil {
 			a.checkClassRefsInExpr(s.Guard.Cond)

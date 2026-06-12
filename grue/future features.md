@@ -211,10 +211,6 @@ for i from queue.head to queue.tail:
 clear queue.
 ```
 
-### Relation to pathfinding
-
-The `go to` auto-pathfinding feature (below) depends on `List` directly — BFS uses it as a frontier queue and the reconstructed route is stored as a list of directions consumed one per turn.
-
 ---
 
 ## NPC command queue — commanding actors around the map
@@ -269,93 +265,95 @@ is dispatched as.
 
 ## `go to Room:destination` — auto-pathfinding
 
-A `go to` handler that finds the shortest route to any named room via BFS and moves the player there step by step, one turn at a time.
+**Implemented** in `library/navigation.grue`.
 
-### What we already have
-
-- **Exit iteration on any room**: `for dir, dest in room_var.filter(Room):` works because `FilterExpr.Collection` is any `Expr`, so runtime room variables are fine
-- **Object-as-map**: serves as BFS queue, visited set, and predecessor map via `obj.{key}` dynamic access
-- **Bounded loops**: `for i from 0 to N:` handles the BFS outer loop (bound ≈ max rooms in the game)
-- **`on every turn:`**: the natural hook for auto-advance
-
-### What's missing
-
-**1. List processing** (see above — prerequisite)
-
-**2. Codegen bug — custom exits silently dropped** (see `codegen_issues.md`)
-
-**3. `go to` handler and BFS logic**
+### Usage
 
 ```grue
-List auto_route
+library "navigation"
+
+go to cave.
+go to the ridge.
+```
+
+### Design
+
+Route storage uses a world-level `Object auto_route` with two integer counters
+(`auto_route_len`, `auto_route_pos`), avoiding any List dependency.  Rooms are
+stored by integer key with index 0 = destination, index 1 = room before
+destination, …, index len-1 = first step.  Each turn the auto-advance handler
+reads from index len-1 downward so no reversal is needed.
+
+```grue
+Object auto_route
+var auto_route_len: 0
+var auto_route_pos: 0
 
 on go to Room:destination:
-    say "You are already there." if location is destination
-    fail if location is destination
+    var Object bq         # leading node-var block (Pascal-style)
+    var Object visited
+    var Object pred
 
-    # BFS setup
-    Object bq
-    var bq_head: 0, bq_tail: 0
-    Object visited, pred_room, pred_dir
+    say "You are already there." if player.location is destination
+    fail if player.location is destination
+    auto_route_len = 0    # clear — a failed BFS leaves no stale route
 
-    bq.{bq_tail} = location
-    bq_tail + 1
-    visited.{location} = 1
+    var bq_head: 0
+    var bq_tail: 0
+    bq.{bq_tail} = player.location
+    bq_tail = bq_tail + 1
+    visited.{player.location} = 1
 
     var found: 0
     for step from 0 to 500:
-        if found == 0 and bq_head < bq_tail:
-            var cur = bq.{bq_head}
-            bq_head + 1
-            if cur is destination:
-                found = 1
-            else:
-                for dir, next in cur.filter(Room):
-                    if visited.{next} is unset:
-                        visited.{next} = 1
-                        pred_room.{next} = cur
-                        pred_dir.{next} = dir
-                        bq.{bq_tail} = next
-                        bq_tail + 1
+        if found == 0:
+            if bq_head < bq_tail:
+                var cur: bq.{bq_head}
+                bq_head = bq_head + 1
+                if cur is destination:
+                    found = 1
+                else:
+                    for dir, next in cur:
+                        if next is Room:
+                            if next isnt Door:
+                                if visited.{next} is unset:
+                                    visited.{next} = 1
+                                    pred.{next} = cur
+                                    bq.{bq_tail} = next
+                                    bq_tail = bq_tail + 1
 
-    say "You can't find a way there." unless found
-    fail unless found
+    say "You can't find a way there." unless found == 1
+    fail unless found == 1
 
-    # Reconstruct: walk back from destination, prepend each direction
-    clear auto_route
-    var r = destination
-    for i from 0 to 100:
-        if r isnt location:
-            push front pred_dir.{r} to auto_route
-            r = pred_room.{r}
+    var r: destination
+    for i from 0 to 200:
+        if r isnt player.location:
+            if r is set:
+                auto_route.{auto_route_len} = r
+                auto_route_len = auto_route_len + 1
+                r = pred.{r}
 
+    auto_route_pos = auto_route_len - 1
+
+internal every turn:
+    if auto_route_len > 0:
+        if auto_route_pos >= 0:
+            var dest: auto_route.{auto_route_pos}
+            auto_route_pos = auto_route_pos - 1
+            {go dest}
+            if auto_route_pos < 0:
+                auto_route_len = 0
+                say "You have arrived."
 ```
 
-The route stores **direction strings** (e.g. `"north"`, `"top of ladder"`), not room names. Each step is consumed by `on every turn:` — one direction per turn, dispatching through the normal `go Room:destination` handler so locked doors, energy limits, and any other movement overrides apply naturally.
+### Limitations
 
-```grue
-on every turn:
-    if auto_route.head < auto_route.tail:
-        var next_dir = auto_route.items.{auto_route.head}
-        pop from auto_route
-        {go next_dir}
-        say "You have arrived." if auto_route.head >= auto_route.tail
-```
-
-The test stepper (`.` in test blocks) advances turns without player input, so auto-routing is fully testable:
-
-```
-go to Mare Tranquillitatis.
-. "You move top of ladder."
-. "You have arrived."
-```
-
-### Work breakdown
-
-1. `List` class — see list processing feature above
-2. Fix `writeExits` bug (see `codegen_issues.md`)
-3. `go to` + BFS handler in `standard.grue` (or `navigation.grue`)
-4. `on every turn:` auto-advance in `standard.grue` — driven by the test stepper in tests, normal turn processing in interactive play
+- **Doors are not traversable.** BFS skips Door exits — Door nodes carry no
+  room-typed props of their own.  Traversal through open doors is a future
+  milestone.
+- **Manual movement does not cancel the route.**  The player can cancel by
+  typing `go to <current room>` (fails with "already there", clears len).
+- **Maximum route: 200 steps.**
 
 ---
 

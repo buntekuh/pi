@@ -1,0 +1,114 @@
+"Navigating Robots" by Test
+library "standard"
+library "list"
+
+class Robot extends Person
+
+# ── World ──────────────────────────────────────────────────────────────────────
+
+Room workshop "The workshop."
+    east: corridor
+
+Room corridor "A long corridor."
+    west: workshop
+    east: storage
+
+Room storage "The storage room."
+    west: corridor
+
+Robot bender "A stocky robot."
+    location: workshop
+
+# ── Navigation ─────────────────────────────────────────────────────────────────
+#
+# Routes are stored as a List on robot.directions.
+# Head = next waypoint; each node consumed when robot arrives at it.
+# var List node inside the reconstruction loop allocates a fresh node each
+# iteration; nodes stored in the chain survive handler cleanup via reference GC.
+
+internal on navigate Robot:robot to Room:dest:
+    var Object bq
+    var Object visited
+    var Object pred
+
+    var bq_head: 0
+    var bq_tail: 0
+    bq.{bq_tail} = robot.location
+    bq_tail = bq_tail + 1
+    visited.{robot.location} = 1
+
+    var found: 0
+    for step from 0 to 500:
+        if found == 0:
+            if bq_head < bq_tail:
+                var cur: bq.{bq_head}
+                bq_head = bq_head + 1
+                if cur is dest:
+                    found = 1
+                else:
+                    for dir, next in cur:
+                        if next is Room:
+                            if next isnt Door:
+                                if visited.{next} is unset:
+                                    visited.{next} = 1
+                                    pred.{next} = cur
+                                    bq.{bq_tail} = next
+                                    bq_tail = bq_tail + 1
+
+    fail unless found == 1
+
+    # Collect route backward into temp buffer (index 0 = dest, len-1 = first step).
+    var Object route_buf
+    var len: 0
+    var r: dest
+    for i from 0 to 200:
+        if r isnt robot.location:
+            if r is set:
+                route_buf.{len} = r
+                len = len + 1
+                r = pred.{r}
+
+    # Build forward List by appending (iterate buffer from len-1 down to 0).
+    robot.directions = unset
+    var tail: unset
+    for i from 0 to 200:
+        if i < len:
+            var j: len - 1 - i
+            var List node
+            node.value = route_buf.{j}
+            node.next = unset
+            if tail is set:
+                tail.next = node
+            else:
+                robot.directions = node
+            tail = node
+
+# Advance all robots one step per turn.
+internal every turn:
+    if bender.directions is set:
+        if bender.location is bender.directions.value:
+            bender.directions = bender.directions.next
+        if bender.directions is set:
+            bender.location = bender.directions.value
+            say "bender moves to {bender.location}."
+        else:
+            say "bender has arrived."
+
+# ── Tests ──────────────────────────────────────────────────────────────────────
+
+test
+    test "two hops".
+    test "one hop".
+
+# bender starts at workshop; storage is two rooms east.
+test "two hops"
+    {navigate bender to storage}.  ""
+    .  "corridor"
+    .  "storage"
+    .  "arrived"
+
+# bender is now at storage; corridor is one hop west.
+test "one hop"
+    {navigate bender to corridor}.  ""
+    .  "corridor"
+    .  "arrived"

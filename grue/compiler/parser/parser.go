@@ -61,7 +61,7 @@ var reserved = map[string]bool{
 	"fail": true, "succeed": true,
 	"parent": true, "self": true, "true": true, "false": true,
 	"unset": true, "set": true, "say": true,
-	"stop": true, "choose": true,
+	"stop": true, "choose": true, "directions": true,
 	"when": true, "test": true, "interface": true, "library": true,
 	"include": true, "kind": true, "class": true, "var": true,
 	"filter": true, "silently": true, "modulo": true,
@@ -76,6 +76,7 @@ var builtinFuncs = map[string]bool{
 	"floor": true, "ceiling": true, "round": true,
 	"absolute": true, "biggest": true, "smallest": true,
 	"random": true, "seed": true,
+	"through": true,
 }
 
 // =============================================================================
@@ -1059,6 +1060,8 @@ func (p *parser) parseStmt() (ast.Stmt, error) {
 			return nil, err
 		}
 		return stmt, nil
+	case "directions":
+		return p.parseDirectionsStmt()
 	default:
 		return p.parseAssignOrMutateStmt()
 	}
@@ -1095,6 +1098,26 @@ func (p *parser) parseSayStmt() (*ast.SayStmt, error) {
 		return nil, err
 	}
 	return &ast.SayStmt{Pos: pos, Style: style, Text: text, Guard: guard}, nil
+}
+
+// directions "go east"
+// directions "go east" if cond
+func (p *parser) parseDirectionsStmt() (*ast.DirectionsStmt, error) {
+	pos := p.currentPos()
+	p.advance() // consume "directions"
+	str, err := p.expect(lexer.STRING)
+	if err != nil {
+		return nil, err
+	}
+	text := &ast.StringLit{Pos: ast.Pos{Line: str.Line, Col: str.Col}, Value: str.Value}
+	guard, err := p.parseOptionalGuard()
+	if err != nil {
+		return nil, err
+	}
+	if err := p.expectNewline(); err != nil {
+		return nil, err
+	}
+	return &ast.DirectionsStmt{Pos: pos, Text: text, Guard: guard}, nil
 }
 
 // =============================================================================

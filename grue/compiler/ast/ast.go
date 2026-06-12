@@ -598,6 +598,18 @@ type StopStmt struct{ Pos Pos }
 func (s *StopStmt) Position() Pos { return s.Pos }
 func (s *StopStmt) stmtNode()     {}
 
+// DirectionsStmt passes a command string to the interface for pre-filling the
+// player's input field. The player may accept (press Enter) or type something
+// else instead. Unlike say, nothing is written to the output area.
+type DirectionsStmt struct {
+	Pos   Pos
+	Text  Expr
+	Guard *Guard
+}
+
+func (s *DirectionsStmt) Position() Pos { return s.Pos }
+func (s *DirectionsStmt) stmtNode()     {}
+
 
 // =============================================================================
 // Guard (postfix if / unless)

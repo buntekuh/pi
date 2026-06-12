@@ -617,50 +617,46 @@ func replaceClassInSigKey(sigKey, oldClass, newClass string) string {
 
 // ── handler compilation ────────────────────────────────────────────────────
 
-// nodeVarEscapes reports whether varName is ever stored into a property
-// anywhere in stmts (including nested blocks). Used to decide whether to
-// emit _freeNode cleanup at handler end.
-func nodeVarEscapes(name string, stmts []ast.Stmt) bool {
+// hasNodeVars reports whether any node-var declaration (var Class name) appears
+// anywhere in stmts, including nested blocks. Used to decide whether to emit
+// the _nf cleanup infrastructure in compileHandler.
+func hasNodeVars(stmts []ast.Stmt) bool {
 	for _, s := range stmts {
-		if nodeVarStmtEscapes(name, s) {
+		if hasNodeVarsStmt(s) {
 			return true
 		}
 	}
 	return false
 }
 
-func nodeVarStmtEscapes(name string, s ast.Stmt) bool {
+func hasNodeVarsStmt(s ast.Stmt) bool {
 	switch s := s.(type) {
-	case *ast.AssignStmt:
-		if _, ok := s.Target.(*ast.PropertyAccess); ok {
-			if n, ok := s.Value.(*ast.NameExpr); ok && n.Name == name {
-				return true
-			}
-		}
+	case *ast.VarStmt:
+		return s.IsNodeVar
 	case *ast.IfStmt:
-		if nodeVarEscapes(name, s.Body) || nodeVarEscapes(name, s.Else) {
+		if hasNodeVars(s.Body) || hasNodeVars(s.Else) {
 			return true
 		}
 		for _, elif := range s.ElseIf {
-			if nodeVarStmtEscapes(name, elif) {
+			if hasNodeVarsStmt(elif) {
 				return true
 			}
 		}
 	case *ast.ForInStmt:
-		return nodeVarEscapes(name, s.Body)
+		return hasNodeVars(s.Body)
 	case *ast.ForFromStmt:
-		return nodeVarEscapes(name, s.Body)
+		return hasNodeVars(s.Body)
 	case *ast.RepeatStmt:
-		return nodeVarEscapes(name, s.Body)
+		return hasNodeVars(s.Body)
 	case *ast.WhenStmt:
 		for _, arm := range s.Arms {
-			if nodeVarEscapes(name, arm.Body) {
+			if hasNodeVars(arm.Body) {
 				return true
 			}
 		}
 	case *ast.ChooseStmt:
 		for _, arm := range s.Arms {
-			if nodeVarEscapes(name, arm.Body) {
+			if hasNodeVars(arm.Body) {
 				return true
 			}
 		}
@@ -676,48 +672,20 @@ func (c *cg) compileHandler(h *world.Handler, ownerClass string) string {
 		}
 	}
 	sc := newScope(h, ownerClass, c.w)
-
-	// Collect leading node-var declarations (Pascal-style: must appear before
-	// any executable statement). Extend scope so the body can use them.
-	var nodeVars []*ast.VarStmt
-	for _, stmt := range h.Body {
-		vs, ok := stmt.(*ast.VarStmt)
-		if !ok || !vs.IsNodeVar {
-			break
-		}
-		nodeVars = append(nodeVars, vs)
-		sc = sc.extendTyped(vs.Name, vs.TypeName)
-	}
-
 	body := c.compileStmts(h.Body, sc, "        ")
 
-	if body == "" && len(nodeVars) == 0 {
+	if body == "" {
 		return fmt.Sprintf("function(%s) {}", strings.Join(params, ", "))
 	}
-	if len(nodeVars) == 0 {
+	// No node vars: emit a plain function, no cleanup overhead.
+	if !hasNodeVars(h.Body) {
 		return fmt.Sprintf("function(%s) {\n%s      }", strings.Join(params, ", "), body)
 	}
-
-	// Emit _newNode declarations and collect non-escaped vars for cleanup.
-	var decls strings.Builder
-	var frees []string
-	for _, nv := range nodeVars {
-		decls.WriteString(fmt.Sprintf("        const %s = %s_newNode(%q);\n", nv.Name, rt, nv.TypeName))
-		if !nodeVarEscapes(nv.Name, h.Body) {
-			frees = append(frees, nv.Name)
-		}
-	}
-
-	if len(frees) == 0 {
-		return fmt.Sprintf("function(%s) {\n%s%s      }", strings.Join(params, ", "), decls.String(), body)
-	}
-
-	var cleanup strings.Builder
-	for _, name := range frees {
-		cleanup.WriteString(fmt.Sprintf("            %s_freeNode(%s);\n", rt, name))
-	}
-	return fmt.Sprintf("function(%s) {\n%s        try {\n%s        } finally {\n%s        }\n      }",
-		strings.Join(params, ", "), decls.String(), body, cleanup.String())
+	// Node vars present: _nf collects every allocated node name; _freeNode
+	// checks references before deleting so stored nodes survive cleanup.
+	return fmt.Sprintf(
+		"function(%s) {\n        const _nf = [];\n        try {\n%s        } finally {\n            for (const _n of _nf) %s_freeNode(_n);\n        }\n      }",
+		strings.Join(params, ", "), body, rt)
 }
 
 func (c *cg) compileStmts(stmts []ast.Stmt, sc *scope, indent string) string {
@@ -747,6 +715,15 @@ func (c *cg) compileStmt(stmt ast.Stmt, sc *scope, indent string) string {
 		}
 		text := c.compileString(lit.Value, sc)
 		line := fmt.Sprintf("%s%ssay(%s);", indent, rt, text)
+		return c.withGuard(line, s.Guard, sc, indent) + "\n"
+
+	case *ast.DirectionsStmt:
+		lit, ok := s.Text.(*ast.StringLit)
+		if !ok {
+			return ""
+		}
+		text := c.compileString(lit.Value, sc)
+		line := fmt.Sprintf("%s%sdirections(%s);", indent, rt, text)
 		return c.withGuard(line, s.Guard, sc, indent) + "\n"
 
 	case *ast.FailStmt:
@@ -812,7 +789,10 @@ func (c *cg) compileStmt(stmt ast.Stmt, sc *scope, indent string) string {
 
 	case *ast.VarStmt:
 		if s.IsNodeVar {
-			return "" // emitted as const at handler top by compileHandler
+			// Allocate inline, register for GC-style cleanup. _freeNode skips
+			// nodes still referenced by a persistent property.
+			return fmt.Sprintf("%slet %s = %s_newNode(%q); _nf.push(%s);\n",
+				indent, s.Name, rt, s.TypeName, s.Name)
 		}
 		if s.Initial != nil {
 			init := c.compileExpr(s.Initial, sc)
@@ -1327,6 +1307,8 @@ func (c *cg) compileFuncCallExpr(e *ast.FuncCallExpr, sc *scope) string {
 		return rt + "_random(" + joined + ")"
 	case "seed":
 		return rt + "_seed(" + joined + ")"
+	case "through":
+		return rt + "_through(" + joined + ")"
 	}
 	return rt + "_fn_" + e.Name + "(" + joined + ")"
 }

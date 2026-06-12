@@ -1,0 +1,130 @@
+# navigation — BFS auto-pathfinding
+#
+# Provides:
+#   go to Room:destination:   compute shortest route and store it
+#   internal every turn:      advance one step per turn via directions
+#
+# Usage:
+#   library "navigation"
+#   go to cave.
+#
+# The route is stored as an integer-indexed Object (auto_route) with two
+# world counters.  Each turn, the next room is identified, the matching exit
+# direction is found in the live exit map, and the string "go <dir>" is passed
+# to the interface via directions.  The player presses Enter to follow it; the
+# every-turn handler detects arrival by position, not by assumption.
+#
+# Storage layout:
+#   auto_route.{"0"} = destination (last step)
+#   auto_route.{"1"} = room before destination
+#   ...
+#   auto_route.{auto_route_len - 1} = first waypoint
+#   auto_route_pos starts at auto_route_len - 1, advances toward -1 as the
+#   player reaches each waypoint.
+#
+# Limitations:
+#   - Closed doors are not traversable.  Open, unlocked doors ARE included in
+#     BFS.  The through() built-in finds the far side of a door given its
+#     connects array.
+#   - Manual movement while a route is active does not cancel the route; the
+#     direction lookup will fail if the player is off-route, clearing it.
+#   - Maximum route: 200 steps.
+
+Object auto_route
+var auto_route_len: 0
+var auto_route_pos: 0
+
+on go to Room:destination:
+    # Node vars must be declared first (Pascal-style leading block).
+    # bq       integer-indexed queue  (bq.{"0"}, bq.{"1"}, …)
+    # visited  room → 1 once enqueued
+    # pred     room → predecessor room, used for route reconstruction
+    var Object bq
+    var Object visited
+    var Object pred
+
+    # Clear first: "go to current room" cancels any active route, then fails.
+    auto_route_len = 0
+
+    say "You are already there." if player.location is destination
+    fail if player.location is destination
+
+    # BFS -------------------------------------------------------------------
+    var bq_head: 0
+    var bq_tail: 0
+
+    bq.{bq_tail} = player.location
+    bq_tail = bq_tail + 1
+    visited.{player.location} = 1
+
+    var found: 0
+    for step from 0 to 500:
+        if found == 0:
+            if bq_head < bq_tail:
+                var cur: bq.{bq_head}
+                bq_head = bq_head + 1
+                if cur is destination:
+                    found = 1
+                else:
+                    for dir, next in cur:
+                        if next is Room:
+                            if next isnt Door:
+                                if visited.{next} is unset:
+                                    visited.{next} = 1
+                                    pred.{next} = cur
+                                    bq.{bq_tail} = next
+                                    bq_tail = bq_tail + 1
+                        if next is Door:
+                            if next.open is true:
+                                if next.locked isnt true:
+                                    var thru: through(next, cur)
+                                    if thru is set:
+                                        if visited.{thru} is unset:
+                                            visited.{thru} = 1
+                                            pred.{thru} = cur
+                                            bq.{bq_tail} = thru
+                                            bq_tail = bq_tail + 1
+
+    say "You can't find a way there." unless found == 1
+    fail unless found == 1
+
+    # Reconstruct -----------------------------------------------------------
+    #
+    # Walk backward from destination via pred.  Store rooms with index 0 =
+    # destination, 1 = prev, … so that auto_route_pos counts down from
+    # len-1 to 0, and the player advances when they reach each waypoint.
+    var r: destination
+    for i from 0 to 200:
+        if r isnt player.location:
+            if r is set:
+                auto_route.{auto_route_len} = r
+                auto_route_len = auto_route_len + 1
+                r = pred.{r}
+
+    auto_route_pos = auto_route_len - 1
+
+# Each turn: if the player reached the current waypoint, advance.  Then emit
+# the direction to the next waypoint via directions.  If no exit leads there,
+# the route is cancelled silently.
+internal every turn:
+    if auto_route_len > 0:
+        if player.location is auto_route.{auto_route_pos}:
+            auto_route_pos = auto_route_pos - 1
+            if auto_route_pos < 0:
+                auto_route_len = 0
+                say "You have arrived."
+        if auto_route_len > 0:
+            var next: auto_route.{auto_route_pos}
+            var emitted: 0
+            for dir, exit in player.location:
+                if emitted == 0:
+                    if exit is next:
+                        directions "go {dir}"
+                        emitted = 1
+                    if emitted == 0:
+                        if exit is Door:
+                            if through(exit, player.location) is next:
+                                directions "go {dir}"
+                                emitted = 1
+            if emitted == 0:
+                auto_route_len = 0
