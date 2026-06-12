@@ -1,5 +1,8 @@
 # standard — core handlers available in every game
 
+# ── Styles ─────────────────────────────────────────────────────────────────────
+Style headline
+
 # ── People ────────────────────────────────────────────────────────────────────
 kind gender: male, female, neuter, *plural
 kind perspective: first, *second, third

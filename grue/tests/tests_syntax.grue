@@ -48,6 +48,6 @@ test "record and recall"
     record "Jason" in rolodex. "Recorded."
     recall rolodex. "Jason"
 
-Room archive "..."
+Room server room "A humming server room."
     test "scoped"
         open notebook at 5. "Opened notebook at position 5."

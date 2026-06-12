@@ -186,7 +186,7 @@ Object
 │   └── Woman               # Person with gender: female
 ├── Animal                  # a creature; gender defaults to neuter
 ├── Array                   # ordered collection
-└── Font                    # base for named text styles
+└── Style                   # named CSS class — no properties; validated by compiler
 ```
 
 `kind gender: *neuter, male, female` is declared at world level — available
@@ -1363,84 +1363,69 @@ if turn modulo 5 == 0:              # modulo — infix operator
 ```
 ## 15. Styles
 
-`Font` is a built-in class with all properties declared as `unset`. Authors
-create named styles by extending it — each subclass declares only the
-properties it changes. The renderer applies `text` first, then overlays any
-non-`unset` properties from the active style.
+Grue does not define fonts, colors, or layout — that is CSS's job. Grue
+only assigns names. The `Style` built-in class is a pure name registry:
+instances carry no properties. What a style name means visually is entirely
+up to the stylesheet that accompanies the exported HTML.
 
-`Font` properties:
-
-| Property    | Values                                              |
-|-------------|-----------------------------------------------------|
-| `family`    | `serif`, `sans`, `monospaced`                       |
-| `face`      | string — specific typeface name                     |
-| `size`      | integer — point size                                |
-| `bold`      | boolean kind                                        |
-| `italic`    | boolean kind                                        |
-| `underline` | boolean kind                                        |
-| `color`     | CSS named color (`black`, `tomato`, …) or `#abcdef` |
-| `align`     | `left`, `right`, `center`, `justified`              |
-
-All properties are `unset` on `Font` itself. `text` is the singleton base
-instance — it holds the concrete values all normal text renders with. Authors
-override it to change the game's base appearance:
+#### Declaring styles
 
 ```
-Font text
-    family: serif
-    face: "Georgia"
-    size: 16
-    align: left
-    color: black
+Style mono
+Style bold
+Style key
+Style headline
+Style alert
 ```
 
-Named styles are classes that extend `Font`:
-
-```
-class mono extends Font
-    family: monospaced
-    face: "Courier New"
-    size: 13
-
-class key extends Font
-    family: monospaced
-    bold: true
-    color: dodgerblue
-
-class italic extends Font
-    italic: true
-```
-
-The standard library pre-declares `italic`, `bold`, and `underline`. All
+Each declaration registers a name the compiler can validate. The standard
+library pre-declares `headline` (used by the room-display handler). All
 others are author- or library-defined.
 
-`text` is a reserved instance name — the compiler rejects a second declaration.
+#### Block style
 
-#### Using styles
-
-A class name after `say` applies the style to the whole line (block form).
-A `[classname]...[/classname]` span applies it inline:
+A style name immediately after `say` wraps the whole output line in a
+`<p class="name">` element:
 
 ```
-say mono "SECTOR 7 status report."          # block — whole line
-say "Press [key]ENTER[/key] to continue."   # inline span
+say headline "The Boiler Room"       → <p class="headline">The Boiler Room</p>
+say mono "All systems nominal."      → <p class="mono">All systems nominal.</p>
 ```
 
-`[classname]` looks up a class extending `Font` by name. Unknown class names
-are a compiler error. Block-level properties (`family`, `face`, `size`,
-`align`) are ignored when a style is used as an inline span.
+A block-style say always starts and ends its own paragraph — it never merges
+with surrounding unstyled says.
 
-#### Box (planned)
+#### Inline spans
 
-`Box` extends `Font` with a rendered box — background, shade, and padding.
-Deferred — requires a dedicated render handler:
+`[name]...[/name]` inside a say string wraps the enclosed text in a
+`<span class="name">`. The compiler validates that `name` is a declared Style:
 
 ```
-class mybox extends Box
-    background: grey
-    shade: 20
-    padding: 20
+say "Press [key]ENTER[/key] to continue."
+say "Score: [bold]{score}[/bold] points."
 ```
+
+`{expr}` interpolation inside a span works normally:
+
+```
+say "[alert]{warning_text}[/alert]"
+```
+
+#### CSS
+
+The exported HTML file contains no inline styles. Authors supply their own
+CSS file (or embed `<style>` rules in the container) targeting the class names
+they declared:
+
+```css
+p.headline  { font-size: 1.4em; font-weight: bold; }
+p.mono      { font-family: monospace; }
+span.key    { font-family: monospace; background: #222; padding: 0 4px; }
+span.alert  { color: crimson; font-weight: bold; }
+```
+
+Using an undeclared style name — in `say name "..."` or in `[name]...[/name]`
+— is a compiler error.
 
 ### interface
 

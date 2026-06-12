@@ -53,14 +53,24 @@ var builtinClasses = map[string]bool{
 	"Object": true, "Room": true, "Door": true,
 	"Player": true, "Item": true,
 	"Number": true, "Text": true,
+	"Style":  true,
 }
 
 // builtinClassParents defines the inheritance hierarchy for built-in classes.
 var builtinClassParents = map[string]string{
-	"Player":  "Object",
-	"Room":    "Object",
-	"Door":    "Room",
-	"Item": "Object",
+	"Player": "Object",
+	"Room":   "Object",
+	"Door":   "Room",
+	"Item":   "Object",
+}
+
+// knownSayDirectives are [word] tags in say strings that are formatting
+// directives, not inline style spans.
+var knownSayDirectives = map[string]bool{
+	"the": true, "The": true, "a": true, "A": true, "s": true,
+	"comma": true, "nobreak": true, "nobr": true,
+	"break": true, "br": true, "paragraph": true, "p": true,
+	`"`: true, "[": true, "]": true, "{": true, "}": true,
 }
 
 // builtinKinds are world-level kinds pre-declared by the runtime.
@@ -596,6 +606,40 @@ func (a *analyser) checkHandlerSigs(decls []ast.Decl) {
 	}
 }
 
+// checkSaySpans scans a raw say string for [word] and [/word] tags. Any tag
+// that is not a known formatting directive must be a declared Style instance.
+func (a *analyser) checkSaySpans(raw string, line int) {
+	i := 0
+	for i < len(raw) {
+		if raw[i] != '[' {
+			i++
+			continue
+		}
+		end := strings.IndexByte(raw[i:], ']')
+		if end == -1 {
+			break
+		}
+		end += i
+		tag := raw[i+1 : end]
+		i = end + 1
+		word := tag
+		if strings.HasPrefix(word, "/") {
+			word = word[1:]
+		}
+		if knownSayDirectives[word] {
+			continue
+		}
+		// Must start with a letter to be a potential style name.
+		if len(word) == 0 || !((word[0] >= 'a' && word[0] <= 'z') || (word[0] >= 'A' && word[0] <= 'Z')) {
+			continue
+		}
+		inst, ok := a.instances[word]
+		if !ok || !a.isSubclassOf(inst.className, "Style") {
+			a.errorf("unknown_style", line, "inline span [%s] is not a declared Style instance", tag)
+		}
+	}
+}
+
 // =============================================================================
 // Class name reference checks
 // =============================================================================
@@ -662,6 +706,15 @@ func (a *analyser) checkClassRefsInStmt(s ast.Stmt) {
 	}
 	switch s := s.(type) {
 	case *ast.SayStmt:
+		if s.Style != "" {
+			inst, ok := a.instances[s.Style]
+			if !ok || !a.isSubclassOf(inst.className, "Style") {
+				a.errorf("unknown_style", s.Pos.Line, "say style %q is not a declared Style instance", s.Style)
+			}
+		}
+		if lit, ok := s.Text.(*ast.StringLit); ok {
+			a.checkSaySpans(lit.Value, s.Pos.Line)
+		}
 		if s.Guard != nil {
 			a.checkClassRefsInExpr(s.Guard.Cond)
 		}

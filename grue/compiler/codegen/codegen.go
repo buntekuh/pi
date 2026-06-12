@@ -713,8 +713,13 @@ func (c *cg) compileStmt(stmt ast.Stmt, sc *scope, indent string) string {
 		if !ok {
 			return ""
 		}
-		text := c.compileString(lit.Value, sc)
-		line := fmt.Sprintf("%s%ssay(%s);", indent, rt, text)
+		text := c.compileSayString(lit.Value, sc)
+		var line string
+		if s.Style != "" {
+			line = fmt.Sprintf("%s%ssay(%s, %s);", indent, rt, text, jsStr(s.Style))
+		} else {
+			line = fmt.Sprintf("%s%ssay(%s);", indent, rt, text)
+		}
 		return c.withGuard(line, s.Guard, sc, indent) + "\n"
 
 	case *ast.DirectionsStmt:
@@ -1390,6 +1395,136 @@ func (c *cg) compileSignalToken(e ast.Expr, sc *scope) string {
 		}
 	}
 	return c.compileExpr(e, sc)
+}
+
+// ── Say string compilation ─────────────────────────────────────────────────
+
+// htmlEscape escapes &, <, > so literal text is safe for insertAdjacentHTML.
+func htmlEscape(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	return s
+}
+
+// isStyleName reports whether name is a declared Style instance (or subclass).
+func (c *cg) isStyleName(name string) bool {
+	node, ok := c.w.NodeMap[name]
+	if !ok {
+		return false
+	}
+	cls := node.ClassName
+	for cls != "" {
+		if cls == "Style" {
+			return true
+		}
+		cl, ok := c.w.ClassMap[cls]
+		if !ok {
+			break
+		}
+		cls = cl.Parent
+	}
+	return false
+}
+
+// sayTok is one token from a say string: literal text, {expr} slot, or span tag.
+type sayTok struct {
+	kind  string // "text", "expr", "spanOpen", "spanClose"
+	value string // text/expr content, or span class name
+}
+
+// splitSayInterp tokenises a raw say string, recognising {expr} interpolation
+// and [Style]...[/Style] span tags. Unknown [word] tags pass through as text.
+func (c *cg) splitSayInterp(raw string) []sayTok {
+	var toks []sayTok
+	var buf strings.Builder
+	flushText := func() {
+		if buf.Len() > 0 {
+			toks = append(toks, sayTok{"text", buf.String()})
+			buf.Reset()
+		}
+	}
+	i := 0
+	for i < len(raw) {
+		switch {
+		case raw[i] == '{':
+			flushText()
+			depth, j := 1, i+1
+			for j < len(raw) && depth > 0 {
+				if raw[j] == '{' {
+					depth++
+				} else if raw[j] == '}' {
+					depth--
+				}
+				j++
+			}
+			toks = append(toks, sayTok{"expr", raw[i+1 : j-1]})
+			i = j
+		case raw[i] == '[':
+			end := strings.IndexByte(raw[i:], ']')
+			if end == -1 {
+				buf.WriteByte('[')
+				i++
+				continue
+			}
+			end += i
+			tag := raw[i+1 : end]
+			i = end + 1
+			if strings.HasPrefix(tag, "/") {
+				word := tag[1:]
+				if c.isStyleName(word) {
+					flushText()
+					toks = append(toks, sayTok{"spanClose", word})
+				} else {
+					buf.WriteByte('[')
+					buf.WriteString(tag)
+					buf.WriteByte(']')
+				}
+			} else if c.isStyleName(tag) {
+				flushText()
+				toks = append(toks, sayTok{"spanOpen", tag})
+			} else {
+				buf.WriteByte('[')
+				buf.WriteString(tag)
+				buf.WriteByte(']')
+			}
+		default:
+			buf.WriteByte(raw[i])
+			i++
+		}
+	}
+	flushText()
+	return toks
+}
+
+// compileSayString produces an HTML-safe JS template-literal expression:
+// literal text is HTML-escaped at compile time, {expr} uses R._hstr() for
+// runtime HTML-escaping, and [Style]...[/Style] becomes <span> elements.
+func (c *cg) compileSayString(raw string, sc *scope) string {
+	toks := c.splitSayInterp(raw)
+	var b strings.Builder
+	b.WriteRune('`')
+	for _, tok := range toks {
+		switch tok.kind {
+		case "text":
+			b.WriteString(escapeTmpl(htmlEscape(tok.value)))
+		case "expr":
+			expr, err := parser.ParseExpr(tok.value)
+			if err != nil {
+				fmt.Fprintf(&b, "${/* parse error: %s */\"\"}", tok.value)
+				continue
+			}
+			b.WriteString("${" + rt + "_hstr(")
+			b.WriteString(c.compileExpr(expr, sc))
+			b.WriteString(")}")
+		case "spanOpen":
+			fmt.Fprintf(&b, `<span class="%s">`, tok.value)
+		case "spanClose":
+			b.WriteString("</span>")
+		}
+	}
+	b.WriteRune('`')
+	return b.String()
 }
 
 // ── String interpolation ───────────────────────────────────────────────────

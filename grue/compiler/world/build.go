@@ -25,6 +25,7 @@ var builtinClassHierarchy = []struct{ Name, Parent string }{
 	{"Player", "Object"},
 	{"Number", ""},
 	{"Text", ""},
+	{"Style", ""},
 }
 
 // Build constructs the world tree IR from validated AST files.

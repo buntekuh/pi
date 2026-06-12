@@ -95,7 +95,7 @@ test "examine"
     record "Jason" in rolodex.
     examine rolodex. "Entry: Jason."
 
-Room archive "..."
+Room bunker "A reinforced sub-basement."
     test "when dispatch"
         when {open rolodex at 3}:
             out_of_bounds:

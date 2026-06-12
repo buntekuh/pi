@@ -28,15 +28,18 @@ const GrueRuntime = (function () {
     _currentPara = null;
   }
 
-  function say(text) {
+  function say(text, cls) {
     if (_muted) return;
-    if (!_currentPara) {
+    if (cls || !_currentPara) {
+      _flushPara();
       _currentPara = document.createElement("p");
+      if (cls) _currentPara.className = cls;
       _out.appendChild(_currentPara);
     } else {
-      _currentPara.appendChild(document.createElement("br"));
+      _currentPara.insertAdjacentHTML("beforeend", "<br>");
     }
-    _currentPara.appendChild(document.createTextNode(text));
+    _currentPara.insertAdjacentHTML("beforeend", text);
+    if (cls) _flushPara();
   }
 
   function heading(text) {
@@ -294,14 +297,19 @@ const GrueRuntime = (function () {
     return Object.entries(node.props).filter(([, v]) => v !== null);
   }
 
-  // _str(v) converts any Grue value to a display string for say interpolation.
-  // Floats are rounded to the nearest integer — division produces a float
-  // intermediate but Grue treats all values as integers at the surface level.
-  // Node references and kind values are already strings; null becomes "".
+  // _str(v) converts any Grue value to a display string (plain text).
+  // Used for test assertions, directions strings, and non-say contexts.
   function _str(v) {
     if (v === null || v === undefined) return "";
     if (typeof v === "number" && !Number.isInteger(v)) return String(Math.round(v));
     return String(v);
+  }
+
+  // _hstr(v) is _str with HTML-escaping for safe insertion via innerHTML.
+  // Used by compiled say strings for {expr} interpolation.
+  function _hstr(v) {
+    const s = _str(v);
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 
   // ── Chain control ────────────────────────────────────────────────────────────
@@ -322,8 +330,8 @@ const GrueRuntime = (function () {
   function _choose(prompt, arms) { throw new _ChooseSignal(prompt, arms); }
   function _presentChoice(prompt, arms) {
     _pendingChoice = arms;
-    if (prompt) say(prompt);
-    for (const arm of arms) say("  > " + arm.label);
+    if (prompt) say(_hstr(prompt));
+    for (const arm of arms) say("  &gt; " + _hstr(arm.label));
   }
 
   // _currentChain / _currentChainPos / _currentArgs / _currentRan track the
@@ -1318,7 +1326,7 @@ const GrueRuntime = (function () {
     // All helpers are exposed so that handler functions and exprFn closures
     // compiled into the game script (outside the IIFE) can reach them via
     // the R parameter of the (function(R){...})(GrueRuntime) wrapper.
-    say, directions,
+    say, directions, _hstr,
     _str, _prop, _setProp, _get, _set,
     _kindOrd, _isset, _truthy, _length, _class, _name, _instanceof,
     _filter, _children, _entries, _iter, _listIter,
