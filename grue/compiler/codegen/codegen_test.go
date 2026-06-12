@@ -238,7 +238,7 @@ func TestEmitHandlerSayCompiled(t *testing.T) {
 on look:
     say "You look around the room."
 `)
-	if !strings.Contains(out, `R.say("You look around the room.")`) {
+	if !strings.Contains(out, "R.say(`You look around the room.`)") {
 		t.Errorf("compiled say call missing:\n%s", out)
 	}
 }
@@ -288,8 +288,8 @@ Room kitchen "The kitchen."
 on look:
     say "Generic look."
 `)
-	kitchenIdx := strings.Index(out, `"Kitchen specific look."`)
-	globalIdx := strings.Index(out, `"Generic look."`)
+	kitchenIdx := strings.Index(out, "`Kitchen specific look.`")
+	globalIdx := strings.Index(out, "`Generic look.`")
 	if kitchenIdx == -1 || globalIdx == -1 {
 		t.Fatal("one or both say strings missing")
 	}
@@ -459,8 +459,8 @@ func TestEmitInterpolationUsesRStr(t *testing.T) {
 on examine Object:thing:
     say "You see {thing}."
 `)
-	if !strings.Contains(out, "${R._str(thing)}") {
-		t.Errorf("interpolated {thing} should compile to ${R._str(thing)}:\n%s", out)
+	if !strings.Contains(out, "${R._hstr(thing)}") {
+		t.Errorf("interpolated {thing} in say should compile to ${R._hstr(thing)}:\n%s", out)
 	}
 }
 

@@ -73,12 +73,6 @@ var knownSayDirectives = map[string]bool{
 	`"`: true, "[": true, "]": true, "{": true, "}": true,
 }
 
-// semanticHTMLInlineTags are [word] tags that emit native HTML inline elements
-// rather than <span class="...">. No Style declaration is needed for these.
-var semanticHTMLInlineTags = map[string]bool{
-	"em": true, "strong": true, "code": true,
-	"mark": true, "s": true, "u": true,
-}
 
 // builtinKinds are world-level kinds pre-declared by the runtime.
 // Values are listed without true/false (boolean kinds are handled separately).
@@ -633,7 +627,7 @@ func (a *analyser) checkSaySpans(raw string, line int) {
 		if strings.HasPrefix(word, "/") {
 			word = word[1:]
 		}
-		if knownSayDirectives[word] || semanticHTMLInlineTags[word] {
+		if knownSayDirectives[word] {
 			continue
 		}
 		// Must start with a letter to be a potential style name.

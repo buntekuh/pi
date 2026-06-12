@@ -28,12 +28,12 @@ const GrueRuntime = (function () {
     _currentPara = null;
   }
 
-  function say(text, cls) {
+  function say(text, cls, htmlTag) {
     if (_muted) return;
     if (cls || !_currentPara) {
       _flushPara();
-      _currentPara = document.createElement("p");
-      _currentPara.className = cls || "text";
+      _currentPara = document.createElement(htmlTag || "p");
+      if (!htmlTag) _currentPara.className = cls || "text";
       _out.appendChild(_currentPara);
     } else {
       _currentPara.insertAdjacentHTML("beforeend", "<br>");

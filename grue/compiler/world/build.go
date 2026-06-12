@@ -39,9 +39,10 @@ var builtinClassHierarchy = []struct{ Name, Parent string }{
 func Build(ownFiles, libFiles []*ast.File) *World {
 	b := &builder{
 		w: &World{
-			ClassMap: make(map[string]*Class),
-			NodeMap:  make(map[string]*Node),
-			Vocab:    make(map[string]string),
+			ClassMap:      make(map[string]*Class),
+			NodeMap:       make(map[string]*Node),
+			Vocab:         make(map[string]string),
+			StyleHTMLTags: make(map[string]string),
 		},
 		kindOf: make(map[string]string),
 	}
@@ -276,6 +277,9 @@ func (b *builder) addToRoot(d ast.Decl, isLibrary bool) {
 		node := b.buildNode(d, isLibrary)
 		root.Children = append(root.Children, node)
 		b.registerNode(node)
+		if b.isStyleClass(d.ClassName) {
+			b.extractStyleTag(d)
+		}
 
 	case *ast.HandlerDecl:
 		if d.EveryTurn {
@@ -294,6 +298,40 @@ func (b *builder) addToRoot(d ast.Decl, isLibrary bool) {
 		}
 
 	// ClassDecl handled in pass 2; IncludeDecl/LibraryImport handled by driver.
+	}
+}
+
+// =============================================================================
+// Style helpers
+// =============================================================================
+
+// isStyleClass reports whether className is "Style" or a subclass of it.
+func (b *builder) isStyleClass(className string) bool {
+	for cls := className; cls != ""; {
+		if cls == "Style" {
+			return true
+		}
+		c, ok := b.w.ClassMap[cls]
+		if !ok {
+			return false
+		}
+		cls = c.Parent
+	}
+	return false
+}
+
+// extractStyleTag reads a "tag:" body property from a Style instance declaration
+// and stores the HTML element name in StyleHTMLTags.
+func (b *builder) extractStyleTag(d *ast.InstanceDecl) {
+	for _, bodyDecl := range d.Body {
+		prop, ok := bodyDecl.(*ast.PropertyDecl)
+		if !ok || prop.Key != "tag" {
+			continue
+		}
+		if lit, ok := prop.Value.(*ast.StringLit); ok && lit.Value != "" {
+			b.w.StyleHTMLTags[d.Name] = lit.Value
+		}
+		return
 	}
 }
 

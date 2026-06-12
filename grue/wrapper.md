@@ -10,9 +10,9 @@ Grue is deployed inside a real container (Pi terminal, web app, etc.).
 ## Test CSS
 
 The generated HTML currently injects a minimal `<style>` block so games look
-readable during development. The rules target the CSS class names that Grue
-emits (`p.text`, `p.headline`, `p.mono`, span-level `em`, `strong`, `code`,
-etc.).
+readable during development. The rules target the CSS class names and HTML element types that Grue emits
+(`p.text`, `p.mono`, `h2` for headline, `em` for emphasize, `strong` for bold,
+custom span classes, etc.).
 
 **What needs to happen**: the wrapper owns the stylesheet. Grue just emits
 class names; the wrapper provides the design tokens. Remove the embedded
@@ -21,9 +21,9 @@ a wrapper ships.
 
 **Current test rules** (in `codegen.go` HTML template):
 ```css
-body        { max-width: 680px; margin: 40px auto; font: 1.05em/1.7 Georgia, serif; color: #222; background: #f7f6f2; }
-p.text      { background: #eeede6; padding: 6px 10px; border-radius: 3px; margin: 4px 0; }
-p.headline  { font-size: 1.25em; font-weight: bold; margin: 1.2em 0 0.2em; color: #333; }
+body   { max-width: 680px; margin: 40px auto; font: 1.05em/1.7 Georgia, serif; color: #222; background: #f7f6f2; }
+p.text { background: #eeede6; padding: 6px 10px; border-radius: 3px; margin: 4px 0; }
+h2     { font-size: 1.25em; font-weight: bold; margin: 1.2em 0 0.2em; color: #333; }
 ```
 
 ---

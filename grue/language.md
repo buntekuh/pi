@@ -1364,68 +1364,83 @@ if turn modulo 5 == 0:              # modulo — infix operator
 ## 15. Styles
 
 Grue does not define fonts, colors, or layout — that is CSS's job. Grue
-only assigns names. The `Style` built-in class is a pure name registry:
-instances carry no properties. What a style name means visually is entirely
-up to the stylesheet that accompanies the exported HTML.
+only assigns names. The `Style` built-in class is a pure name registry.
+What a style name means visually is entirely up to the stylesheet that
+accompanies the exported HTML.
 
 #### Declaring styles
 
 ```
 Style mono
-Style bold
 Style key
-Style headline
 Style alert
 ```
 
-Each declaration registers a name the compiler can validate. The standard
-library pre-declares `headline` (used by the room-display handler). All
-others are author- or library-defined.
+Each declaration registers a name the compiler can validate. Using an
+undeclared style name in `say name "..."` or `[name]...[/name]` is a
+compiler error.
+
+#### Tag styles — mapping to semantic HTML elements
+
+An optional `tag:` property on a Style declaration tells the compiler to
+emit a native HTML element instead of a `<p>` or `<span>`:
+
+```
+Style headline
+    tag: "h2"
+
+Style emphasize
+    tag: "em"
+
+Style bold
+    tag: "strong"
+```
+
+The standard library pre-declares `headline`, `emphasize`, and `bold` with
+their tags. Authors can extend the set with any valid HTML element name.
 
 #### Block style
 
-A style name immediately after `say` wraps the whole output line in a
-`<p class="name">` element:
+A style name immediately after `say` wraps the whole output line. Styles
+without a `tag:` produce `<p class="name">`. Tag styles produce the named
+element with no class:
 
 ```
-say headline "The Boiler Room"       → <p class="headline">The Boiler Room</p>
+say headline "The Boiler Room"       → <h2>The Boiler Room</h2>
 say mono "All systems nominal."      → <p class="mono">All systems nominal.</p>
 ```
 
-A block-style say always starts and ends its own paragraph — it never merges
-with surrounding unstyled says.
+A block-style say always starts and ends its own paragraph — it never
+merges with surrounding unstyled says.
 
 #### Inline spans
 
-`[name]...[/name]` inside a say string wraps the enclosed text in a
-`<span class="name">`. The compiler validates that `name` is a declared Style:
+`[name]...[/name]` inside a say string wraps the enclosed text. Styles
+without a `tag:` produce `<span class="name">`. Tag styles produce the
+named element with no class:
 
 ```
-say "Press [key]ENTER[/key] to continue."
-say "Score: [bold]{score}[/bold] points."
+say "Press [key]ENTER[/key] to continue."       → <span class="key">ENTER</span>
+say "The [bold]primary core[/bold] is stable."  → <strong>primary core</strong>
+say "I am [emphasize]very[/emphasize] tired."   → <em>very</em>
 ```
 
-`{expr}` interpolation inside a span works normally:
-
-```
-say "[alert]{warning_text}[/alert]"
-```
+Unclosed inline tags are automatically closed at the end of the string.
+`{expr}` interpolation works normally inside spans.
 
 #### CSS
 
 The exported HTML file contains no inline styles. Authors supply their own
-CSS file (or embed `<style>` rules in the container) targeting the class names
-they declared:
+CSS targeting the class names or element types they declared:
 
 ```css
-p.headline  { font-size: 1.4em; font-weight: bold; }
 p.mono      { font-family: monospace; }
 span.key    { font-family: monospace; background: #222; padding: 0 4px; }
 span.alert  { color: crimson; font-weight: bold; }
+h2          { font-size: 1.4em; font-weight: bold; }    /* headline */
+em          { font-style: italic; }                      /* emphasize */
+strong      { font-weight: bold; }                       /* bold */
 ```
-
-Using an undeclared style name — in `say name "..."` or in `[name]...[/name]`
-— is a compiler error.
 
 ### interface
 

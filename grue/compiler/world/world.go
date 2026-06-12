@@ -33,14 +33,15 @@ import (
 // World is the complete game IR produced by world tree construction.
 // It is the input to grammar construction (Step 5) and code generation (Step 6).
 type World struct {
-	Game     GameInfo
-	Kinds    []*Kind
-	Classes  []*Class
-	ClassMap map[string]*Class // class name → *Class
-	Root     *Node             // singleton world root; children are top-level instances
-	NodeMap  map[string]*Node  // instance name → *Node (all instances, including children)
-	Vocab    map[string]string // surface form (name or alias) → canonical instance name
-	Tests    []*Test           // all test blocks in declaration order
+	Game          GameInfo
+	Kinds         []*Kind
+	Classes       []*Class
+	ClassMap      map[string]*Class // class name → *Class
+	Root          *Node             // singleton world root; children are top-level instances
+	NodeMap       map[string]*Node  // instance name → *Node (all instances, including children)
+	Vocab         map[string]string // surface form (name or alias) → canonical instance name
+	Tests         []*Test           // all test blocks in declaration order
+	StyleHTMLTags map[string]string // Style name → HTML tag from "tag:" body property (e.g. "headline" → "h2")
 }
 
 // =============================================================================

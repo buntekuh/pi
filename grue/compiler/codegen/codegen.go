@@ -169,7 +169,7 @@ func HTML(w *world.World, g *grammar.Grammar) string {
   <style>
     body       { max-width: 680px; margin: 40px auto; font: 1.05em/1.7 Georgia, serif; color: #222; background: #f7f6f2; }
     p.text     { background: #eeede6; padding: 6px 10px; border-radius: 3px; margin: 4px 0; }
-    p.headline { font-size: 1.25em; font-weight: bold; margin: 1.2em 0 0.2em; color: #333; letter-spacing: 0.02em; }
+    h2         { font-size: 1.25em; font-weight: bold; margin: 1.2em 0 0.2em; color: #333; letter-spacing: 0.02em; }
     #input-area { margin-top: 12px; }
     #cmd        { width: 420px; font-size: 1em; }
   </style>
@@ -724,7 +724,11 @@ func (c *cg) compileStmt(stmt ast.Stmt, sc *scope, indent string) string {
 		text := c.compileSayString(lit.Value, sc)
 		var line string
 		if s.Style != "" {
-			line = fmt.Sprintf("%s%ssay(%s, %s);", indent, rt, text, jsStr(s.Style))
+			if htmlTag := c.w.StyleHTMLTags[s.Style]; htmlTag != "" {
+				line = fmt.Sprintf("%s%ssay(%s, %s, %s);", indent, rt, text, jsStr(s.Style), jsStr(htmlTag))
+			} else {
+				line = fmt.Sprintf("%s%ssay(%s, %s);", indent, rt, text, jsStr(s.Style))
+			}
 		} else {
 			line = fmt.Sprintf("%s%ssay(%s);", indent, rt, text)
 		}
@@ -1415,12 +1419,6 @@ func htmlEscape(s string) string {
 	return s
 }
 
-// semanticHTMLInlineTags are [word] tags that emit native HTML elements, not
-// <span>. They need no Style declaration and are not validated against Styles.
-var semanticHTMLInlineTags = map[string]bool{
-	"em": true, "strong": true, "code": true,
-	"mark": true, "s": true, "u": true,
-}
 
 // isStyleName reports whether name is a declared Style instance (or subclass).
 func (c *cg) isStyleName(name string) bool {
@@ -1494,9 +1492,9 @@ func (c *cg) splitSayInterp(raw string) []sayTok {
 			i = end + 1
 			if strings.HasPrefix(tag, "/") {
 				word := tag[1:]
-				if semanticHTMLInlineTags[word] {
+				if htmlTag := c.w.StyleHTMLTags[word]; htmlTag != "" {
 					flushText()
-					toks = append(toks, sayTok{"htmlClose", word})
+					toks = append(toks, sayTok{"htmlClose", htmlTag})
 				} else if c.isStyleName(word) {
 					flushText()
 					toks = append(toks, sayTok{"spanClose", word})
@@ -1505,9 +1503,9 @@ func (c *cg) splitSayInterp(raw string) []sayTok {
 					buf.WriteString(tag)
 					buf.WriteByte(']')
 				}
-			} else if semanticHTMLInlineTags[tag] {
+			} else if htmlTag := c.w.StyleHTMLTags[tag]; htmlTag != "" {
 				flushText()
-				toks = append(toks, sayTok{"htmlOpen", tag})
+				toks = append(toks, sayTok{"htmlOpen", htmlTag})
 			} else if c.isStyleName(tag) {
 				flushText()
 				toks = append(toks, sayTok{"spanOpen", tag})

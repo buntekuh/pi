@@ -2,7 +2,15 @@
 
 # ── Styles ─────────────────────────────────────────────────────────────────────
 Style text
+
 Style headline
+    tag: "h2"
+
+Style emphasize
+    tag: "em"
+
+Style bold
+    tag: "strong"
 
 # ── People ────────────────────────────────────────────────────────────────────
 kind gender: male, female, neuter, *plural
@@ -90,7 +98,6 @@ internal start game:
     look
 
 internal enter Room:room:
-    say headline "{player.location}"
     look
 
 internal leave Room:room:
@@ -118,6 +125,9 @@ on look:
             say "I can go {direction}." if player.perspective is first
             say "You can go {direction}." if player.perspective is second
             say "{pronoun of player} can go {direction}."
+
+on l:
+    look
 
 # ── Scenery ───────────────────────────────────────────────────────────────────
 # Scenery items are fixed features of the world. They participate in filter(Item)
@@ -181,6 +191,9 @@ on inventory:
         say "I am carrying nothing." if player.perspective is first
         say "You are carrying nothing." if player.perspective is second
         say "{pronoun of player} is carrying nothing."
+
+on i:
+    inventory
 
 # ── Doors ─────────────────────────────────────────────────────────────────────
 # kind open:   false = closed (default), true = open
